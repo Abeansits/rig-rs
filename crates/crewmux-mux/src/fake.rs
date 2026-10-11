@@ -10,8 +10,9 @@ use tokio::sync::{Mutex, broadcast, watch};
 use crate::Key;
 use crate::Multiplexer;
 use crate::argv::{
-    canonical_session_name, invocation, link_into_control_args, manual_size_args, new_session_args,
-    pane_died_hook_args, pane_target, remain_on_exit_args, resize_args, send_keys_args,
+    armed_session_args, canonical_session_name, invocation, link_into_control_args,
+    manual_size_args, pane_target, reject_global_window_size, resize_args, send_keys_args,
+    set_option_args,
 };
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::error::MuxError;
@@ -184,17 +185,14 @@ impl Multiplexer for FakeMux {
         let session = canonical_session_name(&spec.name);
         let pane_id = format!("%{}", guard.next_id);
         guard.next_id = guard.next_id.saturating_add(1);
-        record(&mut guard, &new_session_args(spec));
+        let socket = guard.socket.clone();
+        let armed = armed_session_args(spec, "tmux", &socket, "@bell")?;
+        record(&mut guard, &armed);
         record(&mut guard, &manual_size_args(&session));
         record(
             &mut guard,
             &resize_args(&session, spec.geometry.cols, spec.geometry.rows),
         );
-        if spec.remain_on_exit {
-            record(&mut guard, &remain_on_exit_args(&session, true));
-            let socket = guard.socket.clone();
-            record(&mut guard, &pane_died_hook_args(&session, &socket));
-        }
         record(&mut guard, &link_into_control_args(&session));
         let info = seat(spec, &session, &pane_id);
         guard.sessions.insert(session.clone(), info);
@@ -265,7 +263,10 @@ impl Multiplexer for FakeMux {
         Ok(self.inner.lock().await.hub.subscribe(&pane_id))
     }
 
-    async fn set_option(&self, _scope: OptScope, _key: &str, _value: &str) -> Result<(), MuxError> {
+    async fn set_option(&self, scope: OptScope, key: &str, value: &str) -> Result<(), MuxError> {
+        reject_global_window_size(&scope, key)?;
+        let mut guard = self.inner.lock().await;
+        record(&mut guard, &set_option_args(&scope, key, value));
         Ok(())
     }
 

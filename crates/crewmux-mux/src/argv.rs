@@ -156,21 +156,116 @@ pub(crate) fn remain_on_exit_args(session: &str, on: bool) -> Vec<String> {
     ]
 }
 
-/// External doorbell. tmux expands `#{hook_pane}` and runs the command itself.
+/// External doorbell. tmux expands `#{hook_pane}` inside the single quotes.
+///
+/// The configured binary is embedded so the hook does not depend on `PATH`.
+/// `rename-window` is the 3.3a signal: that release has no `%paste-buffer-changed`,
+/// and the `%subscription-changed` backstop only fires once a second.
 #[must_use]
-pub(crate) fn pane_died_hook(socket: &str) -> String {
-    format!("run-shell -b 'tmux -L {socket} set-buffer -b rig-dead-#{{hook_pane}} x'")
+pub(crate) fn pane_died_hook(binary: &str, socket: &str, bell: &str) -> String {
+    let script = format!(
+        "{binary} -L {socket} -f /dev/null set-buffer -b rig-dead-#{{hook_pane}} x; {binary} -L {socket} -f /dev/null rename-window -t {bell} rig-dead-#{{hook_pane}}"
+    );
+    format!("run-shell -b {}", quote_control(&script))
 }
 
 #[must_use]
-pub(crate) fn pane_died_hook_args(session: &str, socket: &str) -> Vec<String> {
+pub(crate) fn pane_died_hook_args(
+    session: &str,
+    binary: &str,
+    socket: &str,
+    bell: &str,
+) -> Vec<String> {
     vec![
         "set-hook".to_owned(),
         "-t".to_owned(),
         exact_session_colon(session),
         "pane-died".to_owned(),
-        pane_died_hook(socket),
+        pane_died_hook(binary, socket, bell),
     ]
+}
+
+/// `new-session`, and when `remain_on_exit` is set, the pane option and death
+/// hook in the same tmux command. A later command can lose the race against
+/// a process that exits immediately.
+pub(crate) fn armed_session_args(
+    spec: &SessionSpec,
+    binary: &str,
+    socket: &str,
+    bell: &str,
+) -> Result<Vec<String>, MuxError> {
+    if spec.argv.iter().any(|arg| arg == ";") {
+        return Err(MuxError::Forbidden(
+            "refusing a ';' command argument; it would split the tmux command queue",
+        ));
+    }
+    let mut args = new_session_args(spec);
+    if spec.remain_on_exit {
+        ensure_hook_token(binary)?;
+        ensure_hook_token(socket)?;
+        ensure_hook_token(bell)?;
+        let session = canonical_session_name(&spec.name);
+        args.push(";".to_owned());
+        args.extend(remain_on_exit_args(&session, true));
+        args.push(";".to_owned());
+        args.extend(pane_died_hook_args(&session, binary, socket, bell));
+    }
+    Ok(args)
+}
+
+fn ensure_hook_token(text: &str) -> Result<(), MuxError> {
+    let safe = !text.is_empty()
+        && text.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b'+' | b'@')
+        });
+    if safe {
+        Ok(())
+    } else {
+        Err(MuxError::Control(format!(
+            "tmux hook token is not shell-safe: {text}"
+        )))
+    }
+}
+
+/// Hidden window in the control session. Renames are the 3.3a death doorbell.
+#[must_use]
+pub(crate) fn bell_window_args() -> Vec<String> {
+    vec![
+        "new-window".to_owned(),
+        "-d".to_owned(),
+        "-t".to_owned(),
+        format!("{CONTROL_SESSION}:"),
+        "-n".to_owned(),
+        "crewmux-bell".to_owned(),
+        "-P".to_owned(),
+        "-F".to_owned(),
+        "#{window_id}".to_owned(),
+        "sleep".to_owned(),
+        "86400".to_owned(),
+        ";".to_owned(),
+        "set-option".to_owned(),
+        "-w".to_owned(),
+        "-t".to_owned(),
+        format!("{CONTROL_SESSION}:crewmux-bell"),
+        "automatic-rename".to_owned(),
+        "off".to_owned(),
+    ]
+}
+
+pub(crate) fn parse_bell_id(stdout: &str) -> Result<String, MuxError> {
+    let id = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with('@'))
+        .unwrap_or("");
+    let digits = id.strip_prefix('@').unwrap_or("");
+    if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        Ok(id.to_owned())
+    } else {
+        Err(MuxError::Control(format!(
+            "bell window id missing: {stdout}"
+        )))
+    }
 }
 
 #[must_use]
@@ -392,9 +487,26 @@ pub(crate) fn send_keys_args(target: &str, keys: &[Key]) -> Result<Vec<Vec<Strin
     Ok(batches)
 }
 
+/// `set-option -g window-size` crashes tmux 3.5a while a control client is attached.
+pub(crate) fn reject_global_window_size(scope: &OptScope, key: &str) -> Result<(), MuxError> {
+    if key == "window-size" && matches!(scope, OptScope::Global) {
+        Err(MuxError::Forbidden(
+            "refusing a global window-size option; set it on the session",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[must_use]
 pub(crate) fn set_option_args(scope: &OptScope, key: &str, value: &str) -> Vec<String> {
     match scope {
+        OptScope::Global => vec![
+            "set-option".to_owned(),
+            "-g".to_owned(),
+            key.to_owned(),
+            value.to_owned(),
+        ],
         OptScope::Server => {
             vec![
                 "set-option".to_owned(),
@@ -438,11 +550,14 @@ pub(crate) fn backstop_command() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{
-        backstop_command, canonical_session_name, exact_session, invocation, paste_buffer_args,
-        quote_control, send_keys_args, validate_keys,
+        armed_session_args, backstop_command, canonical_session_name, exact_session, invocation,
+        paste_buffer_args, quote_control, send_keys_args, validate_keys,
     };
-    use crate::types::PasteOpts;
+    use crate::error::MuxError;
+    use crate::types::{PasteOpts, SessionSpec};
     use crewmux_types::Key;
 
     #[test]
@@ -465,36 +580,74 @@ mod tests {
         assert_ne!(exact_session("worker"), exact_session("worker-long"));
     }
 
+    fn owned(args: &[&str]) -> Vec<String> {
+        args.iter().copied().map(str::to_owned).collect()
+    }
+
     #[test]
     fn paste_flags_follow_opts_and_skip_enter() {
-        let on = paste_buffer_args("%1", "rig-01", PasteOpts::default());
-        assert_eq!(
-            on,
-            vec!["paste-buffer", "-t", "%1", "-b", "rig-01", "-d", "-p", "-r"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        );
-        assert!(!on.iter().any(|arg| arg == "Enter"));
-        let off = paste_buffer_args(
-            "%1",
-            "rig-01",
-            PasteOpts {
-                bracketed: false,
-                preserve_lf: false,
-            },
-        );
-        assert!(!off.iter().any(|arg| arg == "-p" || arg == "-r"));
-        let keep_lf = paste_buffer_args(
-            "%1",
-            "rig-01",
-            PasteOpts {
-                bracketed: false,
-                preserve_lf: true,
-            },
-        );
-        assert!(keep_lf.iter().any(|arg| arg == "-r"));
-        assert!(!keep_lf.iter().any(|arg| arg == "-p"));
+        let cases = [
+            (
+                PasteOpts {
+                    bracketed: true,
+                    preserve_lf: true,
+                },
+                owned(&["paste-buffer", "-t", "%1", "-b", "rig-01", "-d", "-p", "-r"]),
+            ),
+            (
+                PasteOpts {
+                    bracketed: false,
+                    preserve_lf: true,
+                },
+                owned(&["paste-buffer", "-t", "%1", "-b", "rig-01", "-d", "-r"]),
+            ),
+            (
+                PasteOpts {
+                    bracketed: true,
+                    preserve_lf: false,
+                },
+                owned(&["paste-buffer", "-t", "%1", "-b", "rig-01", "-d", "-p"]),
+            ),
+            (
+                PasteOpts {
+                    bracketed: false,
+                    preserve_lf: false,
+                },
+                owned(&["paste-buffer", "-t", "%1", "-b", "rig-01", "-d"]),
+            ),
+        ];
+        for (opts, expected) in cases {
+            let got = paste_buffer_args("%1", "rig-01", opts);
+            assert_eq!(got, expected);
+            assert!(!got.iter().any(|arg| arg == "Enter"));
+        }
+        assert!(PasteOpts::default().bracketed);
+        assert!(PasteOpts::default().preserve_lf);
+    }
+
+    #[test]
+    fn remain_on_exit_shares_the_new_session_command() {
+        let mut spec = SessionSpec::new("demo", PathBuf::from("/tmp"));
+        spec.remain_on_exit = true;
+        spec.argv = vec!["true".to_owned()];
+        let args = armed_session_args(&spec, "/usr/bin/tmux", "sock", "@9").expect("arm");
+        let semis = args.iter().filter(|arg| arg.as_str() == ";").count();
+        assert_eq!(semis, 2);
+        assert!(args.iter().any(|arg| arg == "new-session"));
+        assert!(args.iter().any(|arg| arg == "remain-on-exit"));
+        let hook = args
+            .iter()
+            .find(|arg| arg.contains("run-shell"))
+            .expect("hook");
+        assert!(hook.contains("/usr/bin/tmux"), "{hook}");
+        assert!(hook.contains("-f /dev/null"), "{hook}");
+        assert!(hook.contains("-L sock"), "{hook}");
+        assert!(hook.contains("rename-window"), "{hook}");
+        assert!(hook.contains("@9"), "{hook}");
+        assert!(hook.contains("rig-dead-"), "{hook}");
+        spec.argv = vec![";".to_owned()];
+        let err = armed_session_args(&spec, "tmux", "sock", "@1").expect_err("semi");
+        assert!(matches!(err, MuxError::Forbidden(_)), "{err}");
     }
 
     #[test]

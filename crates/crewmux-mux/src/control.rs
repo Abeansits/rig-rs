@@ -224,6 +224,10 @@ async fn dispatch_line(state: &mut DriveState<'_>, line: &[u8]) -> Result<Step, 
                 spawn_confirm(state, pane_id, Some(name));
             }
         }
+        Action::WindowRenamed { pane_id } => {
+            let buffer = format!("rig-dead-{pane_id}");
+            spawn_confirm(state, pane_id, Some(buffer));
+        }
         Action::Subscription { pane_id } => spawn_confirm(state, pane_id, None),
         Action::SessionsChanged => {
             drop(state.ctx.events.send(MuxEvent::SessionsChanged));
@@ -332,15 +336,24 @@ async fn confirm_death(
     pane_id: String,
     buffer: Option<String>,
 ) {
-    let shown = exec.run(&dead_status_args(&pane_id)).await;
-    let Ok(output) = shown else {
-        delete_buffer(&exec, buffer.as_deref()).await;
-        return;
-    };
-    let Ok((dead, status)) = parse_dead_status(&output.stdout) else {
-        delete_buffer(&exec, buffer.as_deref()).await;
-        return;
-    };
+    let mut status = None;
+    let mut dead = false;
+    for attempt in 0..8 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
+        let Ok(output) = exec.run(&dead_status_args(&pane_id)).await else {
+            continue;
+        };
+        let Ok((is_dead, pane_status)) = parse_dead_status(&output.stdout) else {
+            continue;
+        };
+        if is_dead {
+            dead = true;
+            status = pane_status;
+            break;
+        }
+    }
     if dead && hub.lock().await.should_emit(&pane_id) {
         drop(events.send(MuxEvent::PaneDied { pane_id, status }));
     }

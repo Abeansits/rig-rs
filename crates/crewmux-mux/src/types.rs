@@ -244,6 +244,8 @@ pub struct GuardInputs {
 /// Where `set-option` applies.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OptScope {
+    /// Global option (`-g`). `window-size` is rejected here.
+    Global,
     /// Server option (`-s`).
     Server,
     /// Session option. The name is canonicalised.

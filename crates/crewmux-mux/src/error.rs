@@ -10,6 +10,9 @@ pub enum MuxError {
     /// The named session or pane does not exist.
     #[error("not found: {0}")]
     NotFound(String),
+    /// The caller asked for something tmux must not do.
+    #[error("{0}")]
+    Forbidden(&'static str),
     /// The installed tmux is older than the supported minimum.
     #[error("tmux {found} is older than minimum {min}")]
     TmuxTooOld {
