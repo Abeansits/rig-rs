@@ -1,0 +1,7 @@
+{
+  "id": "stub-seat",
+  "project": "full",
+  "needs": "slice 1",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [{ "op": "cli", "argv": ["--version"] }]
+}

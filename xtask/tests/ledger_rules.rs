@@ -1,0 +1,181 @@
+//! Ledger parser and one test per AC10 validation rule.
+
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::PathBuf;
+
+use xtask::diff::{PeId, pe_ids_in, workspace_root};
+use xtask::ledger::{LedgerRow, LedgerStatus, parse_csv, report, to_csv, validate, waiver_for};
+
+fn row(path: &str, status: LedgerStatus) -> LedgerRow {
+    LedgerRow {
+        ts_path: path.to_owned(),
+        slice: None,
+        status,
+        rust_test: None,
+        pe_id: None,
+        note: String::new(),
+    }
+}
+
+fn pes() -> BTreeSet<PeId> {
+    let mut set = BTreeSet::new();
+    if let Ok(id) = PeId::parse("PE-001") {
+        set.insert(id);
+    }
+    set
+}
+
+const HEADER: &str = "ts_path,slice,status,rust_test,pe_id,note\n";
+
+#[test]
+fn unknown_status_is_a_parse_error() {
+    let csv = format!("{HEADER}\"a.test.ts\",\"\",\"bogus\",\"\",\"\",\"\"\n");
+    let errors = parse_csv(&csv).unwrap_err();
+    assert!(errors.iter().any(|error| error.contains("unknown status")));
+}
+
+#[test]
+fn diverged_without_pe_id_is_an_error() {
+    let rows = [row("a.test.ts", LedgerStatus::Diverged)];
+    let errors = validate(&rows, &pes(), None);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("requires a pe_id"))
+    );
+}
+
+#[test]
+fn diverged_with_unknown_pe_id_is_an_error() {
+    let mut sample = row("a.test.ts", LedgerStatus::Diverged);
+    sample.pe_id = Some(PeId::parse("PE-999").unwrap());
+    let errors = validate(std::slice::from_ref(&sample), &pes(), None);
+    assert!(errors.iter().any(|error| error.contains("unknown pe_id")));
+}
+
+#[test]
+fn ported_and_reused_require_rust_test() {
+    for status in [LedgerStatus::Ported, LedgerStatus::Reused] {
+        let errors = validate(&[row("a.test.ts", status)], &pes(), None);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("requires rust_test")),
+            "{status:?}"
+        );
+    }
+}
+
+#[test]
+fn waived_with_empty_note_is_an_error() {
+    let errors = validate(&[row("a.test.ts", LedgerStatus::Waived)], &pes(), None);
+    assert!(errors.iter().any(|error| error.contains("requires a note")));
+}
+
+#[test]
+fn duplicate_ts_path_is_an_error() {
+    let rows = [
+        row("a.test.ts", LedgerStatus::Todo),
+        row("a.test.ts", LedgerStatus::Todo),
+    ];
+    let errors = validate(&rows, &pes(), None);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("duplicate ts_path"))
+    );
+}
+
+#[test]
+fn rust_test_must_appear_in_the_cargo_list() {
+    let mut sample = row("a.test.ts", LedgerStatus::Ported);
+    sample.rust_test = Some("missing::test".to_owned());
+    let listed = BTreeSet::from(["present::test".to_owned()]);
+    let errors = validate(std::slice::from_ref(&sample), &pes(), Some(&listed));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("not in `cargo test -- --list`"))
+    );
+}
+
+#[test]
+fn round_trip_preserves_a_note_that_contains_a_comma() {
+    let mut sample = row("a.test.ts", LedgerStatus::Waived);
+    sample.note = "gateway, slack".to_owned();
+    let parsed = parse_csv(&to_csv(std::slice::from_ref(&sample))).unwrap();
+    assert_eq!(parsed, vec![sample]);
+}
+
+#[test]
+fn waiver_rules_leave_in_scope_names_as_todo() {
+    assert!(
+        waiver_for("packages/daemon/test/gateway/slack.test.ts")
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        waiver_for("packages/cli/test/openrig-compat.test.ts")
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        waiver_for("packages/daemon/test/skill-discovery.test.ts")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        waiver_for("packages/daemon/test/fleet-compose.test.ts")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        waiver_for("packages/daemon/test/startup-proof.test.ts")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        waiver_for("packages/daemon/test/proof-command.test.ts")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn workspace_root_walks_up_from_the_process() {
+    let root = workspace_root();
+    assert!(
+        root.join("parity/ledger.csv").is_file(),
+        "{}",
+        root.display()
+    );
+    assert!(root.join("xtask/Cargo.toml").is_file());
+    assert_ne!(root, PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+}
+
+#[test]
+fn seeded_ledger_is_check_green() {
+    let root = workspace_root();
+    let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
+    let rows = parse_csv(&text).unwrap();
+    assert_eq!(rows.len(), 1303);
+    for row in &rows {
+        match row.status {
+            LedgerStatus::Todo => assert!(row.note.is_empty(), "{}", row.ts_path),
+            LedgerStatus::Waived => assert!(!row.note.trim().is_empty(), "{}", row.ts_path),
+            LedgerStatus::Ported | LedgerStatus::Reused | LedgerStatus::Diverged => {
+                panic!("{:?} on {}", row.status, row.ts_path);
+            }
+        }
+        assert!(row.rust_test.is_none());
+        assert!(row.pe_id.is_none());
+    }
+    let markdown = fs::read_to_string(root.join("design/parity-exceptions.md")).unwrap();
+    let pe_ids = pe_ids_in(&markdown).into_iter().collect();
+    assert_eq!(validate(&rows, &pe_ids, None), Vec::<String>::new());
+    let printed = report(&rows);
+    assert!(printed.contains("| todo |"));
+    assert!(printed.contains("| waived |"));
+    assert!(printed.contains("(unassigned)"));
+}

@@ -1,0 +1,6 @@
+{
+  "id": "version",
+  "project": "exit",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [{ "op": "cli", "argv": ["--version"] }]
+}

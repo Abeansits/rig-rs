@@ -1,0 +1,17 @@
+---
+source: tests/diff/cases/scenario-runner-probe.json
+expression: "ts:scenario-runner-probe"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "0.6.9\n",
+  "tmux_argv": [
+    [
+      "tmux",
+      "-V"
+    ]
+  ]
+}

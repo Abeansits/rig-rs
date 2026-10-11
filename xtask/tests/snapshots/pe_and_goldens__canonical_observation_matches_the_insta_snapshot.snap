@@ -1,0 +1,17 @@
+---
+source: xtask/tests/pe_and_goldens.rs
+expression: text
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "ok",
+  "tmux_argv": [
+    [
+      "tmux",
+      "-V"
+    ]
+  ]
+}

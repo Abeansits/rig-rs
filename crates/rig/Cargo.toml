@@ -19,3 +19,6 @@ crewmux-mcp.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+xtask = { path = "../../xtask" }

@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/help-top.json
+expression: "rs:help-top"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "",
+  "tmux_argv": []
+}
