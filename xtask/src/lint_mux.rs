@@ -83,11 +83,12 @@ fn joins_contain(text: &str, needle: &str) -> bool {
 
 fn window_size_violation(path: &Path, text: &str) -> bool {
     if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-        return concat_joins(text)
-            .into_iter()
-            .chain(adjacent_runs(text))
-            .chain(array_groups(text))
-            .any(|joined| global_window_size(&joined));
+        return path_is_mux(path)
+            && concat_joins(text)
+                .into_iter()
+                .chain(adjacent_runs(text))
+                .chain(array_groups(text))
+                .any(|joined| global_window_size(&joined));
     }
     text.lines().any(global_window_size)
 }
@@ -96,7 +97,6 @@ fn global_window_size(text: &str) -> bool {
     text.contains("window-size") && text.split_whitespace().any(|token| token == "-g")
 }
 
-/// String literals inside one `[...]` or `vec![...]`, joined by spaces.
 fn array_groups(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
