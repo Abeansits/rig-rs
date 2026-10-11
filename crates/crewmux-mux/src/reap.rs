@@ -22,7 +22,8 @@ pub(crate) async fn nudge(exec: Arc<dyn TmuxExec>, cancel: CancellationToken) {
     linux_nudge(exec, cancel).await;
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (exec, cancel);
+        drop(exec);
+        cancel.cancelled().await;
     }
 }
 
