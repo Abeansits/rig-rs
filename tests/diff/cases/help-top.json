@@ -1,0 +1,6 @@
+{
+  "id": "help-top",
+  "project": "help-names",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [{ "op": "cli", "argv": ["--help"] }]
+}

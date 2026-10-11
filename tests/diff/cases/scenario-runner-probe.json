@@ -1,0 +1,10 @@
+{
+  "id": "scenario-runner-probe",
+  "project": "full",
+  "scenario": "packages/test-system/scenarios/clean-lifecycle-no-residue.yaml",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [
+    { "op": "cli", "argv": ["--version"] },
+    { "op": "tmux_calls" }
+  ]
+}

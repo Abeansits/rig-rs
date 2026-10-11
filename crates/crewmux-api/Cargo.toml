@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 crewmux-types.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true
