@@ -130,6 +130,15 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Parity ledger check (parity/ledger.csv)
         run: cargo run -p xtask --locked -- ledger check
+      # lint-mux lands with PR #4; remove the skip branch once it is on main.
+      - name: lint-mux (crewmux-mux human-client / shell ban)
+        shell: bash
+        run: |
+          if ! grep -rqs '"lint-mux"' xtask/src; then
+            echo "::notice::xtask has no lint-mux subcommand yet (lands with PR #4); skipping"
+            exit 0
+          fi
+          cargo run -p xtask --locked -- lint-mux
 
   coverage:
     name: coverage (informational)
@@ -159,11 +168,77 @@ jobs:
           path: lcov.info
           if-no-files-found: ignore
 
+  tmux-matrix:
+    name: real tmux ${{ matrix.tmux }} (from source, ubuntu)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.3a = oldest supported, 3.5a = ADR 0005 reference, 3.8 = latest tmux/tmux release.
+        # macOS keeps brew tmux in the nextest job (from-source on macOS is slow/fragile).
+        tmux: ["3.3a", "3.5a", "3.8"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache tmux build
+        id: tmux-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/tmux-${{ matrix.tmux }}
+          key: tmux-${{ matrix.tmux }}-${{ runner.os }}-${{ runner.arch }}-v1
+      - name: Build tmux ${{ matrix.tmux }} from source
+        if: steps.tmux-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          V: ${{ matrix.tmux }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libevent-dev libncurses-dev bison pkg-config
+          curl -fsSL -o tmux.tgz "https://github.com/tmux/tmux/releases/download/${V}/tmux-${V}.tar.gz"
+          tar xzf tmux.tgz
+          cd "tmux-${V}"
+          ./configure --prefix="$HOME/.local/tmux-${V}" >/dev/null
+          make -j"$(nproc)" >/dev/null
+          make install >/dev/null
+      - name: Runtime libs (cache hit path)
+        if: steps.tmux-cache.outputs.cache-hit == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libevent-dev libncurses-dev
+      - name: Put tmux first on PATH and assert version
+        shell: bash
+        env:
+          V: ${{ matrix.tmux }}
+        run: |
+          set -euo pipefail
+          echo "$HOME/.local/tmux-${V}/bin" >> "$GITHUB_PATH"
+          got=$("$HOME/.local/tmux-${V}/bin/tmux" -V)
+          echo "tmux -V: $got"
+          [ "$got" = "tmux ${V}" ] || { echo "::error::expected tmux ${V}, got '$got'"; exit 1; }
+      - name: Verify PATH resolution
+        run: command -v tmux && tmux -V
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest
+      - name: Real-tmux tests (crewmux-mux, feature tmux-it)
+        shell: bash
+        env:
+          INSTA_UPDATE: "no"
+          RIG_HOME: ${{ runner.temp }}/rig-home
+        run: |
+          set -euo pipefail
+          if ! grep -qE '^tmux-it *=' crates/crewmux-mux/Cargo.toml 2>/dev/null; then
+            echo "::notice::crewmux-mux has no tmux-it feature yet (pre slice 1b); nothing to run"
+            exit 0
+          fi
+          cargo nextest run -p crewmux-mux --features tmux-it --profile ci --locked --no-tests=warn
+
   # Single required check for branch protection: add only "ci-pass" as required.
   ci-pass:
     name: ci-pass
     if: always()
-    needs: [check, nextest, deny, msrv, guards]
+    needs: [check, nextest, deny, msrv, guards, tmux-matrix]
     runs-on: ubuntu-latest
     steps:
       - name: All required jobs succeeded
