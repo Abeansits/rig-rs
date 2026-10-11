@@ -1,12 +1,11 @@
-//! `cargo xtask lint-mux` rejects an attachment-based human signal, a global
-//! `window-size`, and a shell invocation under `crewmux-mux`.
+//! `cargo xtask lint-mux` rejects an attachment format, a global `window-size`, and a shell.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-/// Workspace root next to this crate. Independent of the process working directory.
+/// Workspace root next to this crate.
 #[must_use]
 pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -16,7 +15,6 @@ pub fn workspace_root() -> PathBuf {
 /// `-g`, or spawn a shell from `crewmux-mux`.
 ///
 /// # Errors
-///
 /// Returns the first offending path.
 pub fn lint_mux_at(root: &Path) -> Result<(), String> {
     let mut files = Vec::new();
@@ -88,6 +86,7 @@ fn window_size_violation(path: &Path, text: &str) -> bool {
         return concat_joins(text)
             .into_iter()
             .chain(adjacent_runs(text))
+            .chain(array_groups(text))
             .any(|joined| global_window_size(&joined));
     }
     text.lines().any(global_window_size)
@@ -95,6 +94,80 @@ fn window_size_violation(path: &Path, text: &str) -> bool {
 
 fn global_window_size(text: &str) -> bool {
     text.contains("window-size") && text.split_whitespace().any(|token| token == "-g")
+}
+
+/// String literals inside one `[...]` or `vec![...]`, joined by spaces.
+fn array_groups(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut index = 0usize;
+    let mut levels: Vec<Vec<String>> = Vec::new();
+    while index < bytes.len() {
+        if bytes.get(index) == Some(&b'/') && bytes.get(index.saturating_add(1)) == Some(&b'/') {
+            index = skip_line(bytes, index);
+            continue;
+        }
+        if bytes.get(index) == Some(&b'/') && bytes.get(index.saturating_add(1)) == Some(&b'*') {
+            index = skip_block(bytes, index);
+            continue;
+        }
+        if let Some(next) = skip_char_literal(bytes, index) {
+            index = next;
+            continue;
+        }
+        if bytes.get(index) == Some(&b'"')
+            && let Some((value, next)) = parse_string(bytes, index)
+        {
+            if let Some(level) = levels.last_mut() {
+                level.push(value);
+            }
+            index = next;
+            continue;
+        }
+        if bytes.get(index) == Some(&b'[') {
+            levels.push(Vec::new());
+            index = index.saturating_add(1);
+            continue;
+        }
+        if bytes.get(index) == Some(&b']')
+            && let Some(literals) = levels.pop()
+            && !literals.is_empty()
+        {
+            out.push(literals.join(" "));
+            index = index.saturating_add(1);
+            continue;
+        }
+        index = index.saturating_add(1);
+    }
+    out
+}
+
+fn skip_line(bytes: &[u8], index: usize) -> usize {
+    let rest = bytes.get(index.saturating_add(2)..).unwrap_or_default();
+    let newline = rest.iter().position(|byte| *byte == b'\n');
+    index
+        .saturating_add(3)
+        .saturating_add(newline.unwrap_or(rest.len()))
+}
+
+fn skip_block(bytes: &[u8], index: usize) -> usize {
+    let mut index = index.saturating_add(2);
+    while bytes.get(index) != Some(&b'*') || bytes.get(index.saturating_add(1)) != Some(&b'/') {
+        if index >= bytes.len() {
+            return index;
+        }
+        index = index.saturating_add(1);
+    }
+    index.saturating_add(2)
+}
+
+fn skip_char_literal(bytes: &[u8], index: usize) -> Option<usize> {
+    if bytes.get(index) != Some(&b'\'') {
+        return None;
+    }
+    let escaped = bytes.get(index.saturating_add(1)) == Some(&b'\\');
+    let end = index.saturating_add(if escaped { 3 } else { 2 });
+    (bytes.get(end) == Some(&b'\'')).then_some(end.saturating_add(1))
 }
 
 fn path_is_mux(path: &Path) -> bool {

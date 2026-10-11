@@ -26,16 +26,34 @@ slow-timeout = { period = "120s", terminate-after = 5 }
 default-filter = "all()"
 
 # Anything touching a real tmux server runs serially (private -L sockets, but CPU/pty bound).
+# Paste and fidelity tests also take every test thread: a 64 KiB paste overflows the
+# subscriber queue when unit tests keep the runtime busy beside them.
 [test-groups]
 tmux = { max-threads = 1 }
+tmux-heavy = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
 filter = "test(/::tmux_it::/)"
 test-group = "tmux"
 
 [[profile.ci.overrides]]
+filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
+
+[[profile.ci.overrides]]
 filter = "test(/::tmux_it::/)"
 test-group = "tmux"
+
+[[profile.slow.overrides]]
+filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
 
 [[profile.slow.overrides]]
 filter = "test(/::tmux_it::/)"

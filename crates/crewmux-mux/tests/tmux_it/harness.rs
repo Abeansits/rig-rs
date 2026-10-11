@@ -173,6 +173,7 @@ while True:
                 .find(|info| Some(&info.pane_id) == pane.pane_id.as_ref())
                 .expect("pane")
                 .pid
+                .expect("live pane pid")
         }
 
         fn signal(pid: u32, name: &str) {
@@ -443,15 +444,14 @@ while True:
         ) {
             let pastes = log.pastes.len();
             let submits = log.submits;
-            server
-                .mux
-                .paste(pane, payload, PasteOpts::default())
-                .await
-                .expect("paste");
-            pull(stream, log, Duration::from_secs(5), |log| {
+            // Drain while tmux echoes the paste. Waiting until paste() returns
+            // lets the subscriber queue fill under load.
+            let paste = server.mux.paste(pane, payload, PasteOpts::default());
+            let read = pull(stream, log, Duration::from_secs(5), |log| {
                 log.pastes.len() > pastes || log.submits > submits
-            })
-            .await;
+            });
+            let (receipt, ()) = tokio::join!(paste, read);
+            receipt.expect("paste");
             assert_eq!(log.submits, submits, "premature submit");
             assert_eq!(
                 log.pastes.last().map(Vec::as_slice),

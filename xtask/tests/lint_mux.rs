@@ -128,3 +128,28 @@ fn global_window_size_is_rejected_in_strings_and_other_files() {
     assert!(err.contains("notes.md"), "{err}");
     drop(fs::remove_dir_all(&root));
 }
+
+#[test]
+fn argv_tokens_in_an_array_cannot_hide_a_global_window_size() {
+    let root = scratch("argv");
+    let rust = root.join("crates/crewmux-mux/src/argv.rs");
+    let key = ["window", "size"].join("-");
+    let flag = format!("-{}", "g");
+    let owned = format!(
+        "fn probe() {{ let _ = vec![\"set-option\".to_owned(), \"{flag}\".to_owned(), \"{key}\".to_owned()]; }}\n"
+    );
+    write(&rust, &owned).expect("write");
+    let err = lint_mux_at(&root).expect_err("vec");
+    assert!(err.contains("argv.rs"), "{err}");
+    let array =
+        format!("fn probe() {{ let _ = &[\"set-option\", \"{flag}\", \"{key}\", \"latest\"]; }}\n");
+    write(&rust, &array).expect("write");
+    let err = lint_mux_at(&root).expect_err("array");
+    assert!(err.contains("argv.rs"), "{err}");
+    let session = format!(
+        "fn probe() {{ let _ = vec![\"set-option\".to_owned(), \"-t\".to_owned(), \"{key}\".to_owned()]; }}\n"
+    );
+    write(&rust, &session).expect("write");
+    lint_mux_at(&root).expect("session scope is allowed");
+    drop(fs::remove_dir_all(&root));
+}

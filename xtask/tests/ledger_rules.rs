@@ -88,6 +88,77 @@ fn duplicate_ts_path_is_an_error() {
 }
 
 #[test]
+fn case_row_with_a_listed_test_is_accepted() {
+    let mut sample = row(
+        "packages/daemon/test/a.test.ts > does the thing",
+        LedgerStatus::Ported,
+    );
+    sample.rust_test = Some("does_the_thing".to_owned());
+    let rows = [
+        row("packages/daemon/test/a.test.ts", LedgerStatus::Todo),
+        sample,
+    ];
+    let listed = BTreeSet::from(["does_the_thing".to_owned()]);
+    assert_eq!(validate(&rows, &pes(), Some(&listed)), Vec::<String>::new());
+}
+
+#[test]
+fn case_row_rust_test_must_be_listed() {
+    let mut sample = row(
+        "packages/daemon/test/a.test.ts > does the thing",
+        LedgerStatus::Ported,
+    );
+    sample.rust_test = Some("missing".to_owned());
+    let rows = [
+        row("packages/daemon/test/a.test.ts", LedgerStatus::Todo),
+        sample,
+    ];
+    let listed = BTreeSet::from(["present".to_owned()]);
+    let errors = validate(&rows, &pes(), Some(&listed));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("not in `cargo test -- --list`"))
+    );
+}
+
+#[test]
+fn case_row_without_rust_test_is_an_error() {
+    let rows = [
+        row("a.test.ts", LedgerStatus::Todo),
+        row("a.test.ts > a case", LedgerStatus::Ported),
+    ];
+    let errors = validate(&rows, &pes(), None);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("requires rust_test"))
+    );
+}
+
+#[test]
+fn malformed_case_separator_is_an_error() {
+    let mut sample = row("a.test.ts>no-spaces", LedgerStatus::Ported);
+    sample.rust_test = Some("present".to_owned());
+    let rows = [row("a.test.ts", LedgerStatus::Todo), sample];
+    let errors = validate(&rows, &pes(), None);
+    assert!(errors.iter().any(|error| error.contains("must look like")));
+}
+
+#[test]
+fn case_row_parent_must_be_a_file_row() {
+    let mut sample = row("missing.test.ts > a case", LedgerStatus::Ported);
+    sample.rust_test = Some("present".to_owned());
+    let listed = BTreeSet::from(["present".to_owned()]);
+    let errors = validate(std::slice::from_ref(&sample), &pes(), Some(&listed));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("not a file-level ledger row"))
+    );
+}
+
+#[test]
 fn rust_test_must_appear_in_the_cargo_list() {
     let mut sample = row("a.test.ts", LedgerStatus::Ported);
     sample.rust_test = Some("missing::test".to_owned());
@@ -159,7 +230,7 @@ fn seeded_ledger_is_check_green() {
     let root = workspace_root();
     let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     let rows = parse_csv(&text).unwrap();
-    assert_eq!(rows.len(), 1303);
+    assert_eq!(rows.len(), 1310);
     for row in &rows {
         match row.status {
             LedgerStatus::Todo => {

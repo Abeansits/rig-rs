@@ -169,7 +169,7 @@ fn seat(spec: &SessionSpec, session: &str, pane_id: &str) -> PaneInfo {
         pane_id: pane_id.to_owned(),
         window_id: format!("@{pane_id}"),
         session: session.to_owned(),
-        pid: 1,
+        pid: Some(1),
         current_cmd,
         dead: false,
         dead_status: None,

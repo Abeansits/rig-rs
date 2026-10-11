@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, ChildStdout};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -33,6 +33,8 @@ pub(crate) struct ControlCtx {
     pub(crate) events: broadcast::Sender<MuxEvent>,
     pub(crate) cancel: CancellationToken,
     pub(crate) boot_tx: Option<oneshot::Sender<Result<(), MuxError>>>,
+    /// Bell window id (`@N`), published after the control client is ready.
+    pub(crate) bell: watch::Receiver<Option<String>>,
 }
 
 enum Drive {
@@ -224,9 +226,11 @@ async fn dispatch_line(state: &mut DriveState<'_>, line: &[u8]) -> Result<Step, 
                 spawn_confirm(state, pane_id, Some(name));
             }
         }
-        Action::WindowRenamed { pane_id } => {
-            let buffer = format!("rig-dead-{pane_id}");
-            spawn_confirm(state, pane_id, Some(buffer));
+        Action::WindowRenamed { window_id, pane_id } => {
+            if bell_matches(&state.ctx.bell, &window_id) {
+                let buffer = format!("rig-dead-{pane_id}");
+                spawn_confirm(state, pane_id, Some(buffer));
+            }
         }
         Action::Subscription { pane_id } => spawn_confirm(state, pane_id, None),
         Action::SessionsChanged => {
@@ -314,6 +318,10 @@ async fn finish_boot(state: &mut DriveState<'_>) -> Result<(), MuxError> {
     }
     state.stdin.flush().await?;
     Ok(())
+}
+
+fn bell_matches(bell: &watch::Receiver<Option<String>>, window_id: &str) -> bool {
+    bell.borrow().as_deref() == Some(window_id)
 }
 
 fn spawn_confirm(state: &mut DriveState<'_>, pane_id: String, buffer: Option<String>) {

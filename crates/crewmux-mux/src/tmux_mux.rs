@@ -110,6 +110,7 @@ impl TmuxMux {
         let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
         let (events, _) = broadcast::channel(2048);
         let (own_write, _) = watch::channel(None);
+        let (bell_tx, bell_rx) = watch::channel(None);
         let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
         let ctx = ControlCtx {
             binary: config.binary.clone(),
@@ -120,6 +121,7 @@ impl TmuxMux {
             events: events.clone(),
             cancel: cancel.clone(),
             boot_tx: Some(boot_tx),
+            bell: bell_rx,
         };
         let control = tracker.spawn(run_control(ctx));
         wait_ready(&cancel, &control, boot_rx).await?;
@@ -131,6 +133,7 @@ impl TmuxMux {
                 return Err(err);
             }
         };
+        bell_tx.send_replace(Some(bell.clone()));
         Ok(Self {
             exec,
             socket: config.socket,

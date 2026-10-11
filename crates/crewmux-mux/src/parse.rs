@@ -128,14 +128,14 @@ fn field<'a>(parts: &'a [&str], index: usize, line: &str) -> Result<&'a str, Mux
 }
 
 /// A dead remain-on-exit pane has an empty `#{pane_pid}` on tmux 3.8. That is not an error.
-fn parse_pane_pid(raw: &str, dead: bool, line: &str) -> Result<u32, MuxError> {
+fn parse_pane_pid(raw: &str, dead: bool, line: &str) -> Result<Option<u32>, MuxError> {
     if raw.is_empty() {
         if dead {
-            return Ok(0);
+            return Ok(None);
         }
         return Err(MuxError::Control(format!("bad pane_pid: {line}")));
     }
-    parse_u32(raw, "pane_pid")
+    Ok(Some(parse_u32(raw, "pane_pid")?))
 }
 
 fn parse_u32(raw: &str, what: &str) -> Result<u32, MuxError> {
@@ -209,7 +209,7 @@ mod tests {
         let pane = parse_pane_line(line).expect("parse");
         assert_eq!(pane.pane_id, "%12");
         assert_eq!(pane.window_id, "@3");
-        assert_eq!(pane.pid, 4242);
+        assert_eq!(pane.pid, Some(4242));
         assert!(pane.dead);
         assert_eq!(pane.dead_status, None);
         assert_eq!(pane.size.cols, 90);
@@ -224,7 +224,7 @@ mod tests {
         let line = "%1|@1||1|7|90|27|0|bash|demo";
         let pane = parse_pane_line(line).expect("dead pane");
         assert!(pane.dead);
-        assert_eq!(pane.pid, 0);
+        assert_eq!(pane.pid, None);
         assert_eq!(pane.dead_status, Some(7));
         let alive = "%1|@1||0||90|27|0|bash|demo";
         let err = parse_pane_line(alive).expect_err("live pane needs a pid");

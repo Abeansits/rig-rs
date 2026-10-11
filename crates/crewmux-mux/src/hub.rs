@@ -1,8 +1,9 @@
 //! Per-pane output rings and subscriber fan-out.
 //!
 //! The control reader never waits on a subscriber. Each subscriber has a bounded
-//! queue of about 64 KiB; a full queue marks that subscriber behind and counts a
-//! [`crate::MuxEvent::Gap`]. Other subscribers keep their own queues.
+//! queue larger than the 64 KiB history ring, so one full paste plus its framing
+//! still fits when the reader is briefly late. A full queue marks that subscriber
+//! behind and counts a [`crate::MuxEvent::Gap`]. Other subscribers keep their own queues.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -15,7 +16,9 @@ use crate::death::DeathDedupe;
 use crate::types::{MuxEvent, OutputStream, PANE_RING_BYTES, PaneInfo};
 
 pub(crate) const CHUNK: usize = 4 * 1024;
-const QUEUE: usize = PANE_RING_BYTES / CHUNK;
+/// Four times the history ring: a 64 KiB paste is 16 chunks, and the composer
+/// frame around it must not be reported as a gap.
+const QUEUE: usize = (PANE_RING_BYTES / CHUNK).saturating_mul(4);
 
 struct Sub {
     tx: mpsc::Sender<MuxEvent>,
@@ -64,7 +67,7 @@ impl Hub {
         self.dedupe.emit(pane_id)
     }
 
-    /// Subscribe to one pane. The queue is capped near [`PANE_RING_BYTES`].
+    /// Subscribe to one pane. The queue is a multiple of [`PANE_RING_BYTES`].
     pub(crate) fn subscribe(&mut self, pane_id: &str) -> OutputStream {
         let (tx, rx) = mpsc::channel(QUEUE);
         let dropped = Arc::new(AtomicUsize::new(0));
@@ -156,7 +159,7 @@ pub(crate) async fn push_output(
 mod tests {
     use std::sync::Arc;
 
-    use super::{Hub, push_output};
+    use super::{CHUNK, Hub, QUEUE, push_output};
     use crate::types::MuxEvent;
 
     #[tokio::test]
@@ -165,7 +168,7 @@ mod tests {
         let (events, _keep) = tokio::sync::broadcast::channel(64);
         let mut slow = hub.lock().await.subscribe("%1");
         let mut fast = hub.lock().await.subscribe("%1");
-        let total = 80 * 1024;
+        let total = (QUEUE + 8) * CHUNK;
         let reader = tokio::spawn(async move {
             let mut got = 0usize;
             while got < total {
@@ -185,7 +188,7 @@ mod tests {
         let got = reader.await.expect("join").expect("fast reader");
         assert_eq!(got, total);
         let mut saw_gap = false;
-        for _ in 0..64 {
+        for _ in 0..(QUEUE.saturating_add(16)) {
             match tokio::time::timeout(std::time::Duration::from_secs(2), slow.recv()).await {
                 Ok(Some(MuxEvent::Gap { .. })) => {
                     saw_gap = true;

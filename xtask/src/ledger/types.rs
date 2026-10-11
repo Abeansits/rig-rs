@@ -1,4 +1,5 @@
-//! Ledger rows. One row per TypeScript test file.
+//! Ledger rows. One row per TypeScript test file, plus optional case rows
+//! whose `ts_path` is `<file> > <case name>`.
 
 use crate::diff::PeId;
 use crate::error::Error;
@@ -47,6 +48,8 @@ impl LedgerStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerRow {
     /// Path relative to the `OpenRig` checkout, using `/`.
+    ///
+    /// A case row is `<ts_path> > <case name>` and names one `#[test]` inside that file.
     pub ts_path: String,
     /// Slice id, when the row has been assigned.
     pub slice: Option<String>,
