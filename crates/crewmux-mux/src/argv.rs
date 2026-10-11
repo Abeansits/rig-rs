@@ -338,6 +338,11 @@ pub(crate) fn capture_args(target: &str, range: CaptureRange) -> Vec<String> {
     match range {
         CaptureRange::Visible => {}
         CaptureRange::Joined => args.push("-J".to_owned()),
+        CaptureRange::JoinedHistory(lines) => {
+            args.push("-J".to_owned());
+            args.push("-S".to_owned());
+            args.push(format!("-{lines}"));
+        }
         CaptureRange::LastLines(lines) => {
             args.push("-S".to_owned());
             args.push(format!("-{lines}"));
@@ -688,6 +693,12 @@ mod tests {
         assert!(!args.iter().any(|arg| arg == "-S"), "{args:?}");
         let visible = capture_args("%1", CaptureRange::Visible);
         assert!(!visible.iter().any(|arg| arg == "-J"));
+        let history = capture_args("%1", CaptureRange::JoinedHistory(40));
+        assert!(history.iter().any(|arg| arg == "-J"), "{history:?}");
+        assert!(
+            history.windows(2).any(|pair| pair == ["-S", "-40"]),
+            "{history:?}"
+        );
     }
 
     #[test]

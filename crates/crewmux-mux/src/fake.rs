@@ -523,10 +523,19 @@ fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     let lines = match range {
         CaptureRange::Visible | CaptureRange::Joined => return capture,
         CaptureRange::LastLines(n) => usize::from(n),
-        CaptureRange::History(n) => usize::try_from(n).unwrap_or(usize::MAX),
+        CaptureRange::History(n) | CaptureRange::JoinedHistory(n) => {
+            usize::try_from(n).unwrap_or(usize::MAX)
+        }
     };
+    let trailing = capture.text.ends_with('\n');
     let kept: Vec<&str> = capture.text.lines().collect();
-    let skip = kept.len().saturating_sub(lines);
-    let text = kept.into_iter().skip(skip).collect::<Vec<_>>().join("\n");
+    let count = kept.len();
+    let skip = count.saturating_sub(lines);
+    let mut text = kept.into_iter().skip(skip).collect::<Vec<_>>().join("\n");
+    // `lines` drops the terminator. An exact append is `before + payload`, so a
+    // prompt that ended with a newline has to keep it or every paste looks partial.
+    if trailing && skip < count {
+        text.push('\n');
+    }
     Capture::new(text, capture.cursor)
 }

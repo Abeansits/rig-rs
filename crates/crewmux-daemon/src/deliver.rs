@@ -15,11 +15,11 @@ use crewmux_mux::{
 use crewmux_types::ReadinessCode;
 use serde_json::{Value, json};
 
-use crate::composer::{classify_stub, stub_drafting};
+use crate::composer::{ComposerParser, classify_stub, stub_drafting};
 use crate::error::Error;
 use crate::launch::now_ts;
 use crate::notify::emit;
-use crate::paste_check::{PasteHit, classify_paste, clear_composer, pasted_screen};
+use crate::paste_check::{PasteHit, classify_paste, clear_composer, history_range, pasted_screen};
 use crate::query::{address_of, live_seats, pane_of};
 use crate::state::App;
 
@@ -194,32 +194,39 @@ async fn paste_and_check(
     bracketed: bool,
     interact_reason: &str,
 ) -> Result<Value, Error> {
-    let before = app.mux.capture(pane, CaptureRange::Joined).await?;
     let payload = wrap_pane(&outbound.from, address, &outbound.body);
+    // History, joined. The composer region of this capture is the draft at
+    // verdict time; rows above the prompt are not part of the comparison.
+    let range = history_range(&payload);
+    let before = app.mux.capture(pane, range).await?;
     let opts = PasteOpts {
         bracketed,
         preserve_lf: true,
     };
     tracing::debug!(verify = outbound.verify, seat = address, "paste");
     app.mux.paste(pane, &payload, opts).await?;
-    let after = pasted_screen(app, pane, &before.text, &payload).await?;
+    let after = pasted_screen(app, pane, &before.text, &payload, range).await?;
+    let mut degraded = ComposerParser::Stub.state(&before.text, None) == ComposerState::Unknown;
     let outcome = match classify_paste(&before.text, &after, &payload) {
         PasteHit::Clean => {
             app.mux.send_keys(pane, &[Key::Enter]).await?;
             DeliveryOutcome::Delivered
         }
         PasteHit::Contaminated => {
-            clear_composer(app, pane).await?;
+            if !clear_composer(app, pane, range).await? {
+                degraded = true;
+            }
             raise(app, address, "contaminated").await;
             DeliveryOutcome::Contaminated
         }
         PasteHit::Missing => {
-            clear_composer(app, pane).await?;
+            if !clear_composer(app, pane, range).await? {
+                degraded = true;
+            }
             raise(app, address, "did not render").await;
             DeliveryOutcome::Failed
         }
     };
-    let degraded = matches!(classify_stub(&before.text, None), ComposerState::Unknown);
     stored(app, outbound, address, outcome, degraded, interact_reason).await
 }
 

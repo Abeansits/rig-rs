@@ -1,15 +1,16 @@
-//! Post-paste screen check.
+//! Post-paste check against the composer region, not the whole screen.
 //!
-//! The check captures with `capture-pane -J`, so tmux rejoins soft-wrapped rows
-//! before we look for the payload. [`crewmux_mux::FakeMux`] stores logical lines
-//! and ignores `-J`. The stub may still echo the payload before the check runs.
-//! A byte-for-byte `before + payload` compare only matches the fake multiplexer.
+//! The capture is `capture-pane -J -S -<n>`, so a payload taller than the
+//! visible pane is still one logical block. [`ComposerParser`] isolates the
+//! text after the stub prompt. Rows above that prompt are earlier output and
+//! are not contamination. [`crewmux_mux::FakeMux`] stores logical lines and
+//! ignores `-J`.
 
 use std::time::{Duration, Instant};
 
-use crewmux_mux::{CaptureRange, Key, PaneRef};
+use crewmux_mux::{CaptureRange, PaneRef};
 
-use crate::composer::stub_drafting;
+use crate::composer::{ComposerParser, composer_empty};
 use crate::error::Error;
 use crate::state::App;
 
@@ -24,19 +25,42 @@ pub(crate) enum PasteHit {
     Missing,
 }
 
-/// Classify `after` against the screen captured before the paste.
+/// Classify the composer region of `after` against the region at verdict time.
+///
+/// `before` and `after` are pane captures. Only the parser's composer region
+/// is compared, so output above the prompt cannot look like a dirty paste.
 #[must_use]
 pub(crate) fn classify_paste(before: &str, after: &str, payload: &str) -> PasteHit {
-    let after_flat = flatten(after);
+    let parser = ComposerParser::Stub;
+    // Width comes from the whole pane. The composer region starts mid-row, so
+    // it no longer contains the padded rows that show where a wrap joins.
+    let width = pane_width(before).or_else(|| pane_width(after));
+    let before = flat_region(parser, before, width);
+    let after = flat_region(parser, after, width);
     let payload_flat = flatten(payload);
-    if !located(&after_flat, &payload_flat) {
+    if !located(&after, &payload_flat) {
         return PasteHit::Missing;
     }
-    if leftover(before, after, &payload_flat) {
+    if leftover(&before, &after, &payload_flat) {
         PasteHit::Contaminated
     } else {
         PasteHit::Clean
     }
+}
+
+fn flat_region(parser: ComposerParser, screen: &str, width: Option<usize>) -> String {
+    let text = parser.region(screen).unwrap_or_else(|| screen.to_owned());
+    flatten_at(&text, width)
+}
+
+/// How much scrollback covers `payload` plus a margin, joined with `-J`.
+#[must_use]
+pub(crate) fn history_range(payload: &str) -> CaptureRange {
+    let wraps = payload.len() / 20;
+    let breaks = payload.lines().count();
+    let rows = wraps.saturating_add(breaks).saturating_add(32);
+    let rows = u32::try_from(rows).unwrap_or(400).clamp(48, 500);
+    CaptureRange::JoinedHistory(rows)
 }
 
 /// `FakeMux` appends the payload and nothing else. A padded pane never does.
@@ -58,8 +82,9 @@ pub(crate) async fn pasted_screen(
     pane: &PaneRef,
     before: &str,
     payload: &str,
+    range: CaptureRange,
 ) -> Result<String, Error> {
-    let mut after = app.mux.capture(pane, CaptureRange::Joined).await?.text;
+    let mut after = app.mux.capture(pane, range).await?.text;
     let hit = classify_paste(before, &after, payload);
     if exact_append(before, &after, payload) || hit == PasteHit::Contaminated {
         return Ok(after);
@@ -80,7 +105,7 @@ pub(crate) async fn pasted_screen(
             return Ok(after);
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
-        let next = app.mux.capture(pane, CaptureRange::Joined).await?.text;
+        let next = app.mux.capture(pane, range).await?.text;
         if waited && next == after && hit == PasteHit::Clean {
             return Ok(after);
         }
@@ -88,32 +113,32 @@ pub(crate) async fn pasted_screen(
     }
 }
 
-/// Drop a failed paste from the composer.
+/// Drop a failed paste. Enter is never sent.
 ///
-/// `C-u` alone kills the line. Enter is not sent: on a real composer an empty
-/// line would submit a turn. The stub redraws `stub>` when it sees `C-u`.
-/// An unchanged screen means the multiplexer did not redraw; stop waiting.
-pub(crate) async fn clear_composer(app: &App, pane: &PaneRef) -> Result<(), Error> {
-    let started = Instant::now();
-    let mut last = app.mux.capture(pane, CaptureRange::Visible).await?.text;
-    app.mux.send_keys(pane, &[Key::CtrlU]).await?;
-    let mut stable = Instant::now();
+/// The stub's clear is `C-u`, repeated a bounded number of times for a
+/// multi-line buffer. Returns whether a recapture shows an empty composer.
+/// A composer that stays dirty is reported by the caller; this does not loop
+/// until it is empty and does not submit.
+pub(crate) async fn clear_composer(
+    app: &App,
+    pane: &PaneRef,
+    range: CaptureRange,
+) -> Result<bool, Error> {
+    let parser = ComposerParser::Stub;
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut sent = 0u8;
     loop {
-        let text = app.mux.capture(pane, CaptureRange::Visible).await?.text;
-        if !stub_drafting(&text) {
-            return Ok(());
-        }
-        if text == last {
-            if stable.elapsed() >= Duration::from_millis(80) {
-                return Ok(());
+        if sent > 0 {
+            let text = app.mux.capture(pane, range).await?.text;
+            if composer_empty(parser, &text) {
+                return Ok(true);
             }
-        } else {
-            last = text;
-            stable = Instant::now();
         }
-        if started.elapsed() >= Duration::from_millis(500) {
-            return Ok(());
+        if sent >= 8 || (sent > 0 && Instant::now() >= deadline) {
+            return Ok(false);
         }
+        app.mux.send_keys(pane, parser.clear_keys()).await?;
+        sent = sent.saturating_add(1);
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
@@ -185,9 +210,16 @@ fn logical_lines(text: &str) -> Vec<String> {
 }
 
 fn flatten(text: &str) -> String {
+    flatten_at(text, None)
+}
+
+fn flatten_at(text: &str, width: Option<usize>) -> String {
     let normalized = text.replace("\r\n", "\n").replace('\r', "");
     let raw: Vec<&str> = normalized.split('\n').collect();
-    let width = grid_width(&raw);
+    flatten_rows(&raw, width.or_else(|| grid_width(&raw)))
+}
+
+fn flatten_rows(raw: &[&str], width: Option<usize>) -> String {
     let mut out = String::new();
     for line in raw {
         let hard = width
@@ -209,6 +241,12 @@ fn flatten(text: &str) -> String {
 ///
 /// Padding is a trailing space. A repeated long composer line (the stub echoing
 /// the payload) is not a grid, and one full-width line is not a wrap by itself.
+fn pane_width(screen: &str) -> Option<usize> {
+    let normalized = screen.replace("\r\n", "\n").replace('\r', "");
+    let raw: Vec<&str> = normalized.split('\n').collect();
+    grid_width(&raw)
+}
+
 fn grid_width(lines: &[&str]) -> Option<usize> {
     let max = lines.iter().map(|line| line.len()).max()?;
     if max < 2 {
@@ -290,9 +328,11 @@ mod tests {
             lines.push(line.to_owned());
         }
         lines.push("EXTRA".to_owned());
-        lines.push("stub>".to_owned());
         let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-        let after = grid(&refs, 24);
+        // A padded `stub>` would grow a trailing space and look like a new prompt,
+        // hiding the payload above it. The redraw the stub actually writes has none.
+        let mut after = grid(&refs, 24);
+        after.push_str("stub>\n");
         assert_eq!(
             classify_paste(&before, &after, payload()),
             PasteHit::Contaminated
@@ -322,5 +362,17 @@ mod tests {
         let mut extra = glued.clone();
         extra.push_str("EXTRA\n");
         assert_eq!(classify_paste(before, &extra, body), PasteHit::Contaminated);
+    }
+
+    #[test]
+    fn earlier_output_above_the_prompt_is_not_contamination() {
+        let before = "stub-agent\nstub> \nold payload that scrolled\nstub> \n";
+        let body = payload();
+        let mut after = before.to_owned();
+        after.push_str(body);
+        assert_eq!(classify_paste(before, &after, body), PasteHit::Clean);
+        let mut dirty = after.clone();
+        dirty.push_str("\nEXTRA\n");
+        assert_eq!(classify_paste(before, &dirty, body), PasteHit::Contaminated);
     }
 }

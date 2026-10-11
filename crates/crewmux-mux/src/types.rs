@@ -125,6 +125,11 @@ pub enum CaptureRange {
     Visible,
     /// The visible screen with soft-wrapped rows joined (`capture-pane -J`).
     Joined,
+    /// Scrollback with soft-wrapped rows joined (`capture-pane -J -S -n`).
+    ///
+    /// `n` is a line count above the cursor, enough for a payload taller than
+    /// the visible pane.
+    JoinedHistory(u32),
     /// The last `n` lines, via `capture-pane -S -n`.
     LastLines(u16),
     /// The last `n` lines of history, via `capture-pane -S -n`.

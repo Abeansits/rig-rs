@@ -129,11 +129,10 @@ async fn replay(
         Missed::CaughtUp => {}
         Missed::Replay(events) => out.extend(events),
         Missed::Gap(events) => {
-            // No buffered event to name: the id is the next one the hub will
-            // issue, one past the head. The client's cursor is not that id.
-            let id = events
-                .first()
-                .map_or_else(|| hub.head().saturating_add(1), |event| event.id);
+            // No buffered event to name. The id is the head itself, so the next
+            // real event is `head + 1`. A client that resumes from this gap
+            // still receives that event.
+            let id = events.first().map_or_else(|| hub.head(), |event| event.id);
             out.push(StreamEvent {
                 id,
                 kind: StreamKind::Gap,
@@ -236,7 +235,8 @@ mod tests {
         let missed = replay(&hub, Some(3), false).await;
         let gap = missed.first().expect("gap");
         assert_eq!(gap.kind, StreamKind::Gap);
-        assert_eq!(gap.id, 1);
+        assert_eq!(gap.id, hub.head());
+        assert_ne!(gap.id, hub.head().saturating_add(1));
         assert_eq!(hub.head(), 0);
         assert_eq!(missed.len(), 1);
 
@@ -246,8 +246,8 @@ mod tests {
         let ahead = replay(&hub, Some(published.id.saturating_add(2)), false).await;
         let gap = ahead.first().expect("ahead");
         assert_eq!(gap.kind, StreamKind::Gap);
-        assert_eq!(gap.id, hub.head().saturating_add(1));
-        assert_ne!(gap.id, published.id.saturating_add(3));
+        assert_eq!(gap.id, hub.head());
+        assert_ne!(gap.id, hub.head().saturating_add(1));
         assert!(ahead.iter().all(|event| event.kind == StreamKind::Gap));
     }
 }

@@ -44,6 +44,26 @@ mod live {
         }
 
         #[test]
+        fn long_clean_payloads_deliver() {
+            super::long_clean_payloads_deliver();
+        }
+
+        #[test]
+        fn followup_after_long_send_delivers() {
+            super::followup_after_long_send_delivers();
+        }
+
+        #[test]
+        fn resize_to_40_then_300_chars_delivers() {
+            super::resize_to_40_then_300_chars_delivers();
+        }
+
+        #[test]
+        fn buffered_contamination_submits_nothing() {
+            super::buffered_contamination_submits_nothing();
+        }
+
+        #[test]
         fn send_renders_in_addressed_pane() {
             super::send_renders_in_addressed_pane();
         }
@@ -257,7 +277,14 @@ mod live {
         let live = boot(Some("contaminate=1"));
         let (code, body, err) = send(
             &live,
-            &["send", "--to", "one@pair", "marker-forced", "--json"],
+            &[
+                "send",
+                "--to",
+                "one@pair",
+                "marker-forced",
+                "--verify",
+                "--json",
+            ],
         );
         assert_eq!(code, 1, "{err} {body} {}", log(&live));
         assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
@@ -270,6 +297,105 @@ mod live {
         );
         assert_eq!(again, 0, "{err} {next} {}", log(&live));
         assert_eq!(outcome(&next), "delivered", "{next}");
+    }
+
+    fn long_clean_payloads_deliver() {
+        let live = boot(None);
+        let size = pane_size(&live);
+        assert_eq!(size.as_deref(), Some("90x27"), "{size:?}");
+        for n in [1000, 2000] {
+            let body = "W".repeat(n);
+            let (code, value, err) = send(&live, &["send", "--to", "one@pair", &body, "--json"]);
+            assert_eq!(code, 0, "{n} {err} {value} {}", log(&live));
+            assert_eq!(outcome(&value), "delivered", "{n} {value}");
+            wait_prompt(&live, "one");
+            let flat: String = history(&live, "one__pair")
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect();
+            assert!(flat.contains(&body), "{n} chars were not delivered");
+        }
+    }
+
+    fn followup_after_long_send_delivers() {
+        let live = boot(None);
+        assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
+        for (gap_ms, first_char, second_char) in [(600_u64, 'A', 'B'), (2000, 'C', 'D')] {
+            let first = first_char.to_string().repeat(479);
+            let second = second_char.to_string().repeat(88);
+            let (code, value, err) = send(&live, &["send", "--to", "one@pair", &first, "--json"]);
+            assert_eq!(code, 0, "{gap_ms} {err} {value} {}", log(&live));
+            assert_eq!(outcome(&value), "delivered", "{gap_ms} {value}");
+            std::thread::park_timeout(Duration::from_millis(gap_ms));
+            let (code, value, err) = send(&live, &["send", "--to", "one@pair", &second, "--json"]);
+            assert_eq!(code, 0, "{gap_ms} follow-up {err} {value} {}", log(&live));
+            assert_eq!(outcome(&value), "delivered", "{gap_ms} {value}");
+            wait_prompt(&live, "one");
+            let flat: String = history(&live, "one__pair")
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect();
+            assert!(flat.contains(&first), "{gap_ms} first payload missing");
+            assert!(flat.contains(&second), "{gap_ms} follow-up missing");
+        }
+    }
+
+    fn resize_to_40_then_300_chars_delivers() {
+        let live = boot(None);
+        assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
+        let resized = tmux(
+            &live.socket,
+            &["resize-window", "-t", "one__pair", "-x", "40", "-y", "27"],
+        );
+        assert_eq!(resized.0, 0, "{}", resized.2);
+        assert_eq!(pane_size(&live).as_deref(), Some("40x27"));
+        let body = "W".repeat(300);
+        let (code, value, err) = send(&live, &["send", "--to", "one@pair", &body, "--json"]);
+        assert_eq!(code, 0, "{err} {value} {}", log(&live));
+        assert_eq!(outcome(&value), "delivered", "{value}");
+        wait_prompt(&live, "one");
+        let flat: String = history(&live, "one__pair")
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect();
+        assert!(flat.contains(&body), "resized payload was not delivered");
+    }
+
+    fn buffered_contamination_submits_nothing() {
+        let live = boot(Some("contaminate=1,buffer=1"));
+        let (code, body, err) = send(
+            &live,
+            &[
+                "send",
+                "--to",
+                "one@pair",
+                "marker-buffer",
+                "--verify",
+                "--json",
+            ],
+        );
+        assert_ne!(code, 0, "{err} {body} {}", log(&live));
+        assert_ne!(outcome(&body), "delivered", "{body}");
+        let shot = history(&live, "one__pair");
+        assert!(
+            !shot.contains("SUBMIT"),
+            "buffered composer submitted after a failed verify: {shot}"
+        );
+        assert!(!capture(&live, "one").contains("SUBMIT"));
+    }
+
+    fn pane_size(live: &Live) -> Option<String> {
+        let size = tmux(
+            &live.socket,
+            &[
+                "list-panes",
+                "-t",
+                "one__pair",
+                "-F",
+                "#{pane_width}x#{pane_height}",
+            ],
+        );
+        (size.0 == 0).then(|| size.1.trim().to_owned())
     }
 
     fn send_renders_in_addressed_pane() {
