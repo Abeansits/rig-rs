@@ -60,4 +60,4 @@ cargo xtask ledger report
 
 `report` prints markdown counts per status and per slice.
 
-`tests/parity/LEDGER.md` is a separate QA note with its own vocabulary. The acceptance ledger is `parity/ledger.csv`.
+`parity/ledger.csv` is the single parity ledger (the old `tests/parity/LEDGER.md` QA note was retired).
