@@ -59,14 +59,15 @@ fn collect(value: &Value, ids: &mut Vec<String>, times: &mut Vec<String>) {
     }
 }
 
-fn seat_proof(env: &Env) -> (String, String) {
+fn seat_proof(env: &Env) -> (String, String, String) {
     let path = env.rig_home.join("state/rig.db");
     let conn = rusqlite::Connection::open(&path).expect("db");
     conn.busy_timeout(Duration::from_secs(2)).expect("busy");
     conn.query_row(
-        "SELECT seat_id, token FROM seat_tokens LIMIT 1",
+        "SELECT seat_tokens.seat_id, seat_tokens.token, seats.name
+         FROM seat_tokens JOIN seats ON seats.id = seat_tokens.seat_id LIMIT 1",
         [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .expect("seat token")
 }
@@ -152,7 +153,7 @@ fn chatroom_topic_creates_marker() {
 fn chatroom_history_sender_since_and_after() {
     let env = Env::new();
     up(&env);
-    let (seat, token) = seat_proof(&env);
+    let (seat, token, name) = seat_proof(&env);
     let (code, _, err) = stdout(env.rig().args(["chatroom", "send", "pair", "from-op"]));
     assert_eq!(code, 0, "{err}");
     let (code, seated, err) = stdout(
@@ -164,7 +165,7 @@ fn chatroom_history_sender_since_and_after() {
     assert_eq!(code, 0, "{err} {seated}");
     assert_eq!(
         serde_json::from_str::<Value>(seated.trim()).expect("json")["sender"].as_str(),
-        Some(seat.as_str())
+        Some(name.as_str())
     );
     let (code, filtered, err) = stdout(
         env.rig()
@@ -199,7 +200,7 @@ fn chatroom_history_sender_since_and_after() {
     ]));
     assert_eq!(code, 0, "{err}");
     assert!(
-        past.contains("from-op") && past.contains("from-seat"),
+        past.contains("from-op") && past.contains(&format!("[{name}] from-seat")),
         "{past}"
     );
     let first = rows[0]["id"].as_str().expect("id");
@@ -232,7 +233,7 @@ fn chatroom_clear_prints_deleted_count() {
 fn chatroom_wrong_token_is_rejected() {
     let env = Env::new();
     up(&env);
-    let (seat, _) = seat_proof(&env);
+    let (seat, _, _) = seat_proof(&env);
     let (code, out, err) = stdout(
         env.rig()
             .env("RIG_SEAT_ID", &seat)
@@ -293,4 +294,82 @@ fn chatroom_watch_prints_and_exits_on_sigint() {
     let status = child.wait().expect("wait");
     assert!(seen.contains("[operator] streamed"), "{seen}");
     assert!(status.success(), "{status} {seen}");
+}
+
+#[test]
+fn chatroom_watch_prints_the_small_message_after_a_large_one() {
+    let env = Env::new();
+    up(&env);
+    let mut child = env
+        .rig()
+        .args(["chatroom", "watch", "pair"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("watch");
+    let mut stdout_pipe = child.stdout.take().expect("stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut raw = Vec::new();
+        let mut buf = [0_u8; 256];
+        loop {
+            match stdout_pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if let Some(chunk) = buf.get(..n) {
+                        raw.extend_from_slice(chunk);
+                    }
+                    drop(tx.send(String::from_utf8_lossy(&raw).into_owned()));
+                }
+            }
+        }
+    });
+    let (code, _, err) = stdout(env.rig().args(["chatroom", "send", "pair", "ready"]));
+    assert_eq!(code, 0, "{err}");
+    let ready = wait_for(&rx, "[operator] ready");
+    assert!(ready.contains("[operator] ready"), "{ready}");
+    let huge = "a".repeat(crewmux_api::MAX_CHAT_BODY.saturating_add(1));
+    let (code, out, err) = stdout(env.rig().args(["chatroom", "send", "pair", &huge]));
+    assert_ne!(code, 0, "{out} {err}");
+    assert!(err.contains("too large"), "{err}");
+    let (code, _, err) = stdout(env.rig().args(["chatroom", "send", "pair", "kept-small"]));
+    assert_eq!(code, 0, "{err}");
+    let seen = wait_for(&rx, "[operator] kept-small");
+    if child.try_wait().expect("poll").is_none() {
+        let raw = i32::try_from(child.id()).expect("pid");
+        let pid = rustix::process::Pid::from_raw(raw).expect("pid");
+        rustix::process::kill_process(pid, rustix::process::Signal::INT).expect("int");
+    }
+    let status = child.wait().expect("wait");
+    let watch_err = child
+        .stderr
+        .take()
+        .map(|mut pipe| {
+            let mut text = String::new();
+            drop(pipe.read_to_string(&mut text));
+            text
+        })
+        .unwrap_or_default();
+    assert!(
+        seen.contains("[operator] kept-small") || (!watch_err.is_empty() && !status.success()),
+        "stdout={seen} stderr={watch_err} status={status}"
+    );
+}
+
+fn wait_for(rx: &std::sync::mpsc::Receiver<String>, needle: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut seen = String::new();
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(text) => {
+                seen = text;
+                if seen.contains(needle) {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    seen
 }

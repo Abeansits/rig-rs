@@ -70,9 +70,25 @@ pub struct TmuxMux {
 impl Drop for TmuxMux {
     fn drop(&mut self) {
         self.cancel.cancel();
+        let binary = self.binary.clone();
+        let socket = self.socket.clone();
+        let killer = std::thread::spawn(move || kill_server(&binary, &socket));
+        drop(killer.join());
         self.control.abort();
         self.tracker.close();
     }
+}
+
+fn kill_server(binary: &str, socket: &str) {
+    let mut command = std::process::Command::new(binary);
+    command
+        .args(["-L", socket, "-f", "/dev/null", "kill-server"])
+        .env_remove("TMUX")
+        .env_remove("TMUX_TMPDIR")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    drop(command.status());
 }
 
 impl TmuxMux {

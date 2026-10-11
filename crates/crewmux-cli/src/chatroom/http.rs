@@ -97,7 +97,7 @@ pub(super) fn topic(rig: &str, name: &str, body: Option<&str>, json: bool) -> Re
         output::stdout_line(response.body.trim());
         return Ok(0);
     }
-    output::stdout_line(&format!("--- topic: {name} ---"));
+    output::stdout_line(&format!("--- topic: {} ---", escape_controls(name)));
     Ok(0)
 }
 
@@ -115,7 +115,10 @@ pub(super) fn clear(rig: &str, json: bool) -> Result<i32, Error> {
     }
     let value = parse(&response.body)?;
     let deleted = value.get("deleted").and_then(Value::as_u64).unwrap_or(0);
-    output::stdout_line(&format!("Cleared {deleted} messages from {rig} chatroom."));
+    output::stdout_line(&format!(
+        "Cleared {deleted} messages from {} chatroom.",
+        escape_controls(rig)
+    ));
     Ok(0)
 }
 
@@ -230,14 +233,28 @@ fn push_query(path: &mut String, key: &str, value: &str) {
 pub(super) fn format_message(value: &Value) -> String {
     if value.get("kind").and_then(Value::as_str) == Some("topic") {
         let topic = value.get("topic").and_then(Value::as_str).unwrap_or("");
-        return format!("--- topic: {topic} ---");
+        return format!("--- topic: {} ---", escape_controls(topic));
     }
     let sender = value
         .get("sender")
         .and_then(Value::as_str)
         .unwrap_or("operator");
     let body = value.get("body").and_then(Value::as_str).unwrap_or("");
-    format!("[{sender}] {body}")
+    format!("[{}] {}", escape_controls(sender), escape_controls(body))
+}
+
+/// C0, DEL, and C1 become `\xNN` so a body cannot inject ESC, OSC, or NUL.
+fn escape_controls(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        let code = u32::from(ch);
+        if code < 0x20 || (0x7f..0xa0).contains(&code) {
+            let _ = write!(out, "\\x{code:02x}");
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn parse(body: &str) -> Result<Value, Error> {
@@ -265,4 +282,29 @@ fn fail(status: u16, body: &str, json_stdout: bool) -> Result<i32, Error> {
             }
         });
     Err(Error::User(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_message;
+    use serde_json::json;
+
+    #[test]
+    fn human_line_escapes_esc_osc_and_nul() {
+        let value = json!({
+            "kind": "message",
+            "sender": "one",
+            "body": "a\u{0000}b\u{001b}]0;title\u{0007}c"
+        });
+        let line = format_message(&value);
+        assert!(!line.contains('\u{1b}'));
+        assert!(!line.contains('\0'));
+        assert!(line.contains("\\x00"), "{line}");
+        assert!(line.contains("\\x1b"), "{line}");
+        assert!(line.contains("\\x07"), "{line}");
+        let topic = json!({"kind": "topic", "topic": "go\u{001b}"});
+        let marker = format_message(&topic);
+        assert!(!marker.contains('\u{1b}'));
+        assert!(marker.contains("\\x1b"), "{marker}");
+    }
 }

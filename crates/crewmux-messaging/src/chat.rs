@@ -19,6 +19,8 @@ pub struct SeatProof<'a> {
     pub token: &'a str,
     /// Token stored at launch, when this seat has one.
     pub stored_token: Option<&'a str>,
+    /// Seat name to store when the token matches. Absent in unit proofs.
+    pub name: Option<&'a str>,
 }
 
 /// Decide who a chat write is from.
@@ -47,17 +49,40 @@ fn authenticated_seat(
     claimed: Option<&str>,
 ) -> Result<SenderRef, ChatError> {
     let stored = proof.stored_token.ok_or(ChatError::UnknownSender)?;
-    if stored != proof.token || proof.token.is_empty() {
+    if !tokens_match(stored, proof.token) {
         return Err(ChatError::UnknownSender);
     }
     let seat = SeatId::from_str(proof.seat_id).map_err(|_| ChatError::UnknownSender)?;
-    let sender = SenderRef::seat(seat);
-    if let Some(claimed) = claimed
-        && claimed != sender.as_str()
-    {
-        return Err(ChatError::UnknownSender);
+    let sender = match proof.name {
+        Some(name) => SenderRef::parse(name).map_err(|_| ChatError::UnknownSender)?,
+        None => SenderRef::seat(seat),
+    };
+    if let Some(claimed) = claimed {
+        let id = seat.to_string();
+        if claimed != sender.as_str() && claimed != id.as_str() {
+            return Err(ChatError::UnknownSender);
+        }
     }
     Ok(sender)
+}
+
+/// Compare tokens without returning at the first differing byte.
+fn tokens_match(stored: &str, presented: &str) -> bool {
+    if presented.is_empty() {
+        return false;
+    }
+    let left = stored.as_bytes();
+    let right = presented.as_bytes();
+    let mut diff = left.len() ^ right.len();
+    let width = left.len().max(right.len());
+    let mut index = 0;
+    while index < width {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(a ^ b);
+        index = index.saturating_add(1);
+    }
+    diff == 0
 }
 
 fn unauthenticated(claimed: Option<&str>) -> Result<SenderRef, ChatError> {
@@ -100,6 +125,7 @@ mod tests {
             seat_id: &seat_text,
             token: "token-a",
             stored_token: Some("token-a"),
+            name: None,
         };
         assert_eq!(
             resolve_sender(Some(proof), None).expect("seat"),
@@ -109,6 +135,7 @@ mod tests {
             seat_id: &seat_text,
             token: "nope",
             stored_token: Some("token-a"),
+            name: None,
         };
         assert_eq!(
             resolve_sender(Some(wrong), None).expect_err("token"),
@@ -118,10 +145,33 @@ mod tests {
             seat_id: &seat_text,
             token: "token-a",
             stored_token: Some("token-a"),
+            name: None,
         };
         assert_eq!(
             resolve_sender(Some(mismatched_claim), Some("mallory")).expect_err("claim"),
             ChatError::UnknownSender
+        );
+        let named = SeatProof {
+            seat_id: &seat_text,
+            token: "token-a",
+            stored_token: Some("token-a"),
+            name: Some("one"),
+        };
+        assert_eq!(
+            resolve_sender(Some(named), None).expect("name").as_str(),
+            "one"
+        );
+        let named_id = SeatProof {
+            seat_id: &seat_text,
+            token: "token-a",
+            stored_token: Some("token-a"),
+            name: Some("one"),
+        };
+        assert_eq!(
+            resolve_sender(Some(named_id), Some(seat_text.as_str()))
+                .expect("id claim")
+                .as_str(),
+            "one"
         );
     }
 }

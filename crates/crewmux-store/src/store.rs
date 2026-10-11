@@ -1,5 +1,6 @@
 //! Single-writer SQLite actor. Reads share that connection so `:memory:` works.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
@@ -140,5 +141,27 @@ fn prepare(path: &Path) -> Result<Connection, Error> {
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.busy_timeout(Duration::from_millis(5000))?;
     migrate(&mut conn)?;
+    private_db_files(path)?;
     Ok(conn)
+}
+
+/// `rig.db`, `rig.db-wal`, and `rig.db-shm` are owner-only.
+fn private_db_files(path: &Path) -> Result<(), Error> {
+    if path == Path::new(":memory:") {
+        return Ok(());
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let mut owned = path.as_os_str().to_os_string();
+        owned.push(suffix);
+        let file = std::path::PathBuf::from(owned);
+        match std::fs::metadata(&file) {
+            Ok(_) => {
+                let perms = std::fs::Permissions::from_mode(0o600);
+                std::fs::set_permissions(&file, perms)?;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
 }

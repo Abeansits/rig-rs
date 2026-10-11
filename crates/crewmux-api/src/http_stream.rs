@@ -20,6 +20,10 @@ pub struct HttpStream {
     decoded_pos: usize,
     mode: BodyMode,
     eof: bool,
+    /// Bytes of an oversized chunk still to drop, including its trailing CRLF.
+    skip_left: usize,
+    /// Timeouts while discarding. A peer that stops mid-frame must not spin.
+    skip_stalls: u32,
 }
 
 enum BodyMode {
@@ -102,11 +106,12 @@ impl HttpStream {
             match self.io.read(&mut tmp) {
                 Ok(0) => return self.finish_socket_eof(),
                 Ok(n) => {
+                    self.skip_stalls = 0;
                     if let Some(chunk) = tmp.get(..n) {
                         self.raw.extend_from_slice(chunk);
                     }
                 }
-                Err(err) => return Err(err),
+                Err(err) => return Err(self.stall_or_pass(err)),
             }
         }
     }
@@ -163,6 +168,9 @@ impl HttpStream {
     }
 
     fn pull_chunk(&mut self) -> io::Result<bool> {
+        if self.skip_left > 0 {
+            return self.finish_skip();
+        }
         let unread = self.raw.get(self.raw_pos..).unwrap_or(&[]);
         let Some(line_at) = find_crlf(unread) else {
             if unread.len() > MAX_CHUNK {
@@ -173,12 +181,23 @@ impl HttpStream {
         let line = unread.get(..line_at).unwrap_or(&[]);
         let text = std::str::from_utf8(line)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "chunk size"))?;
-        let size = chunk_size(text)?;
         let data_at = line_at.saturating_add(2);
+        let size = match chunk_size(text) {
+            Ok(size) => size,
+            Err(err) => {
+                self.raw_pos = self.raw_pos.saturating_add(data_at);
+                return Err(err);
+            }
+        };
         if size == 0 {
             self.raw_pos = self.raw_pos.saturating_add(data_at);
             self.eof = true;
             return Ok(true);
+        }
+        if size > MAX_CHUNK {
+            self.raw_pos = self.raw_pos.saturating_add(data_at);
+            self.skip_left = size.saturating_add(2);
+            return self.finish_skip();
         }
         let need = data_at.saturating_add(size).saturating_add(2);
         if unread.len() < need {
@@ -192,7 +211,41 @@ impl HttpStream {
         Ok(true)
     }
 
+    /// Drop an oversized chunk, then report it once so the caller can continue.
+    fn finish_skip(&mut self) -> io::Result<bool> {
+        let unread = self.raw.get(self.raw_pos..).unwrap_or(&[]);
+        let take = self.skip_left.min(unread.len());
+        self.raw_pos = self.raw_pos.saturating_add(take);
+        self.skip_left = self.skip_left.saturating_sub(take);
+        if self.skip_left > 0 {
+            return Ok(false);
+        }
+        self.skip_stalls = 0;
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "chunk too large",
+        ))
+    }
+
+    /// A discard that receives no bytes is a stall, not a quiet timeout.
+    fn stall_or_pass(&mut self, err: io::Error) -> io::Error {
+        if self.skip_left == 0 || !is_timeout(&err) {
+            return err;
+        }
+        self.skip_stalls = self.skip_stalls.saturating_add(1);
+        if self.skip_stalls > SKIP_STALLS {
+            return io::Error::new(io::ErrorKind::InvalidData, "chunk too large");
+        }
+        err
+    }
+
     fn finish_socket_eof(&mut self) -> io::Result<()> {
+        if self.skip_left > 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "truncated HTTP body",
+            ));
+        }
         let unread = self.raw.get(self.raw_pos..).unwrap_or(&[]);
         match self.mode {
             BodyMode::UntilClose => {
@@ -266,6 +319,8 @@ fn read_headers(mut stream: IoStream, target: &str) -> Result<HttpStream, Error>
         decoded_pos: 0,
         mode,
         eof: false,
+        skip_left: 0,
+        skip_stalls: 0,
     })
 }
 
@@ -302,13 +357,93 @@ fn find_crlf(buf: &[u8]) -> Option<usize> {
 
 fn chunk_size(text: &str) -> io::Result<usize> {
     let hex = text.split(';').next().unwrap_or(text).trim();
-    let size = usize::from_str_radix(hex, 16)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "chunk size"))?;
-    if size > MAX_CHUNK {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "chunk too large",
-        ));
+    usize::from_str_radix(hex, 16)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "chunk size"))
+}
+
+fn is_timeout(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
+}
+
+/// Timeouts at the watch interval before an unfinished oversized chunk is an error.
+const SKIP_STALLS: u32 = 25;
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    use super::{MAX_CHUNK, chunk_size};
+    use crate::Client;
+
+    #[test]
+    fn oversized_chunk_is_skipped_and_the_next_frame_is_readable() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0_u8; 1024];
+            let mut raw = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).expect("read req");
+                if n == 0 {
+                    return;
+                }
+                if let Some(chunk) = buf.get(..n) {
+                    raw.extend_from_slice(chunk);
+                }
+                if raw.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let mut body = Vec::new();
+            body.extend_from_slice(&chunk_bytes(&vec![b'A'; MAX_CHUNK.saturating_add(1)]));
+            body.extend_from_slice(&chunk_bytes(b"data: tiny\n"));
+            body.extend_from_slice(b"0\r\n\r\n");
+            let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n";
+            stream.write_all(head).expect("head");
+            stream.write_all(&body).expect("body");
+        });
+        let client = Client::over_tcp(addr);
+        let mut stream = client.open("GET", "/watch", &[]).expect("open");
+        let mut got = Vec::new();
+        let mut skipped = false;
+        let mut buf = [0_u8; 64];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Some(chunk) = buf.get(..n) {
+                        got.extend_from_slice(chunk);
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                    skipped = true;
+                }
+                Err(err) => panic!("read: {err}"),
+            }
+        }
+        server.join().expect("server");
+        assert!(skipped);
+        let text = String::from_utf8_lossy(&got);
+        assert!(text.contains("tiny"), "{text}");
+        assert!(!text.contains('A'), "{text}");
     }
-    Ok(size)
+
+    #[test]
+    fn chunk_size_parses_hex_without_capping() {
+        assert_eq!(chunk_size("10").expect("size"), 16);
+        assert!(chunk_size("zz").is_err());
+    }
+
+    fn chunk_bytes(data: &[u8]) -> Vec<u8> {
+        let mut out = format!("{:x}\r\n", data.len()).into_bytes();
+        out.extend_from_slice(data);
+        out.extend_from_slice(b"\r\n");
+        out
+    }
 }

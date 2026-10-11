@@ -15,13 +15,13 @@ use super::route_support::{
     boot, enc, exchange, history_path, json, rig, seat_headers, seated, seed, stamp,
 };
 
-struct Reader {
+pub(super) struct Reader {
     stop: Arc<AtomicBool>,
     rx: std::sync::mpsc::Receiver<String>,
 }
 
 impl Reader {
-    fn open(sock: PathBuf, path: String, headers: Vec<(String, String)>) -> Self {
+    pub(super) fn open(sock: PathBuf, path: String, headers: Vec<(String, String)>) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
@@ -72,7 +72,7 @@ impl Reader {
         Self { stop, rx }
     }
 
-    async fn until(&self, needle: &str) -> String {
+    pub(super) async fn until(&self, needle: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut last = String::new();
         while Instant::now() < deadline {
@@ -499,7 +499,7 @@ async fn send_matching_token_is_the_seat() {
     )
     .await;
     assert_eq!(response.status, 201);
-    assert_eq!(json(&response.body)["sender"], seat.to_string());
+    assert_eq!(json(&response.body)["sender"], "one");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

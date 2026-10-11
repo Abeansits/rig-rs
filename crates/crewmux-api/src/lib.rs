@@ -14,7 +14,7 @@ mod read;
 
 pub use chat::{
     CHAT_MESSAGE_TYPE, ChatClear, ChatHistory, ChatSend, ChatTopic, ChatWatch, ChatWatchEvent,
-    ChatWire, RigSummary, RigSummaryRow,
+    ChatWire, MAX_CHAT_BODY, RigSummary, RigSummaryRow,
 };
 pub use client::{
     Client, HttpStream, MAX_SUN_PATH_BYTES, Response, daemon_bind_path, daemon_socket, path_bytes,

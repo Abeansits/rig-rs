@@ -79,7 +79,7 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 ## PE-011: chat sender is a seat token, not `X-OpenRig-Session`
 
 - **TS behaviour:** `requireSenderIdentity` deliver-and-label. No header and no body sender is `400 actor_required`. No header plus `body.sender` stores that claim. A header supersedes a different body sender and still returns 201. The CLI echoes `OPENRIG_SESSION_NAME` or `[you]`.
-- **Rust behaviour:** `RIG_SEAT_ID` and `RIG_SEAT_TOKEN` are stamped into the seat process at launch and checked against `seat_tokens`. A matching pair attributes the row to that seat. No seat headers, and no claim or a claim of `operator`, attributes the row to `operator`. A claim of anyone else, a wrong token, or a partial header pair is `unknown sender`. There is no spoofable `--sender` on `rig chatroom send`. The human send line is `[operator]` outside a seat.
+- **Rust behaviour:** `RIG_SEAT_ID` and `RIG_SEAT_TOKEN` are stamped into the seat process at launch and checked against `seat_tokens`. A matching pair attributes the row to that seat's name, and only when the seat belongs to the rig in the path. No seat headers, and no claim or a claim of `operator`, attributes the row to `operator`. A claim of anyone else, a wrong token, a partial header pair, or a seat from another rig is rejected. There is no spoofable `--sender` on `rig chatroom send`. The human send line is `[operator]` outside a seat and `[name]` for a seat.
 - **Required test:** `send_outside_seat_is_operator`, `send_spoofed_sender_is_rejected`, `send_wrong_token_is_rejected`, `send_matching_token_is_the_seat`, and `send_token_mismatch_claim_is_rejected`.
 
 ## PE-012: history page and unknown topic

@@ -31,23 +31,33 @@ pub(super) fn run(rig: &str, json: bool) -> Result<i32, Error> {
     let _hook = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&stop))
         .map_err(Error::Io)?;
     let mut pending = Vec::new();
+    let mut discarding = false;
     let mut buf = [0_u8; 1024];
+    let mut skips = 0_u32;
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(0);
         }
         match stream.read(&mut buf) {
             Ok(0) => {
-                emit_lines(&mut pending, json);
+                emit_lines(&mut pending, json, &mut discarding);
                 return Ok(0);
             }
             Ok(n) => {
+                skips = 0;
                 if let Some(chunk) = buf.get(..n) {
                     pending.extend_from_slice(chunk);
                 }
-                emit_lines(&mut pending, json);
+                emit_lines(&mut pending, json, &mut discarding);
             }
             Err(err) if timed_out(&err) => {}
+            Err(err) if oversized(&err) => {
+                skips = skips.saturating_add(1);
+                output::stderr_line("warning: skipped an oversized chat frame");
+                if skips > SKIP_LIMIT {
+                    return Err(Error::Io(err));
+                }
+            }
             Err(err) => {
                 if stop.load(Ordering::Relaxed) {
                     return Ok(0);
@@ -58,8 +68,32 @@ pub(super) fn run(rig: &str, json: bool) -> Result<i32, Error> {
     }
 }
 
-fn emit_lines(pending: &mut Vec<u8>, json: bool) {
+/// A frame this long is past the chat body cap plus the SSE envelope.
+const MAX_LINE: usize = 128 * 1024;
+/// Repeated oversized-frame errors mean the stream is not making progress.
+const SKIP_LIMIT: u32 = 4;
+
+fn emit_lines(pending: &mut Vec<u8>, json: bool, discarding: &mut bool) {
+    if *discarding {
+        let Some(at) = pending.iter().position(|byte| *byte == b'\n') else {
+            pending.clear();
+            return;
+        };
+        let rest = pending.get(at.saturating_add(1)..).unwrap_or(&[]).to_vec();
+        *pending = rest;
+        *discarding = false;
+    }
+    if pending.len() > MAX_LINE && !pending.contains(&b'\n') {
+        output::stderr_line("warning: skipped an oversized chat frame");
+        pending.clear();
+        *discarding = true;
+        return;
+    }
     for line in take_lines(pending) {
+        if line.len() > MAX_LINE {
+            output::stderr_line("warning: skipped an oversized chat frame");
+            continue;
+        }
         print_data(&line, json);
     }
 }
@@ -108,4 +142,8 @@ fn timed_out(err: &std::io::Error) -> bool {
         err.kind(),
         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
     )
+}
+
+fn oversized(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::InvalidData
 }

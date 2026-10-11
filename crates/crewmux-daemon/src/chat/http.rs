@@ -12,13 +12,15 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use crewmux_api::{ChatWire, RigSummaryRow};
-use crewmux_core::RigRepo;
+use crewmux_api::{ChatWire, MAX_CHAT_BODY, RigSummaryRow};
 use crewmux_core::chat::{ChatError, ChatMessage, ChatRepo, HistoryQuery, NewChat, NewTopic};
 use crewmux_core::chat::{format_sqlite_utc, parse_since, rejected_since};
+use crewmux_core::{RigRepo, SeatRepo};
 use crewmux_messaging::chat::{SeatProof, resolve_sender};
 use crewmux_store::{Db, seat_token};
-use crewmux_types::{ChatCursor, RigId, SEAT_ID_HEADER, SEAT_TOKEN_HEADER, SenderRef, TopicId};
+use crewmux_types::{
+    ChatCursor, ChatId, RigId, SEAT_ID_HEADER, SEAT_TOKEN_HEADER, SeatId, SenderRef, TopicId,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -72,8 +74,11 @@ async fn send(
     else {
         return json_error(StatusCode::BAD_REQUEST, "Missing body");
     };
+    if let Some(reject) = reject_large(text) {
+        return reject.response();
+    }
     let claimed = obj.get("sender").and_then(Value::as_str);
-    let sender = match authenticate(&app, &headers, claimed).await {
+    let sender = match authenticate(&app, &rig, &headers, claimed).await {
         Ok(sender) => sender,
         Err(err) => return err.response(),
     };
@@ -150,7 +155,7 @@ async fn watch_route(
     let Some(rig) = parse_rig(&rig_id) else {
         return json_error(StatusCode::BAD_REQUEST, "invalid rig id");
     };
-    let after = match cursor_filter(header_str(&headers, "last-event-id")) {
+    let after = match resume_cursor(header_str(&headers, "last-event-id")) {
         Ok(after) => after,
         Err(err) => return err.response(),
     };
@@ -179,8 +184,11 @@ async fn topic(
         return json_error(StatusCode::BAD_REQUEST, "invalid topic");
     };
     let text = obj.get("body").and_then(Value::as_str).unwrap_or("");
+    if let Some(reject) = reject_large(text) {
+        return reject.response();
+    }
     let claimed = obj.get("sender").and_then(Value::as_str);
-    let sender = match authenticate(&app, &headers, claimed).await {
+    let sender = match authenticate(&app, &rig, &headers, claimed).await {
         Ok(sender) => sender,
         Err(err) => return err.response(),
     };
@@ -246,36 +254,81 @@ async fn unknown_topic(app: &App, rig: &RigId, topic: Option<&TopicId>) -> Optio
 
 async fn authenticate(
     app: &App,
+    rig: &RigId,
     headers: &HeaderMap,
     claimed: Option<&str>,
 ) -> Result<SenderRef, Reject> {
     match presented(headers) {
         Presented::Partial => Err(Reject::new(StatusCode::BAD_REQUEST, "unknown sender")),
         Presented::None => resolve_sender(None, claimed).map_err(|err| chat_reject(&err)),
-        Presented::Pair { seat, token } => {
-            let stored = lookup_token(app, &seat).await?;
-            let proof = SeatProof {
-                seat_id: &seat,
-                token: &token,
-                stored_token: stored.as_deref(),
-            };
-            resolve_sender(Some(proof), claimed).map_err(|err| chat_reject(&err))
-        }
+        Presented::Pair { seat, token } => seat_sender(app, rig, &seat, &token, claimed).await,
     }
 }
 
-async fn lookup_token(app: &App, seat: &str) -> Result<Option<String>, Reject> {
-    let seat_id = crewmux_types::SeatId::from_str(seat)
+async fn seat_sender(
+    app: &App,
+    rig: &RigId,
+    seat: &str,
+    token: &str,
+    claimed: Option<&str>,
+) -> Result<SenderRef, Reject> {
+    let auth = lookup_seat(app, seat).await?;
+    let stored = auth.as_ref().and_then(|row| row.token.as_deref());
+    let name = auth.as_ref().map(|row| row.name.as_str());
+    let proof = SeatProof {
+        seat_id: seat,
+        token,
+        stored_token: stored,
+        name,
+    };
+    let sender = resolve_sender(Some(proof), claimed).map_err(|err| chat_reject(&err))?;
+    if let Some(row) = auth.as_ref()
+        && row.rig_id != *rig
+    {
+        return Err(Reject::new(
+            StatusCode::FORBIDDEN,
+            "seat is not in this rig",
+        ));
+    }
+    Ok(sender)
+}
+
+async fn lookup_seat(app: &App, seat: &str) -> Result<Option<SeatAuth>, Reject> {
+    let seat_id = SeatId::from_str(seat)
         .map_err(|_| Reject::new(StatusCode::BAD_REQUEST, "unknown sender"))?;
     let store = Arc::clone(&app.store);
-    let joined = tokio::task::spawn_blocking(move || {
-        store
-            .read(move |conn| seat_token(conn, &seat_id).map_err(crewmux_store::Error::from))
-            .map_err(crewmux_store::Error::into_chat)
-    })
-    .await
-    .map_err(|err| Reject::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let joined = tokio::task::spawn_blocking(move || load_seat(&store, seat_id))
+        .await
+        .map_err(|err| Reject::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     joined.map_err(|err| chat_reject(&err))
+}
+
+fn load_seat(store: &crewmux_store::Store, seat_id: SeatId) -> Result<Option<SeatAuth>, ChatError> {
+    store
+        .read(move |conn| {
+            let found = match SeatRepo::get(&crewmux_store::Db::new(conn), &seat_id) {
+                Ok(seat) => seat,
+                Err(crewmux_core::Error::SeatNotFound(_)) => return Ok(None),
+                Err(
+                    err @ (crewmux_core::Error::RigNotFound(_)
+                    | crewmux_core::Error::Invalid(_)
+                    | crewmux_core::Error::Store(_)),
+                ) => return Err(err.into()),
+            };
+            let token = seat_token(conn, &seat_id)?;
+            Ok(Some(SeatAuth {
+                rig_id: found.rig_id,
+                name: found.name.as_str().to_owned(),
+                token,
+            }))
+        })
+        .map_err(crewmux_store::Error::into_chat)
+}
+
+struct SeatAuth {
+    rig_id: RigId,
+    name: String,
+    token: Option<String>,
 }
 
 fn presented(headers: &HeaderMap) -> Presented {
@@ -334,6 +387,27 @@ fn topic_filter(value: Option<&str>) -> Result<Option<TopicId>, Reject> {
         Some(text) => TopicId::new(text)
             .map(Some)
             .map_err(|_| Reject::new(StatusCode::BAD_REQUEST, format!("unknown topic: {text}"))),
+    }
+}
+
+fn resume_cursor(value: Option<&str>) -> Result<Option<ChatCursor>, Reject> {
+    match value.filter(|text| !text.is_empty()) {
+        None => Ok(None),
+        Some(text) => match ChatId::from_str(text) {
+            Ok(id) => Ok(Some(ChatCursor::from_chat_id(id))),
+            Err(_) => Err(Reject::new(StatusCode::BAD_REQUEST, "invalid cursor")),
+        },
+    }
+}
+
+fn reject_large(text: &str) -> Option<Reject> {
+    if text.len() > MAX_CHAT_BODY {
+        Some(Reject::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "message is too large",
+        ))
+    } else {
+        None
     }
 }
 

@@ -19,7 +19,7 @@ pub(crate) struct ChatroomArgs {
 
 #[derive(Debug, Subcommand)]
 enum ChatCmd {
-    /// Post a message. The sender is the seat token, or `operator`.
+    /// Post a message. The sender is the seat name, or `operator`.
     Send {
         /// Rig name.
         rig: String,
