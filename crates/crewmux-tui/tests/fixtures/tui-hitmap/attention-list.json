@@ -1,0 +1,124 @@
+{
+  "screen": "attention-list",
+  "source": "openrig v0.6.9",
+  "cols": 120,
+  "rows": 40,
+  "shift_reason": "Coordinates are ratatui widget rects. ADR-0004 does not require cell parity with the TypeScript renderer, so hits are compared by action kind and target.",
+  "hits": [
+    {
+      "y": 3,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "topology"
+      },
+      "identity": null
+    },
+    {
+      "y": 4,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "specs"
+      },
+      "identity": null
+    },
+    {
+      "y": 5,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "scopes"
+      },
+      "identity": null
+    },
+    {
+      "y": 6,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "terminals"
+      },
+      "identity": null
+    },
+    {
+      "y": 6,
+      "x1": 33,
+      "x2": 120,
+      "raw": {
+        "type": "attention-open",
+        "id": "queue:q1"
+      },
+      "identity": {
+        "kind": "attention",
+        "target": "queue:q1"
+      }
+    },
+    {
+      "y": 7,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "needs"
+      },
+      "identity": null
+    },
+    {
+      "y": 8,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "attention-category",
+        "category": "action"
+      },
+      "identity": null
+    },
+    {
+      "y": 9,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "attention-category",
+        "category": "update"
+      },
+      "identity": null
+    },
+    {
+      "y": 9,
+      "x1": 33,
+      "x2": 120,
+      "raw": {
+        "type": "attention-open",
+        "id": "queue:q2"
+      },
+      "identity": {
+        "kind": "attention",
+        "target": "queue:q2"
+      }
+    },
+    {
+      "y": 10,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "back"
+      },
+      "identity": null
+    },
+    {
+      "y": 11,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "system"
+      },
+      "identity": null
+    }
+  ]
+}

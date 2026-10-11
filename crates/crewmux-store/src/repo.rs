@@ -221,6 +221,38 @@ impl EventLog for Db<'_> {
         }
         Ok(events)
     }
+
+    fn after(&self, after: Seq) -> Result<Vec<(Seq, DomainEvent)>, CoreError> {
+        let bound = i64::try_from(after.0).unwrap_or(i64::MAX);
+        let mut stmt = self
+            .prepare("SELECT seq, payload FROM events WHERE seq > ?1 ORDER BY seq LIMIT 32")
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![bound], |row| {
+                let seq: i64 = row.get(0)?;
+                let payload: String = row.get(1)?;
+                Ok((seq, payload))
+            })
+            .map_err(db)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db)?;
+        let mut events = Vec::with_capacity(rows.len());
+        for (seq, payload) in rows {
+            let event =
+                serde_json::from_str(&payload).map_err(|err| CoreError::Store(err.to_string()))?;
+            events.push((Seq(u64::try_from(seq).unwrap_or(0)), event));
+        }
+        Ok(events)
+    }
+
+    fn tip(&self) -> Result<Seq, CoreError> {
+        let seq: i64 = self
+            .query_row("SELECT COALESCE(MAX(seq), 0) FROM events", [], |row| {
+                row.get(0)
+            })
+            .map_err(db)?;
+        Ok(Seq(u64::try_from(seq).unwrap_or(0)))
+    }
 }
 
 fn seat_sql(tail: &str) -> String {

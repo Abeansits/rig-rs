@@ -1,4 +1,7 @@
 //! `GET /api/events` over SSE and WebSocket, plus `/api/queue/watch`.
+//!
+//! This hub-backed handler is the canonical stream. It replaces the interim
+//! event-log tail on the same path and the same `{id, type, payload}` envelope.
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -15,6 +18,9 @@ use tokio::sync::mpsc;
 
 use crate::hub::Missed;
 use crate::state::App;
+
+/// Route the TUI opens. The interim tail used this path.
+pub(crate) const PATH: &str = "/api/events";
 
 pub(crate) async fn events(State(app): State<App>, req: Request) -> Response {
     app.touch();

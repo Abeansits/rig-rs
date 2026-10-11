@@ -1,6 +1,7 @@
 //! `rig` verbs. State changes go through the daemon; this crate does not link it.
 //!
 //! `setup` plans provider, tmux, skill, and install steps. `doctor` is read-only.
+//! The binary dispatches `tui` before clap so `rig --help` stays the setup/doctor list.
 
 mod autostart;
 mod command;
@@ -18,9 +19,11 @@ mod setup_cmd;
 mod setup_plan;
 mod slice4;
 mod spawn;
+mod tui_cmd;
 
 pub use error::Error;
-pub use output::{print_stderr, print_stdout};
+pub use output::{error_line, print_stderr, print_stdout};
+pub use tui_cmd::{report, run as run_tui};
 
 /// Report whether a daemon is listening. Does not start one.
 ///

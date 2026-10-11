@@ -186,7 +186,7 @@ impl FromStr for SessionId {
 }
 
 /// Rig name as written in a spec. Not an id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RigName(String);
 

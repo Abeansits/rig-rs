@@ -31,6 +31,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: test
         run: cargo test --workspace --locked
+      - name: Release 20-seat render budget
+        run: cargo test -p crewmux-tui --release --locked --lib render_tests::twenty_seat_frame_is_under_five_milliseconds_in_release -- --exact
 
   # ---- QA Bot additions (new jobs only) ----
   nextest:

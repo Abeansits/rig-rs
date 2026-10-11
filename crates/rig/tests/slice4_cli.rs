@@ -176,7 +176,7 @@ fn tui_client_resumes_canonical_events() {
     ]));
     assert_eq!(code, 0, "{err}");
     let socket = crewmux_api::daemon_socket(&env.rig_home);
-    let first = crewmux_tui::read_events(&socket, None, 1, Duration::from_secs(5)).expect("sse");
+    let first = tui_events(&socket, None, 1).expect("sse");
     let last = first.first().expect("event").id;
     assert!(last >= 1);
     let (code, _, err) = json_out(env.rig().args([
@@ -192,8 +192,7 @@ fn tui_client_resumes_canonical_events() {
         "second",
     ]));
     assert_eq!(code, 0, "{err}");
-    let more =
-        crewmux_tui::read_events(&socket, Some(last), 8, Duration::from_secs(5)).expect("resume");
+    let more = tui_events(&socket, Some(last), 8).expect("resume");
     assert!(
         more.iter().any(|event| event.id > last),
         "missed events: {more:?}"
@@ -203,4 +202,21 @@ fn tui_client_resumes_canonical_events() {
             .all(|event| event.kind != crewmux_api::StreamKind::Gap),
         "backlog should still hold both creates: {more:?}"
     );
+}
+
+fn tui_events(
+    socket: &std::path::Path,
+    last: Option<u64>,
+    limit: usize,
+) -> Result<Vec<crewmux_api::StreamEvent>, crewmux_tui::Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(crewmux_tui::Error::Runtime)?;
+    runtime.block_on(crewmux_tui::read_events(
+        socket,
+        last,
+        limit,
+        Duration::from_secs(5),
+    ))
 }

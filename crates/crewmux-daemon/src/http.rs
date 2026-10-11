@@ -26,6 +26,7 @@ pub(crate) fn router(app: App) -> Router {
         .route(CaptureSeat::PATH, post(capture_seat))
         .route(AttachInfo::PATH, post(attach))
         .route(RigDown::PATH, post(rig_down))
+        .route(crate::events::PATH, get(crate::events::events))
         .route("/shutdown", post(shutdown))
         .route(
             "/api/queue",
@@ -42,7 +43,6 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/queue/fallback", post(crate::queue_http::fallback))
         .route("/api/queue/update", post(crate::queue_http::update_item))
         .route("/api/queue/watch", get(crate::events::watch))
-        .route("/api/events", get(crate::events::events))
         .route("/api/terminal", get(crate::events::terminal))
         .route("/api/send", post(crate::deliver::send_route))
         .route("/api/broadcast", post(crate::deliver::broadcast_route))

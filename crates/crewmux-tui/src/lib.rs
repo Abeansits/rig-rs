@@ -1,81 +1,53 @@
 //! Terminal UI backed by the daemon API client.
 //!
-//! The event reader speaks the canonical `/api/events` envelope.
+//! The live stream is consumed as [`crewmux_api::StreamEvent`] over `GET /api/events`.
+//! This crate does not depend on the daemon. [`read_events`] is that same client, used
+//! to resume the canonical stream.
 
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::time::Duration;
+mod action;
+mod app;
+mod attach;
+mod control;
+mod error;
+mod guard;
+mod input;
+mod msg;
+mod refresh;
+mod rows;
+mod seat_bits;
+mod sse;
+mod state;
+mod update;
+mod view;
 
-use crewmux_api::StreamEvent;
+pub use action::{Action, CrossLink, HitMap, HitTarget};
+pub use app::{Config, run, run_blocking};
+pub use attach::{LaunchFail, LaunchFn, LaunchRequest, perform, tmux_argv};
+pub use error::Error;
+pub use guard::{CrosstermGuard, TerminalGuard};
+pub use input::{
+    DecodedMouse, Dispatch, HitAction, MouseAction, Perform, decode_mice, dispatch_sgr,
+    resolve_mouse_action, sgr_click,
+};
+pub use msg::{
+    AttachOutcome, AttachTarget, Cmd, ControlCmd, ControlReplyId, KeyEvent, KeyKind, MouseEvent,
+    Msg,
+};
+pub use sse::read_events;
+pub use state::{
+    ConnState, FLASH_WINDOW, IDLE_TICK, LoadState, RowFlash, RowKey, Section, SessionEnv, Size,
+    State, explorer_right, idle_wait,
+};
+pub use update::update;
+pub use view::view;
 
-/// Read up to `limit` SSE events from the daemon socket.
-///
-/// # Errors
-///
-/// Returns a message when the socket cannot be read or a `data:` line is not JSON.
-pub fn read_events(
-    socket: &Path,
-    last_event_id: Option<u64>,
-    limit: usize,
-    timeout: Duration,
-) -> Result<Vec<StreamEvent>, String> {
-    let mut stream = UnixStream::connect(socket).map_err(|err| err.to_string())?;
-    stream
-        .set_read_timeout(Some(timeout))
-        .map_err(|err| err.to_string())?;
-    stream
-        .set_write_timeout(Some(timeout))
-        .map_err(|err| err.to_string())?;
-    let query = last_event_id.map_or(String::new(), |id| format!("?last_event_id={id}"));
-    let request = format!(
-        "GET /api/events{query} HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n"
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|err| err.to_string())?;
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 1024];
-    let mut events = Vec::new();
-    loop {
-        if events.len() >= limit {
-            break;
-        }
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                buf.extend_from_slice(chunk.get(..n).unwrap_or(&[]));
-                events = parse_data(&buf)?;
-                if events.len() >= limit {
-                    events.truncate(limit);
-                    break;
-                }
-            }
-            Err(err)
-                if err.kind() == std::io::ErrorKind::WouldBlock
-                    || err.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                break;
-            }
-            Err(err) => return Err(err.to_string()),
-        }
-    }
-    Ok(events)
-}
-
-fn parse_data(buf: &[u8]) -> Result<Vec<StreamEvent>, String> {
-    let text = String::from_utf8_lossy(buf);
-    let mut events = Vec::new();
-    for line in text.lines() {
-        let Some(payload) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let payload = payload.trim();
-        if payload.is_empty() {
-            continue;
-        }
-        let event = serde_json::from_str(payload).map_err(|err| err.to_string())?;
-        events.push(event);
-    }
-    Ok(events)
-}
+#[cfg(test)]
+mod fake_api;
+#[cfg(test)]
+mod hitmap_tests;
+#[cfg(test)]
+mod parity_tests;
+#[cfg(test)]
+mod render_tests;
+#[cfg(test)]
+mod socket_tests;
