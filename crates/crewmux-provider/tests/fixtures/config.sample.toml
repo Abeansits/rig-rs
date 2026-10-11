@@ -8,4 +8,7 @@ model = "gpt-5" # profile keeps its comment
 command = "other"
 args = ["--flag"] # existing server stays
 
+[projects."/tmp/existing"]
+trust_level = "untrusted" # user project stays
+
 # trailing comment stays

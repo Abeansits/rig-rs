@@ -1,9 +1,9 @@
 //! Format-preserving edits of Codex `config.toml` via `toml_edit`.
 //!
 //! New tables are explicit (`[mcp_servers.<name>]`, `[projects."<path>"]`).
-//! The original bytes are kept and extended; removal writes those bytes back.
+//! They live in a comment-marked block so a later process can remove only those
+//! tables from the bytes on disk.
 
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -11,6 +11,7 @@ use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::atomic::AtomicWrite;
 use crate::backup::Backups;
+use crate::codex_block::{insert_table, strip_block};
 use crate::error::ProviderError;
 
 /// Server name setup writes into `[mcp_servers]`.
@@ -25,8 +26,10 @@ pub fn rig_mcp_command() -> Vec<String> {
 /// How a Codex config relates to the rig server entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodexHealth {
-    /// The file is missing, or the rig entry matches.
+    /// The rig entry is present and matches the command we write.
     Current,
+    /// The file parses and the rig entry is not there.
+    Missing,
     /// The rig entry is present with a different command.
     Drift,
 }
@@ -44,10 +47,12 @@ pub fn classify_config(text: &str) -> Result<CodexHealth, ProviderError> {
         return Ok(CodexHealth::Current);
     };
     let args = cmd.get(1..).unwrap_or(&[]);
-    if mcp_matches(&doc, RIG_MCP_NAME, command, args) || !mcp_exists(&doc, RIG_MCP_NAME) {
+    if mcp_matches(&doc, RIG_MCP_NAME, command, args) {
         Ok(CodexHealth::Current)
-    } else {
+    } else if mcp_exists(&doc, RIG_MCP_NAME) {
         Ok(CodexHealth::Drift)
+    } else {
+        Ok(CodexHealth::Missing)
     }
 }
 
@@ -85,11 +90,7 @@ impl TrustLevel {
 pub struct CodexConfig {
     doc: DocumentMut,
     path: PathBuf,
-    original: String,
     rendered: String,
-    owned_mcp: BTreeSet<String>,
-    owned_projects: BTreeSet<String>,
-    restore_original: bool,
 }
 
 impl CodexConfig {
@@ -110,11 +111,7 @@ impl CodexConfig {
         Ok(Self {
             doc,
             path: path.to_path_buf(),
-            rendered: original.clone(),
-            original,
-            owned_mcp: BTreeSet::new(),
-            owned_projects: BTreeSet::new(),
-            restore_original: false,
+            rendered: original,
         })
     }
 
@@ -158,7 +155,6 @@ impl CodexConfig {
             ],
         );
         self.append_addition(&addition)?;
-        self.owned_mcp.insert(name.to_owned());
         Ok(Change::Added)
     }
 
@@ -185,23 +181,23 @@ impl CodexConfig {
             &[("trust_level", Item::Value(Value::from(level.as_str())))],
         );
         self.append_addition(&addition)?;
-        self.owned_projects.insert(key.into_owned());
         Ok(Change::Added)
     }
 
-    /// Drop every table this value added and restore the bytes from [`Self::load`].
+    /// Remove the marked tables from the loaded bytes.
+    ///
+    /// The markers are read from the text [`Self::load`] got off disk, so a
+    /// later process can drop only those tables and keep every other line.
     #[must_use]
     pub fn remove_ours(&mut self) -> Change {
-        if self.owned_mcp.is_empty() && self.owned_projects.is_empty() {
+        let next = strip_block(&self.rendered);
+        if next == self.rendered {
             return Change::Unchanged;
         }
-        self.owned_mcp.clear();
-        self.owned_projects.clear();
-        self.rendered.clone_from(&self.original);
-        self.restore_original = true;
-        if let Ok(doc) = parse_doc(&self.path, &self.original) {
+        if let Ok(doc) = parse_doc(&self.path, &next) {
             self.doc = doc;
         }
+        self.rendered = next;
         Change::Removed
     }
 
@@ -233,22 +229,38 @@ fn parse_doc(path: &Path, text: &str) -> Result<DocumentMut, ProviderError> {
     text.parse::<DocumentMut>()
         .map_err(|err| ProviderError::Parse {
             file: path.to_path_buf(),
-            msg: err.to_string(),
+            msg: parse_location(&err, text),
         })
 }
 
+/// Line and column only. The parser's own message repeats the source line.
+fn parse_location(err: &toml_edit::TomlError, text: &str) -> String {
+    let Some(span) = err.span() else {
+        return "TOML parse error".to_owned();
+    };
+    let (line, column) = line_column(text, span.start);
+    format!("TOML parse error at line {line} column {column}")
+}
+
+fn line_column(text: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for (index, ch) in text.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line = line.saturating_add(1);
+            column = 1;
+        } else {
+            column = column.saturating_add(1);
+        }
+    }
+    (line, column)
+}
+
 fn append_owned(config: &mut CodexConfig, addition: &str) -> Result<(), ProviderError> {
-    if !config.rendered.is_empty() && !config.rendered.ends_with('\n') {
-        config.rendered.push('\n');
-    }
-    if !config.rendered.is_empty() && !config.rendered.ends_with("\n\n") {
-        config.rendered.push('\n');
-    }
-    config.rendered.push_str(addition);
-    if !config.rendered.ends_with('\n') {
-        config.rendered.push('\n');
-    }
-    config.restore_original = false;
+    config.rendered = insert_table(&config.rendered, addition);
     config.doc = parse_doc(&config.path, &config.rendered)?;
     Ok(())
 }

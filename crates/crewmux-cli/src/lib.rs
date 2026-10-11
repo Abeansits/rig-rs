@@ -9,6 +9,7 @@ mod doctor_facts;
 mod doctor_fixture;
 mod doctor_live;
 mod error;
+mod herdr_probe;
 mod output;
 mod paths;
 mod setup_apply;

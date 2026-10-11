@@ -5,10 +5,11 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use crewmux_api::{Client, daemon_socket};
-use crewmux_provider::{CodexProviderAuth, global_window_size_manual, select_codex_provider_auth};
+use crewmux_provider::{CodexProviderAuth, select_codex_provider_auth};
 
 use crate::doctor_eval::codex_view_from_text;
-use crate::doctor_facts::{DoctorFacts, HerdrView, HomeState, HostOs, ToolFact};
+use crate::doctor_facts::{DoctorFacts, HomeState, HostOs, ToolFact};
+use crate::herdr_probe::{launchctl_is_aqua, parse_window_size};
 use crate::paths::{Paths, socket_path_fits};
 use crate::spawn::{capture, which};
 
@@ -16,7 +17,7 @@ use crate::spawn::{capture, which};
 #[must_use]
 pub(crate) fn gather(paths: &Paths) -> DoctorFacts {
     let tmux_conf = fs::read_to_string(&paths.tmux_conf).unwrap_or_default();
-    let window_size = window_size_from_conf(&tmux_conf);
+    let window_size = probe_window_size(paths);
     DoctorFacts {
         os: host_os(),
         tmux_version_line: tool_version(paths, "tmux", &["-V".to_owned()]).map(|fact| fact.version),
@@ -29,10 +30,10 @@ pub(crate) fn gather(paths: &Paths) -> DoctorFacts {
         codex_config: codex_config(paths),
         opencode: tool_version(paths, "opencode", &["--version".to_owned()])
             .unwrap_or_else(ToolFact::missing),
-        herdr: herdr_fact(paths),
+        herdr: crate::herdr_probe::probe(paths),
         ghostty: tool_version(paths, "ghostty", &["--version".to_owned()])
             .unwrap_or_else(ToolFact::missing),
-        ghostty_aqua: false,
+        ghostty_aqua: ghostty_aqua(paths),
         rig_home: rig_home_state(paths),
     }
 }
@@ -114,11 +115,29 @@ fn codex_config(paths: &Paths) -> crate::doctor_facts::CodexView {
     }
 }
 
-fn herdr_fact(paths: &Paths) -> HerdrView {
-    if which(&paths.path_env, "herdr").is_none() {
-        return HerdrView::Absent;
+fn probe_window_size(paths: &Paths) -> Option<String> {
+    let program = which(&paths.path_env, "tmux")?;
+    let captured = capture(
+        &program,
+        &["show".to_owned(), "-g".to_owned(), "window-size".to_owned()],
+    )?;
+    if captured.code != 0 {
+        return None;
     }
-    HerdrView::Unreachable
+    parse_window_size(&captured.stdout)
+}
+
+fn ghostty_aqua(paths: &Paths) -> bool {
+    if host_os() != HostOs::Macos {
+        return false;
+    }
+    let Some(program) = which(&paths.path_env, "launchctl") else {
+        return false;
+    };
+    let Some(captured) = capture(&program, &["managername".to_owned()]) else {
+        return false;
+    };
+    captured.code == 0 && launchctl_is_aqua(&captured.stdout)
 }
 
 fn daemon_healthy(paths: &Paths) -> bool {
@@ -129,14 +148,6 @@ fn daemon_healthy(paths: &Paths) -> bool {
     Client::over_uds(socket)
         .get_healthz()
         .is_ok_and(|response| response.status == 200)
-}
-
-fn window_size_from_conf(conf: &str) -> Option<String> {
-    if global_window_size_manual(conf) {
-        Some("manual".to_owned())
-    } else {
-        None
-    }
 }
 
 fn rig_home_state(paths: &Paths) -> HomeState {

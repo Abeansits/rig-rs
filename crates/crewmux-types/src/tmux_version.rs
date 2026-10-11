@@ -1,8 +1,7 @@
-//! tmux version parsing and the 3.3 minimum.
+//! Canonical tmux version parser and the 3.3 minimum.
 //!
-//! Slice 1b's `crewmux-mux` parser should call this module (or drop its copy)
-//! when the branches merge. The shape matches that parser: `major`, `minor`,
-//! a letter `suffix`, and `next` for `tmux next-X.Y`.
+//! Slice 1b re-exports [`Version`] and [`parse_version`] from this module.
+//! The shape is `major`, `minor`, a letter `suffix`, and `next` for `tmux next-X.Y`.
 
 use std::fmt;
 

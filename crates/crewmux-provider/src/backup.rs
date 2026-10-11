@@ -35,12 +35,23 @@ impl Backups {
             return Ok(None);
         }
         fs::create_dir_all(&dir)?;
-        let dest = dir.join("first-touch.orig");
+        set_mode(&dir, 0o700)?;
+        let dest = dir.join(backup_name());
         let bytes = fs::read(path)?;
-        let mode = fs::metadata(path)?.permissions().mode() & 0o777;
-        AtomicWrite::write(&dest, &bytes, Some(mode))?;
+        AtomicWrite::write(&dest, &bytes, Some(0o600))?;
         Ok(Some(dest))
     }
+}
+
+fn backup_name() -> &'static str {
+    "first-touch.orig"
+}
+
+fn set_mode(path: &Path, bits: u32) -> Result<(), ProviderError> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(bits);
+    fs::set_permissions(path, permissions)?;
+    Ok(())
 }
 
 fn has_backup(dir: &Path) -> Result<bool, ProviderError> {
@@ -63,6 +74,7 @@ fn file_id(path: &Path) -> String {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
+    // Hex only, so the backup directory name cannot carry `..` or a separator.
     format!("{hash:016x}")
 }
 

@@ -8,7 +8,7 @@ use std::fs;
 
 use crewmux_provider::{CodexConfig, CodexHealth, ProviderError, TrustLevel, classify_config};
 
-const SAMPLE: &str = include_str!("fixtures/config.sample.toml");
+const SAMPLE: &str = include_str!("../../../spikes/scratch/6-config-writes/config.sample.toml");
 
 fn loaded(dir: &std::path::Path) -> (std::path::PathBuf, CodexConfig) {
     let path = dir.join("config.toml");
@@ -41,6 +41,8 @@ fn additions_only() {
     assert!(rendered.contains("# profile keeps its comment"));
     assert!(rendered.contains("# existing server stays"));
     assert!(rendered.contains("# trailing comment stays"));
+    assert!(rendered.contains("[projects.\"/tmp/existing\"]"));
+    assert!(rendered.contains("# user project stays"));
     assert!(rendered.contains("[mcp_servers.rig]"));
     assert!(rendered.contains("[projects.\"/work/app\"]"));
     assert!(rendered.contains("trust_level = \"trusted\""));
@@ -87,11 +89,18 @@ fn remove_restores_bytes() {
     config
         .ensure_project_trust(std::path::Path::new("/work/app"), TrustLevel::Trusted)
         .unwrap();
-    assert_eq!(config.remove_ours(), crewmux_provider::Change::Removed);
-    assert_eq!(config.rendered(), SAMPLE);
     let backups = crewmux_provider::Backups::new(&dir.path().join("backups"));
     config.save(&backups).unwrap();
+    let mut reloaded = CodexConfig::load(&path).unwrap();
+    assert!(reloaded.rendered().contains("[projects.\"/tmp/existing\"]"));
+    assert!(reloaded.rendered().contains("[mcp_servers.rig]"));
+    assert_eq!(reloaded.remove_ours(), crewmux_provider::Change::Removed);
+    reloaded.save(&backups).unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), SAMPLE);
+    assert_eq!(
+        classify_config("model = \"gpt-5\"\n").unwrap(),
+        CodexHealth::Missing
+    );
 }
 
 #[test]
@@ -102,6 +111,12 @@ fn invalid_toml_is_not_written() {
     let error = CodexConfig::load(&path).unwrap_err();
     assert!(matches!(error, ProviderError::Parse { .. }));
     assert_eq!(fs::read_to_string(&path).unwrap(), "this = [\n");
+    let secret = "token = \"sk-live-secret\"\nthis = [\n";
+    let error = classify_config(secret).unwrap_err();
+    let message = error.to_string();
+    assert!(!message.contains("sk-"), "{message}");
+    assert!(message.contains("line "), "{message}");
+    assert!(message.contains("column "), "{message}");
     let classified = classify_config("this = [\n").unwrap_err();
     assert!(matches!(classified, ProviderError::Parse { .. }));
     assert_eq!(

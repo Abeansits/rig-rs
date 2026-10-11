@@ -43,6 +43,9 @@ pub struct SetupArgs {
     /// Leave Herdr out of the plan.
     #[arg(long)]
     pub no_herdr: bool,
+    /// Offer the Herdr install. It runs only together with `--yes` or a prompt.
+    #[arg(long)]
+    pub herdr: bool,
     /// Offer a Ghostty install.
     #[arg(long)]
     pub ghostty: bool,

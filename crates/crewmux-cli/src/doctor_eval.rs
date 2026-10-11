@@ -1,7 +1,7 @@
 // Derived from openrig packages/cli/src/commands/doctor.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! Pure doctor checks. Names and order match the slice 7 table.
 
-use crewmux_provider::{classify_config, global_window_size_manual, managed_block_current};
+use crewmux_provider::{classify_config, managed_block_current};
 use crewmux_types::{CheckStatus, DoctorCheck, parse_version};
 
 use crate::command::Providers;
@@ -99,7 +99,7 @@ fn check_window_size(facts: &DoctorFacts) -> DoctorCheck {
         .window_size
         .as_deref()
         .is_some_and(|value| value == "manual");
-    if from_probe || global_window_size_manual(&facts.tmux_conf) {
+    if from_probe {
         DoctorCheck::fail(
             "tmux_global_window_size",
             "global window-size is manual",
@@ -137,7 +137,7 @@ fn check_claude(facts: &DoctorFacts, selected: bool) -> DoctorCheck {
         );
     }
     if facts.claude.logged_in {
-        DoctorCheck::pass("claude", format!("claude {}", facts.claude.version))
+        DoctorCheck::pass("claude", tool_message("claude", &facts.claude.version))
     } else {
         DoctorCheck::warn(
             "claude",
@@ -171,7 +171,7 @@ fn check_codex(facts: &DoctorFacts, selected: bool) -> DoctorCheck {
         );
     }
     if facts.codex.logged_in {
-        DoctorCheck::pass("codex", format!("codex {}", facts.codex.version))
+        DoctorCheck::pass("codex", tool_message("codex", &facts.codex.version))
     } else {
         DoctorCheck::warn(
             "codex",
@@ -188,6 +188,11 @@ fn check_codex_config(facts: &DoctorFacts, selected: bool) -> DoctorCheck {
     match &facts.codex_config {
         CodexView::Absent => DoctorCheck::pass("codex_config", "codex config is absent"),
         CodexView::Current => DoctorCheck::pass("codex_config", "codex config entries are current"),
+        CodexView::Missing => DoctorCheck::warn(
+            "codex_config",
+            "rig mcp entry is missing",
+            "Rerun rig setup to add the rig mcp server",
+        ),
         CodexView::Drift => DoctorCheck::warn(
             "codex_config",
             "codex config drifted from the rig mcp entry",
@@ -213,7 +218,10 @@ fn check_opencode(facts: &DoctorFacts, selected: bool) -> DoctorCheck {
         );
     }
     if opencode_version_ok(&facts.opencode.version) {
-        DoctorCheck::pass("opencode", format!("opencode {}", facts.opencode.version))
+        DoctorCheck::pass(
+            "opencode",
+            tool_message("opencode", &facts.opencode.version),
+        )
     } else {
         DoctorCheck::warn(
             "opencode",
@@ -265,7 +273,7 @@ fn check_ghostty(facts: &DoctorFacts) -> DoctorCheck {
         );
     }
     if facts.ghostty_aqua {
-        DoctorCheck::pass("ghostty", format!("ghostty {}", facts.ghostty.version))
+        DoctorCheck::pass("ghostty", tool_message("ghostty", &facts.ghostty.version))
     } else {
         DoctorCheck::fail(
             "ghostty",
@@ -334,9 +342,14 @@ pub(crate) fn codex_view_from_text(text: Option<&str>) -> CodexView {
     }
     match classify_config(text) {
         Ok(crewmux_provider::CodexHealth::Current) => CodexView::Current,
+        Ok(crewmux_provider::CodexHealth::Missing) => CodexView::Missing,
         Ok(crewmux_provider::CodexHealth::Drift) => CodexView::Drift,
         Err(error) => CodexView::Parse(error.to_string()),
     }
+}
+
+fn tool_message(name: &str, version: &str) -> String {
+    format!("{name} {}", version_token(version))
 }
 
 #[cfg(test)]
@@ -392,5 +405,75 @@ mod tests {
         }
         assert!(!report.healthy);
         assert_eq!(exit_code(&report), 1);
+    }
+
+    #[test]
+    fn parse_error_omits_the_secret_and_names_the_line() {
+        let secret = "token = \"sk-live-secret\"\nthis = [\n";
+        let view = codex_view_from_text(Some(secret));
+        let CodexView::Parse(message) = &view else {
+            panic!("expected a parse failure");
+        };
+        assert!(!message.contains("sk-"), "{message}");
+        assert!(message.contains("line "), "{message}");
+        assert!(message.contains("column "), "{message}");
+        let mut facts = passing();
+        facts.codex_config = view;
+        let report = evaluate(
+            &facts,
+            &DoctorOptions {
+                providers: Providers::all(),
+                herdr: true,
+            },
+        );
+        let rendered = format!("{report:?}");
+        assert!(!rendered.contains("sk-"), "{rendered}");
+    }
+
+    #[test]
+    fn missing_rig_mcp_entry_warns_and_version_is_not_doubled() {
+        let mut facts = passing();
+        facts.codex_config = CodexView::Missing;
+        facts.claude.version = "claude 1.0.0".to_owned();
+        let report = evaluate(
+            &facts,
+            &DoctorOptions {
+                providers: Providers::all(),
+                herdr: true,
+            },
+        );
+        let codex = report
+            .checks
+            .iter()
+            .find(|check| check.name == "codex_config")
+            .expect("codex_config");
+        assert_eq!(codex.status, CheckStatus::Warn);
+        assert!(codex.fix.is_some());
+        let claude = report
+            .checks
+            .iter()
+            .find(|check| check.name == "claude")
+            .expect("claude");
+        assert_eq!(claude.message, "claude 1.0.0");
+    }
+
+    #[test]
+    fn tmux_missing_fails_with_a_fix() {
+        let mut facts = passing();
+        facts.tmux_version_line = None;
+        let report = evaluate(
+            &facts,
+            &DoctorOptions {
+                providers: Providers::all(),
+                herdr: true,
+            },
+        );
+        let tmux = report
+            .checks
+            .iter()
+            .find(|check| check.name == "tmux")
+            .expect("tmux");
+        assert_eq!(tmux.status, CheckStatus::Fail);
+        assert!(tmux.fix.is_some());
     }
 }

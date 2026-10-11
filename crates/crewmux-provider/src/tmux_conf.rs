@@ -1,6 +1,7 @@
 //! Marker-delimited managed block for `~/.tmux.conf`.
 //!
-//! The block never sets `window-size` at global scope.
+//! The block never sets `window-size` or `remain-on-exit` at global scope.
+//! `remain-on-exit` belongs on the session created for a rig seat.
 
 use crate::error::ProviderError;
 
@@ -20,55 +21,73 @@ impl ManagedBlock {
         end: "# <<< rig-rs managed <<<",
     };
 
-    /// Replace the managed region, or append it. A second call with the same body
-    /// returns the same string.
+    /// Replace every managed region, or append one. A second call with the same
+    /// body returns the same string. Files that use CRLF keep CRLF outside the
+    /// replacement and inside the new block.
     ///
     /// # Errors
     ///
     /// Returns [`ProviderError::Parse`] when a begin marker has no matching end.
     pub fn upsert(&self, file: &str, body: &str) -> Result<String, ProviderError> {
-        let block = render(self, body);
-        match span(file, self.begin, self.end) {
-            Span::Absent => Ok(append(file, &block)),
-            Span::Found { start, end } => {
-                let mut out = String::new();
-                out.push_str(file.get(..start).unwrap_or(""));
-                out.push_str(&block);
-                out.push_str(file.get(end..).unwrap_or(""));
-                Ok(out)
+        let newline = newline_of(file);
+        let block = render_with(self, body, newline);
+        let mut out = String::new();
+        let mut rest = file;
+        let mut replaced = false;
+        loop {
+            match span(rest, self.begin, self.end) {
+                Span::Absent => {
+                    out.push_str(rest);
+                    break;
+                }
+                Span::Broken => {
+                    return Err(ProviderError::Parse {
+                        file: std::path::PathBuf::from("tmux.conf"),
+                        msg: "managed block begin marker has no end marker".to_owned(),
+                    });
+                }
+                Span::Found { start, end } => {
+                    out.push_str(rest.get(..start).unwrap_or(""));
+                    out.push_str(&block);
+                    rest = rest.get(end..).unwrap_or("");
+                    replaced = true;
+                }
             }
-            Span::Broken => Err(ProviderError::Parse {
-                file: std::path::PathBuf::from("tmux.conf"),
-                msg: "managed block begin marker has no end marker".to_owned(),
-            }),
+        }
+        if replaced {
+            Ok(out)
+        } else {
+            Ok(append(file, &block, newline))
         }
     }
 
-    /// Delete the managed region. Bytes outside the markers stay in place.
+    /// Delete every managed region. Bytes outside the markers stay in place.
     #[must_use]
     pub fn remove(&self, file: &str) -> String {
-        let Span::Found { start, end } = span(file, self.begin, self.end) else {
-            return file.to_owned();
-        };
-        let mut out = String::new();
-        out.push_str(file.get(..start).unwrap_or(""));
-        out.push_str(file.get(end..).unwrap_or(""));
-        out
+        let mut current = file.to_owned();
+        loop {
+            let Span::Found { start, end } = span(&current, self.begin, self.end) else {
+                return current;
+            };
+            let mut out = String::new();
+            out.push_str(current.get(..start).unwrap_or(""));
+            out.push_str(current.get(end..).unwrap_or(""));
+            current = out;
+        }
     }
 }
 
-/// Body of the tmux managed block. It sets mouse, history, and remain-on-exit.
-/// It does not set a global window size.
+/// Body of the tmux managed block. It sets mouse and history.
+/// It does not set a global window size or a global `remain-on-exit`.
 pub const TMUX_BLOCK_BODY: &str = "\
 set -g mouse on
 set -g history-limit 50000
-set -g remain-on-exit on
 ";
 
 /// `begin`, body, and `end`, each on its own line, with a trailing newline.
 #[must_use]
 pub fn render_tmux_block() -> String {
-    render(&ManagedBlock::TMUX, TMUX_BLOCK_BODY)
+    render_with(&ManagedBlock::TMUX, TMUX_BLOCK_BODY, "\n")
 }
 
 /// The managed block is present and matches [`render_tmux_block`].
@@ -90,24 +109,28 @@ fn line_sets_manual_window_size(line: &str) -> bool {
     sets_size && global && manual
 }
 
-fn render(block: &ManagedBlock, body: &str) -> String {
+fn newline_of(file: &str) -> &'static str {
+    if file.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+fn render_with(block: &ManagedBlock, body: &str, newline: &str) -> String {
     let mut out = String::new();
     out.push_str(block.begin);
-    out.push('\n');
-    out.push_str(body.trim_end());
-    out.push('\n');
+    out.push_str(newline);
+    out.push_str(&body.trim_end().replace('\n', newline));
+    out.push_str(newline);
     out.push_str(block.end);
-    out.push('\n');
+    out.push_str(newline);
     out
 }
 
-fn append(file: &str, block: &str) -> String {
+fn append(file: &str, block: &str, newline: &str) -> String {
     if file.is_empty() {
         return block.to_owned();
     }
     let mut out = file.to_owned();
     if !out.ends_with('\n') {
-        out.push('\n');
+        out.push_str(newline);
     }
     out.push_str(block);
     out
@@ -129,7 +152,11 @@ fn span(file: &str, begin: &str, end_marker: &str) -> Span {
     let mut end = start
         .saturating_add(relative)
         .saturating_add(end_marker.len());
-    if file.as_bytes().get(end) == Some(&b'\n') {
+    if file.as_bytes().get(end) == Some(&b'\r')
+        && file.as_bytes().get(end.saturating_add(1)) == Some(&b'\n')
+    {
+        end = end.saturating_add(2);
+    } else if file.as_bytes().get(end) == Some(&b'\n') {
         end = end.saturating_add(1);
     }
     Span::Found { start, end }

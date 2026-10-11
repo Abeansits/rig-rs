@@ -172,11 +172,22 @@ fn follow_file_symlink(path: &Path) -> Result<PathBuf, ProviderError> {
             return Ok(target);
         }
         let link = fs::read_link(&target)?;
-        target = if link.is_absolute() {
+        let next = if link.is_absolute() {
             link
         } else {
             target.parent().unwrap_or_else(|| Path::new(".")).join(link)
         };
+        match fs::symlink_metadata(&next) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "refusing to write through a dangling symlink",
+                )
+                .into());
+            }
+            Err(error) => return Err(error.into()),
+            Ok(_) => target = next,
+        }
     }
     Err(ProviderError::Parse {
         file: path.to_path_buf(),

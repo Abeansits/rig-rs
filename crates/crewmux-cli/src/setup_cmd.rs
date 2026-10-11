@@ -34,6 +34,8 @@ pub(crate) fn run(paths: &Paths, args: &SetupArgs) -> Result<i32, Error> {
         &ApplyCtx {
             paths,
             confirm_installs: confirm(args),
+            herdr: args.herdr && !args.no_herdr,
+            ghostty: args.ghostty && !args.no_ghostty,
             macos: std::env::consts::OS == "macos",
         },
     )?;

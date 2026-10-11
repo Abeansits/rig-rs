@@ -51,7 +51,7 @@ impl ClaudeSeatFiles {
     /// Returns [`ProviderError::Io`] when the seat directory or file cannot be written.
     pub fn write_mcp(&self, servers: &[McpServerEntry]) -> Result<PathBuf, ProviderError> {
         let path = self.seat_dir.join("mcp.json");
-        let body = mcp_document(servers)?;
+        let body = Self::render_mcp(servers)?;
         fs::create_dir_all(&self.seat_dir)?;
         AtomicWrite::write(&path, body.as_bytes(), Some(0o600))?;
         Ok(path)
@@ -64,10 +64,28 @@ impl ClaudeSeatFiles {
     /// Returns [`ProviderError::Io`] when the seat directory or file cannot be written.
     pub fn write_settings(&self, settings: &ClaudeSeatSettings) -> Result<PathBuf, ProviderError> {
         let path = self.seat_dir.join("settings.json");
-        let body = settings_document(settings)?;
+        let body = Self::render_settings(settings)?;
         fs::create_dir_all(&self.seat_dir)?;
         AtomicWrite::write(&path, body.as_bytes(), Some(0o600))?;
         Ok(path)
+    }
+
+    /// JSON that [`Self::write_mcp`] publishes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProviderError::Parse`] when the document cannot be encoded.
+    pub fn render_mcp(servers: &[McpServerEntry]) -> Result<String, ProviderError> {
+        mcp_document(servers)
+    }
+
+    /// JSON that [`Self::write_settings`] publishes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProviderError::Parse`] when the document cannot be encoded.
+    pub fn render_settings(settings: &ClaudeSeatSettings) -> Result<String, ProviderError> {
+        settings_document(settings)
     }
 
     /// `--mcp-config <p> --strict-mcp-config --settings <p>`.

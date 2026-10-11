@@ -27,7 +27,23 @@ fn upsert_is_idempotent_and_remove_is_exact() {
     assert!(twice.contains(outside_after));
     let removed = ManagedBlock::TMUX.remove(&twice);
     assert_eq!(removed, original);
+    let stale = ManagedBlock::TMUX.upsert("tail\n", "stale-body\n").unwrap();
+    let doubled = format!("{once}{stale}");
+    let replaced = ManagedBlock::TMUX
+        .upsert(&doubled, TMUX_BLOCK_BODY)
+        .unwrap();
+    assert_eq!(replaced.matches("# >>> rig-rs managed >>>").count(), 2);
+    assert!(!replaced.contains("stale-body"));
+    assert!(replaced.contains("tail"));
+    let crlf = once.replace('\n', "\r\n");
+    let crlf_next = ManagedBlock::TMUX.upsert(&crlf, TMUX_BLOCK_BODY).unwrap();
+    assert!(crlf_next.contains("\r\n"));
+    assert_eq!(
+        ManagedBlock::TMUX.remove(&crlf_next).replace("\r\n", "\n"),
+        original
+    );
     assert!(!global_window_size_manual(&render_tmux_block()));
+    assert!(!render_tmux_block().contains("remain-on-exit"));
     for line in render_tmux_block().lines() {
         let sets_size = line.contains("window-size");
         assert!(!sets_size, "{line}");
@@ -35,12 +51,13 @@ fn upsert_is_idempotent_and_remove_is_exact() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "tmux is absent from the macOS cargo test job; this is not a pass. Nextest installs tmux. RIG_REQUIRE_TMUX fails the load when the binary is missing"
+)]
 fn tmux_loads_the_managed_block() {
-    // The macOS `cargo test` job does not install tmux. Nextest and the tmux
-    // matrix do, and this environment does. Skip the load when the binary is
-    // absent so that job still runs the byte-level managed-block test.
     let Some(tmux) = which("tmux") else {
-        return;
+        panic!("tmux is not on PATH");
     };
     let dir = tempfile::tempdir().unwrap();
     let conf = dir.path().join("tmux.conf");
@@ -57,16 +74,27 @@ fn tmux_loads_the_managed_block() {
             ";",
             "show",
             "-g",
-            "remain-on-exit",
+            "mouse",
         ],
     );
     drop(run(&tmux, &["-L", &socket, "kill-server"]));
     assert_eq!(shown.0, 0, "stderr={}", shown.2);
     assert!(
-        shown.1.contains("remain-on-exit on"),
+        shown.1.contains("mouse on"),
         "stdout={} stderr={}",
         shown.1,
         shown.2
+    );
+}
+
+#[test]
+fn missing_tmux_fails_when_required() {
+    if std::env::var_os("RIG_REQUIRE_TMUX").is_none() {
+        return;
+    }
+    assert!(
+        which("tmux").is_some(),
+        "RIG_REQUIRE_TMUX is set and tmux is not on PATH"
     );
 }
 

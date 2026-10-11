@@ -9,6 +9,7 @@ mod auth;
 mod backup;
 mod claude;
 mod codex;
+mod codex_block;
 mod drift;
 mod error;
 mod guidance;

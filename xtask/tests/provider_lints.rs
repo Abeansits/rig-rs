@@ -34,6 +34,20 @@ fn planted_claude_basename_fails() {
 }
 
 #[test]
+fn planted_concat_basename_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("other.rs"),
+        "const NAME: &str = concat!(\".claude\", \".json\");\n",
+    )
+    .unwrap();
+    let error = lint_claude_json(dir.path()).unwrap_err();
+    assert!(error.to_string().contains("lint-claude-json"), "{error}");
+}
+
+#[test]
 fn planted_window_size_fails() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("crates/crewmux-provider/src");

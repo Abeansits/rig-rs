@@ -38,7 +38,19 @@ fn preserves_mode_and_backs_up_once() {
     assert_eq!(fs::read(&backup).unwrap(), b"first");
     assert!(backups.capture_once(&path).unwrap().is_none());
     assert_eq!(fs::read(&backup).unwrap(), b"first");
+    assert_eq!(fs::metadata(&backup).unwrap().mode() & 0o777, 0o600);
     assert_ne!(fs::metadata(&path).unwrap().ino(), inode);
+}
+
+#[test]
+fn refuses_a_dangling_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let link = dir.path().join("link.txt");
+    std::os::unix::fs::symlink(dir.path().join("missing.txt"), &link).unwrap();
+    let error = AtomicWrite::write(&link, b"new", None).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("dangling"), "{message}");
+    assert!(!dir.path().join("missing.txt").exists());
 }
 
 #[test]

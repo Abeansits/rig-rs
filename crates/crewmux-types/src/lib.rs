@@ -1,10 +1,10 @@
 //! Shared IDs, enums, wire DTOs, and the tmux version parser.
 //!
-//! The version parser lives here so slice 1b can reuse it without this slice
-//! linking the tmux control modules.
+//! [`tmux_version`] is the canonical parser. Slice 1b re-exports it instead of
+//! keeping a second copy next to the tmux control modules.
 
 mod doctor;
-mod tmux_version;
+pub mod tmux_version;
 
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use tmux_version::{Version, parse_version};

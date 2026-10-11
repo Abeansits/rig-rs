@@ -14,11 +14,13 @@ pub(crate) enum HostOs {
 pub(crate) enum CodexView {
     /// The file is not there.
     Absent,
-    /// The file parses and the rig entry is absent or current.
+    /// The rig entry matches the command setup writes.
     Current,
+    /// The file parses and the rig entry is missing.
+    Missing,
     /// The rig entry is present with a different command.
     Drift,
-    /// The file is not TOML.
+    /// The file is not TOML. The message is a line and column, never the source line.
     Parse(String),
 }
 

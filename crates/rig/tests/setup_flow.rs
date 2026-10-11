@@ -128,4 +128,93 @@ fn json_without_yes_does_not_install() {
         .assert()
         .success();
     assert!(!marker.exists());
+    rig(&home, &rig_home)
+        .env("PATH", &path)
+        .args(["setup", "--yes", "--no-ghostty"])
+        .assert()
+        .success();
+    assert!(
+        !marker.exists(),
+        "--yes alone must not run the herdr installer"
+    );
+}
+
+#[test]
+fn setup_does_not_trust_the_home_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let rig_home = dir.path().join("rig-home");
+    fs::create_dir(&home).unwrap();
+    rig(&home, &rig_home)
+        .args([
+            "setup",
+            "--providers",
+            "codex",
+            "--no-herdr",
+            "--no-ghostty",
+        ])
+        .assert()
+        .success();
+    let config = fs::read_to_string(home.join(".codex").join("config.toml")).unwrap();
+    assert!(config.contains("[mcp_servers.rig]"));
+    assert!(!config.contains(&home.display().to_string()));
+    assert!(!config.contains("trust_level"));
+}
+
+#[test]
+fn dry_run_after_apply_reports_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let rig_home = dir.path().join("rig-home");
+    fs::create_dir(&home).unwrap();
+    rig(&home, &rig_home)
+        .args(["setup", "--no-herdr", "--no-ghostty"])
+        .assert()
+        .success();
+    let output = rig(&home, &rig_home)
+        .args(["setup", "--dry-run", "--json", "--no-herdr", "--no-ghostty"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plan: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let steps = plan["steps"].as_array().unwrap();
+    for id in [
+        "claude_mcp",
+        "claude_settings",
+        "codex",
+        "opencode",
+        "tmux_conf",
+    ] {
+        let step = steps
+            .iter()
+            .find(|step| step["id"] == id)
+            .unwrap_or_else(|| panic!("missing {id}"));
+        assert_eq!(step["change"], "unchanged", "{id} {step}");
+    }
+}
+
+#[test]
+fn read_only_tmux_conf_is_left_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let rig_home = dir.path().join("rig-home");
+    fs::create_dir(&home).unwrap();
+    let conf = home.join(".tmux.conf");
+    fs::write(&conf, "keep\n").unwrap();
+    let mut permissions = fs::metadata(&conf).unwrap().permissions();
+    permissions.set_mode(0o444);
+    fs::set_permissions(&conf, permissions).unwrap();
+    rig(&home, &rig_home)
+        .args([
+            "setup",
+            "--providers",
+            "claude",
+            "--no-herdr",
+            "--no-ghostty",
+        ])
+        .assert()
+        .failure();
+    assert_eq!(fs::read(&conf).unwrap(), b"keep\n");
 }
