@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/help-top.json
+expression: "ts:help-top"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "add\nadopt\nagent\nagent-image\narchive\nask\nattach\nauth\nbind\nbootstrap\nbroadcast\nbundle\ncapture\nchatroom\ncompact\ncompact-plan\nconfig\ncontext\ncrash-cart\ncreate\ndaemon\ndestroy\ndiscover\ndoctor\ndown\nenv\nexpand\nexport\nfile\nfork\ngateway\ngrow\nhandover\nhealth\nheartbeat\nhelp\nhost\nimport\nlaunch\nmcp\nmode\npackage\nparked\nplugin\npolicy\npreflight\nproject\nproof\nprovider\nps\nqueue\nreconcile-session\nrelease\nremove\nrequirements\nrestore\nrestore-check\nrestore-packet\nroster\nscope\nseat\nsend\nsetup\nshrink\nskill\nslack\nsnapshot\nspec\nspecs\nstart\nstartup-proof\nstatus\nstream\ntelemetry\nterminal\ntranscript\ntui\nui\nunarchive\nunclaim\nup\nusage\nview\nwalk\nwatchdog\nwhoami\nworkflow\nworkspace",
+  "tmux_argv": []
+}

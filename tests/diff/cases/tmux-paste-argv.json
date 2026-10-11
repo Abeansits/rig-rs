@@ -1,0 +1,10 @@
+{
+  "id": "tmux-paste-argv",
+  "project": "full",
+  "needs": "slice 1 daemon paste command",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [
+    { "op": "cli", "argv": ["--version"] },
+    { "op": "tmux_calls" }
+  ]
+}
