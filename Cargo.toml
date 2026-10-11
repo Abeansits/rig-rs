@@ -8,8 +8,19 @@ rust-version = "1.99"
 license = "Apache-2.0"
 publish = false
 
-# Internal crates only. External deps are added (cargo add, then hoisted here) when a slice needs them.
+# Internal crates, plus external deps hoisted here when a slice needs them.
+# Slice 1b: tokio (argv exec + tasks), tokio-util (cancellation + task tracking),
+# async-trait (dyn Multiplexer), thiserror (MuxError), bytes (pane output),
+# tracing (structured logs), ulid (unique paste buffer names), proptest (decoder).
 [workspace.dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+proptest = "1.12.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["fs", "io-util", "macros", "process", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+tracing = "0.1.44"
+ulid = "3.0.0"
 crewmux-types = { path = "crates/crewmux-types" }
 crewmux-spec = { path = "crates/crewmux-spec" }
 crewmux-core = { path = "crates/crewmux-core" }
