@@ -155,9 +155,9 @@ fn pe_003_covers_stdout_only() {
 }
 
 #[test]
-fn pe_006_covers_stdout_and_exit() {
+fn pe_007_covers_stdout_and_exit() {
     let text = fs::read_to_string(workspace_root().join("design/parity-exceptions.md")).unwrap();
-    let covers = covers_for(&text, &PeId::parse("PE-006").unwrap()).unwrap();
+    let covers = covers_for(&text, &PeId::parse("PE-007").unwrap()).unwrap();
     assert_eq!(covers, vec![ObsField::Stdout, ObsField::Exit]);
 }
 

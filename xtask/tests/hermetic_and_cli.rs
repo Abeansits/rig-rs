@@ -125,7 +125,10 @@ fn self_mode_exits_0_and_update_with_self_is_a_usage_error() {
     assert_eq!(code, 0, "{stdout}\n{stderr}");
     assert!(stdout.contains("| version | Equal |"), "{stdout}");
     assert!(stdout.contains("needs UDS listener"), "{stdout}");
-    assert!(stdout.contains("needs slice 1"), "{stdout}");
+    assert!(
+        stdout.contains("deferred until the daemon paste command exists"),
+        "{stdout}"
+    );
     let (code, _stdout, stderr) = run(
         &["diff", "--self", "--update", "--bin", &bin_text],
         None,

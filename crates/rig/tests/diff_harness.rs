@@ -62,7 +62,7 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
     assert!(text.contains("| up-ps-down-stub | Equal |"), "{text}");
     assert!(text.contains("| capture-stub | Equal |"), "{text}");
     assert!(
-        text.contains("needs slice 1 daemon paste command"),
+        text.contains("deferred until the daemon paste command exists"),
         "{text}"
     );
     for report in &reports {

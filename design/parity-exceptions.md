@@ -42,14 +42,14 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Rust behaviour:** the slice 1 acceptance script is comma-separated `ready_after_ms`, `exit_after_ms`, and `print_gate=<code>`. The fixture still prints `stub> ` and echoes submitted lines.
 - **Required test:** `crewmux_adapters::screen_tests::script_parses_gate_and_timers` and `gate_surfaces_as_attention`.
 
-## PE-006: slice 1 stub up, ps, capture, and down speak the acceptance JSON
+## PE-007: slice 1 stub up, ps, capture, and down speak the acceptance JSON
 
 - **Covers:** stdout, exit
 - **TS behaviour:** `rig up` of the slice 1 document (`name` plus a `seats` list) exits 1. v0.6.9 reports `seats` as an unknown key and refuses the file. `rig ps --json` then prints `[]`. `rig capture <seat> --json` reports the session missing or tmux unreachable. `rig down --json` without a rig argument is `commander.missingArgument`. stderr stays empty. The cases record no tmux argv, and that list is empty on both sides.
 - **Rust behaviour:** the same document is the slice 1 spec. `rig up --json` auto-starts the daemon and prints `{status, rig, seats, events}` with both seats `ready`. `rig ps --json` lists rig, seat, runtime, state, tmux session, and `attached: false`. `rig capture --json` returns the screen text, including `stub> `. `rig down --json` prints `{stopped, sessions_killed, events}`. The process exits 0.
-- **Snapshot:** `tests/diff/snapshots/stub-seat.rs.snap`, `tests/diff/snapshots/up-ps-down-stub.rs.snap`, and `tests/diff/snapshots/capture-stub.rs.snap` record that Rust side. `ExpectedDiff(PE-006)` applies only while the live Rust observation still matches the snapshot for that case. stderr, json, files, and tmux argv stay compared as ordinary fields.
+- **Snapshot:** `tests/diff/snapshots/stub-seat.rs.snap`, `tests/diff/snapshots/up-ps-down-stub.rs.snap`, and `tests/diff/snapshots/capture-stub.rs.snap` record that Rust side. `ExpectedDiff(PE-007)` applies only while the live Rust observation still matches the snapshot for that case. stderr, json, files, and tmux argv stay compared as ordinary fields.
 - **Why this is recorded:** this is the stdout and exit from a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). The acceptance spec requires this document and this JSON. Delete this heading and the three `.rs.snap` files when those two fields match v0.6.9. The harness then reports `stale exception`. The `capture-stub` TypeScript golden is the cold-start capture error (`tmux_unavailable`). A leftover OpenRig daemon from an earlier run answers the same capture with `session_missing`, and the golden check fails. CI runs one cold diff, which is the snapshot that is committed.
-- **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-006)` for `stub-seat`, `up-ps-down-stub`, and `capture-stub`.
+- **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-007)` for `stub-seat`, `up-ps-down-stub`, and `capture-stub`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.
