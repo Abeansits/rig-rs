@@ -57,7 +57,11 @@ jobs:
         env:
           INSTA_UPDATE: "no"
           RIG_HOME: ${{ runner.temp }}/rig-home
-        run: cargo nextest run --workspace --all-targets --all-features --profile ci --no-tests=warn --locked
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export RIG_REQUIRE_TMUX=1
+          fi
+          cargo nextest run --workspace --all-targets --all-features --profile ci --no-tests=warn --locked
       - name: doctests (nextest does not run them)
         run: cargo test --workspace --doc --all-features --locked
 
@@ -238,6 +242,7 @@ jobs:
         env:
           INSTA_UPDATE: "no"
           RIG_HOME: ${{ runner.temp }}/rig-home
+          RIG_REQUIRE_TMUX: "1"
         run: |
           set -euo pipefail
           if ! grep -qE '^tmux-it *=' crates/crewmux-mux/Cargo.toml 2>/dev/null; then

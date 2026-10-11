@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/doctor-help.json
+expression: "ts:doctor-help"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "Usage: rig doctor [options]\n\nCheck installation, provider authentication, writable paths, port/daemon and\nconditional cmux control\n\nOptions:\n  --json         JSON output for agents\n  --spec <path>  Rig spec to check against the running rig of the same name\n                 (spec-vs-live topology)\n  -h, --help     display help for command\n\nWith --spec, compares declared and live topology. This is not an end-to-end readiness check.\nReports Claude and Codex authentication using setup's checks, including configured Codex credential variables. No agent task or provider request is tested.\nInspect your team with rig ps --nodes --rig <rig> and rig capture <seat> --lines 30.\n",
+  "tmux_argv": []
+}

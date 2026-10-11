@@ -7,6 +7,6 @@ expression: "rs:help-top"
   "files": [],
   "json": null,
   "stderr": "",
-  "stdout": "",
+  "stdout": "doctor\nhelp\nsetup",
   "tmux_argv": []
 }

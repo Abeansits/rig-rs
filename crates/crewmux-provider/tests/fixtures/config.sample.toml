@@ -1,0 +1,14 @@
+# Codex sample from the config-writes spike.
+model = "gpt-5" # inline comment on the model
+
+[profiles.work]
+model = "gpt-5" # profile keeps its comment
+
+[mcp_servers.existing]
+command = "other"
+args = ["--flag"] # existing server stays
+
+[projects."/tmp/existing"]
+trust_level = "untrusted" # user project stays
+
+# trailing comment stays
