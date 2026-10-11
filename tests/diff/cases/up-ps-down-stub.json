@@ -1,6 +1,7 @@
 {
   "id": "up-ps-down-stub",
   "project": "full",
+  "expected_diff": "PE-006",
   "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
   "steps": [
     {

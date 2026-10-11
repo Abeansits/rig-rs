@@ -155,6 +155,13 @@ fn pe_003_covers_stdout_only() {
 }
 
 #[test]
+fn pe_006_covers_stdout_and_exit() {
+    let text = fs::read_to_string(workspace_root().join("design/parity-exceptions.md")).unwrap();
+    let covers = covers_for(&text, &PeId::parse("PE-006").unwrap()).unwrap();
+    assert_eq!(covers, vec![ObsField::Stdout, ObsField::Exit]);
+}
+
+#[test]
 fn expected_diff_without_covers_fails_to_load() {
     let dir = scratch("pe-bare-").unwrap();
     let markdown = dir.path().join("parity-exceptions.md");

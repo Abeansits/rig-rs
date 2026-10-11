@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/stub-seat.json
+expression: "ts:stub-seat"
+---
+{
+  "exit": 1,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "{\"error\":\"Source is YAML but not a valid rig spec: seats: unknown key \\\"seats\\\"; refusing the spec because normalization would otherwise discard it and alter the requested topology\"}\n[]\n{\"ok\":false,\"sessionName\":\"one\",\"reason\":\"session_missing\",\"error\":\"Session 'one' not found: tmux reports no session with this name. Nothing was captured. Check available sessions with: rig ps --nodes\"}\n{\"ok\":false,\"error\":{\"code\":\"commander.missingArgument\",\"message\":\"missing required argument 'rig'\"}}\n",
+  "tmux_argv": []
+}

@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/up-ps-down-stub.json
+expression: "ts:up-ps-down-stub"
+---
+{
+  "exit": 1,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "{\"error\":\"Source is YAML but not a valid rig spec: seats: unknown key \\\"seats\\\"; refusing the spec because normalization would otherwise discard it and alter the requested topology\"}\n[]\n{\"ok\":false,\"error\":{\"code\":\"commander.missingArgument\",\"message\":\"missing required argument 'rig'\"}}\n",
+  "tmux_argv": []
+}
