@@ -47,6 +47,7 @@ struct FakeInner {
 struct ScriptHooks {
     keystroke_on_read: Option<u32>,
     contaminate: bool,
+    swallow: bool,
 }
 
 /// Scripted multiplexer. Records paste and create argv and can inject events.
@@ -97,6 +98,7 @@ impl FakeMux {
                 hooks: ScriptHooks {
                     keystroke_on_read: None,
                     contaminate: false,
+                    swallow: false,
                 },
                 hub: Hub::default(),
             })),
@@ -115,6 +117,11 @@ impl FakeMux {
     /// After a paste, append extra text so post-paste verification sees contamination.
     pub async fn contaminate_on_paste(&self, enabled: bool) {
         self.inner.lock().await.hooks.contaminate = enabled;
+    }
+
+    /// Record the paste argv but leave the screen unchanged, so the payload is missing.
+    pub async fn swallow_paste(&self, enabled: bool) {
+        self.inner.lock().await.hooks.swallow = enabled;
     }
 
     /// Honour `RIG_STUB_SCRIPT` on later [`create_session`](Multiplexer::create_session) calls.
@@ -379,7 +386,9 @@ impl Multiplexer for FakeMux {
                 .get(&session)
                 .cloned()
                 .unwrap_or_else(|| guard.capture.clone());
-            screen.text.push_str(text);
+            if !guard.hooks.swallow {
+                screen.text.push_str(text);
+            }
             if guard.hooks.contaminate {
                 screen.text.push_str(" EXTRA");
             }

@@ -129,7 +129,10 @@ async fn replay(
         Missed::CaughtUp => {}
         Missed::Replay(events) => out.extend(events),
         Missed::Gap(events) => {
-            let id = events.first().map_or(0, |event| event.id);
+            let id = events.first().map_or_else(
+                || last.map_or(0, |id| id.saturating_add(1)),
+                |event| event.id,
+            );
             out.push(StreamEvent {
                 id,
                 kind: StreamKind::Gap,
@@ -217,5 +220,31 @@ async fn terminal_pump(mut socket: WebSocket, app: App, seat: String) {
         if matches!(message, Message::Text(_) | Message::Binary(_)) {
             app.taps.record_name(&seat, std::time::Instant::now());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replay;
+    use crate::hub::EventHub;
+    use crewmux_api::StreamKind;
+
+    #[tokio::test]
+    async fn last_event_id_past_the_head_is_a_gap() {
+        let hub = EventHub::new();
+        let missed = replay(&hub, Some(3), false).await;
+        let gap = missed.first().expect("gap");
+        assert_eq!(gap.kind, StreamKind::Gap);
+        assert_eq!(gap.id, 4);
+        assert_eq!(missed.len(), 1);
+
+        let published = hub.publish(StreamKind::Activity, None).await;
+        let caught = replay(&hub, Some(published.id), false).await;
+        assert_eq!(caught.len(), 0);
+        let ahead = replay(&hub, Some(published.id.saturating_add(2)), false).await;
+        let gap = ahead.first().expect("ahead");
+        assert_eq!(gap.kind, StreamKind::Gap);
+        assert_eq!(gap.id, published.id.saturating_add(3));
+        assert!(ahead.iter().all(|event| event.kind == StreamKind::Gap));
     }
 }

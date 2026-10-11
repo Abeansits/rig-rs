@@ -72,14 +72,23 @@ fn update_state(
 
 #[test]
 fn every_state_pair_matches_the_terminal_and_closure_rules() {
+    // packages/daemon/src/domain/queue-repository.ts (v0.6.9): guarded sources are
+    // done, canceled, and handed-off. Leaving one is legal only toward pending,
+    // in-progress, or blocked, and the fixture supplies --reopen plus a note.
+    // Same-state is a note append. Any other source may move to any state when
+    // the closure fields on the fixture are valid. The expected bit is this
+    // table, not QueueState::is_guarded / is_active.
+    const GUARDED: &[&str] = &["done", "canceled", "handed-off"];
+    const ACTIVE: &[&str] = &["pending", "in-progress", "blocked"];
     let id = QItemId::new("qitem-1").expect("id");
     for from in QueueState::all() {
         for to in QueueState::all() {
             let leaving = from != to;
-            let reopen = from.is_guarded() && leaving;
-            let err = crewmux_messaging::admit(&id, from, &pair_update(to, reopen, leaving));
-            let expect = if from.is_guarded() && leaving {
-                to.is_active()
+            let guarded = GUARDED.contains(&from.as_str());
+            let err =
+                crewmux_messaging::admit(&id, from, &pair_update(to, guarded && leaving, leaving));
+            let expect = if guarded && leaving {
+                ACTIVE.contains(&to.as_str())
             } else {
                 true
             };

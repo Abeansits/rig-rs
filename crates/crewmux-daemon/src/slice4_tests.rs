@@ -86,6 +86,7 @@ async fn contaminated_paste_does_not_send_enter() {
     let body = deliver(&app, outbound(&["one@pair"], "hello"))
         .await
         .expect("receipt");
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
     assert_eq!(outcome_of(&body), "contaminated");
     assert!(!entered(&mux.recorded().await));
     let Missed::Replay(events) = app.hub.missed(None).await else {
@@ -96,6 +97,18 @@ async fn contaminated_paste_does_not_send_enter() {
             .iter()
             .any(|event| event.kind == StreamKind::AttentionRaised)
     );
+}
+
+#[tokio::test]
+async fn missing_payload_is_not_delivered() {
+    let (app, mux) = harness(None).await;
+    ready(&app, &two_stub("/tmp")).await;
+    mux.swallow_paste(true).await;
+    let err = deliver(&app, outbound(&["one@pair"], "hello"))
+        .await
+        .expect_err("missing");
+    assert!(err.to_string().contains("did not render"), "{err}");
+    assert!(!entered(&mux.recorded().await));
 }
 
 #[tokio::test]

@@ -12,11 +12,13 @@ mod hub;
 mod inbox_http;
 mod launch;
 mod notify;
+mod paste_check;
 mod persist;
 mod query;
 mod queue_http;
 mod reconcile;
 mod runtime;
+mod send_http;
 mod serve;
 mod settle;
 mod state;
@@ -29,5 +31,7 @@ pub use serve::run;
 
 #[cfg(test)]
 mod flow;
+#[cfg(test)]
+mod receipt_tests;
 #[cfg(test)]
 mod slice4_tests;

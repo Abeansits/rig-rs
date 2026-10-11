@@ -270,7 +270,7 @@ async fn mutate<T>(
     let value = f(&mut book).map_err(|err| Error::Message(err.to_string()))?;
     let snap = book.clone();
     drop(book);
-    app.submit_queue(snap);
+    app.commit_queue(snap).await?;
     Ok(value)
 }
 

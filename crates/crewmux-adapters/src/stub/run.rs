@@ -2,7 +2,7 @@
 
 //! `rig-stub-agent` process: banner, optional gate, composer, and echo.
 
-use std::io::BufRead;
+use std::io::{BufRead, Write};
 use std::os::fd::AsFd;
 use std::time::Duration;
 
@@ -41,11 +41,12 @@ async fn drive(script: StubScript) -> Result<(), Error> {
         script
             .exit_after_ms
             .map(|ms| started + Duration::from_millis(ms)),
+        script.contaminate,
     )
     .await
 }
 
-async fn echo_until(exit_at: Option<tokio::time::Instant>) -> Result<(), Error> {
+async fn echo_until(exit_at: Option<tokio::time::Instant>, contaminate: bool) -> Result<(), Error> {
     // Tokio's stdin read cannot be cancelled, so a timer cannot win while tmux
     // holds the pty. Holding `Stdin::lock` also deadlocks process exit, which
     // flushes stdio. A detached thread reads a dup'd fd instead.
@@ -58,11 +59,18 @@ async fn echo_until(exit_at: Option<tokio::time::Instant>) -> Result<(), Error> 
         };
         let mut reader = std::io::BufReader::new(std::fs::File::from(fd));
         let mut line = String::new();
+        let mut first = true;
         loop {
             line.clear();
             match reader.read_line(&mut line) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {
+                    if contaminate && first {
+                        first = false;
+                        let mut out = std::io::stdout();
+                        drop(writeln!(out, "EXTRA"));
+                        drop(out.flush());
+                    }
                     if tx.send(std::mem::take(&mut line)).is_err() {
                         break;
                     }
@@ -71,6 +79,12 @@ async fn echo_until(exit_at: Option<tokio::time::Instant>) -> Result<(), Error> 
         }
     }));
     let mut stdout = tokio::io::stdout();
+    // Lines in one paste arrive together. Enter comes later, after the
+    // post-paste check, and that gap is what reprints the prompt. Reprinting
+    // on every echoed line would clear the draft and the next send would not
+    // see the leftover text.
+    let mut seen = false;
+    let mut last = tokio::time::Instant::now();
     loop {
         if exit_due(exit_at) {
             return Ok(());
@@ -88,7 +102,14 @@ async fn echo_until(exit_at: Option<tokio::time::Instant>) -> Result<(), Error> 
         let Some(line) = line else {
             return Ok(());
         };
+        let now = tokio::time::Instant::now();
+        let gap = now.saturating_duration_since(last);
+        last = now;
         stdout.write_all(line.as_bytes()).await?;
+        if seen && gap >= Duration::from_millis(40) {
+            stdout.write_all(b"stub> \n").await?;
+        }
+        seen = true;
         stdout.flush().await?;
     }
 }

@@ -11,7 +11,7 @@ const BACKLOG: usize = 128;
 
 /// What a client missed.
 pub(crate) enum Missed {
-    /// `last` is the newest id, or the log is empty.
+    /// `last` is the newest id, or the log is empty and `last` is absent or zero.
     CaughtUp,
     /// Every event with an id greater than `last` is still buffered.
     Replay(Vec<StreamEvent>),
@@ -60,10 +60,17 @@ impl EventHub {
             return Missed::Replay(queue.iter().cloned().collect());
         };
         let Some(oldest) = queue.front().map(|event| event.id) else {
-            return Missed::CaughtUp;
+            return if last > 0 {
+                Missed::Gap(Vec::new())
+            } else {
+                Missed::CaughtUp
+            };
         };
         let newest = queue.back().map_or(oldest, |event| event.id);
-        if last >= newest {
+        if last > newest {
+            return Missed::Gap(Vec::new());
+        }
+        if last == newest {
             return Missed::CaughtUp;
         }
         if last.saturating_add(1) < oldest {

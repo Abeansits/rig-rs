@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crewmux_adapters::AdapterRegistry;
 use crewmux_messaging::{Mailboxes, QueueBook};
 use crewmux_mux::Multiplexer;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -54,8 +54,16 @@ pub(crate) struct App {
     pub transcripts: bool,
     /// Background work owned by this process.
     pub tasks: TaskTracker,
-    persist_tx: mpsc::UnboundedSender<QueueBook>,
-    queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueBook>>>>,
+    persist_tx: mpsc::UnboundedSender<QueueWrite>,
+    queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueWrite>>>>,
+}
+
+/// One queue snapshot for the writer, plus the callers waiting on that commit.
+pub(crate) struct QueueWrite {
+    /// Book to persist. A newer epoch replaces an older one still in the channel.
+    pub book: QueueBook,
+    /// Completed after the snapshot write, including a store error.
+    pub acks: Vec<oneshot::Sender<Result<(), String>>>,
 }
 
 impl App {
@@ -102,9 +110,46 @@ impl App {
         self.tasks.spawn(crate::transcripts::run(self.clone()));
     }
 
+    /// Remember the highest receipt cursor already stored. The next id is one past it.
+    pub(crate) fn seed_cursor(&self, max_cursor: u64) {
+        self.cursor.store(max_cursor, Ordering::Relaxed);
+    }
+
     /// Queue the latest book for the writer. The writer keeps the newest epoch.
+    ///
+    /// Callers that must not return before the commit use [`commit_queue`](Self::commit_queue).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "integration tests queue a snapshot without waiting; HTTP handlers use commit_queue"
+        )
+    )]
     pub(crate) fn submit_queue(&self, book: QueueBook) {
-        drop(self.persist_tx.send(book));
+        drop(self.persist_tx.send(QueueWrite {
+            book,
+            acks: Vec::new(),
+        }));
+    }
+
+    /// Persist `book` and wait until the write finishes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Message`] when the writer has stopped or the snapshot write failed.
+    pub(crate) async fn commit_queue(&self, book: QueueBook) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.persist_tx
+            .send(QueueWrite {
+                book,
+                acks: vec![tx],
+            })
+            .map_err(|_| Error::Message("queue writer stopped".to_owned()))?;
+        match rx.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(Error::Message(format!("queue snapshot: {err}"))),
+            Err(_) => Err(Error::Message("queue writer stopped".to_owned())),
+        }
     }
 
     /// Remember that a request is in progress so the idle reap waits.

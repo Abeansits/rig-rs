@@ -142,7 +142,52 @@ fn ready_delivers(now: Instant, old_tap: Instant, config: &GuardConfig) {
     assert!(!ready.guard_degraded);
 }
 
+#[test]
+fn exactly_three_seconds_delivers() {
+    let now = Instant::now();
+    let wall = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
+    let tap = now.checked_sub(Duration::from_secs(3)).expect("tap");
+    let tmux = wall.checked_sub(Duration::from_secs(3)).expect("tmux");
+    let by_tap = evaluate(
+        &inputs(false, Some(tap), None),
+        ComposerState::AtPrompt,
+        &cfg(wall),
+        now,
+    );
+    let by_tmux = evaluate(
+        &inputs(false, None, Some(tmux)),
+        ComposerState::AtPrompt,
+        &cfg(wall),
+        now,
+    );
+    assert!(matches!(by_tap.verdict, GuardVerdict::Deliver));
+    assert!(matches!(by_tmux.verdict, GuardVerdict::Deliver));
+}
+
+#[test]
+fn future_keystroke_defers() {
+    let now = Instant::now();
+    let wall = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
+    let tap = now.checked_add(Duration::from_secs(5)).expect("tap");
+    let tmux = wall.checked_add(Duration::from_secs(5)).expect("tmux");
+    let by_tap = evaluate(
+        &inputs(false, Some(tap), None),
+        ComposerState::AtPrompt,
+        &cfg(wall),
+        now,
+    );
+    let by_tmux = evaluate(
+        &inputs(false, None, Some(tmux)),
+        ComposerState::AtPrompt,
+        &cfg(wall),
+        now,
+    );
+    assert_eq!(reason(&by_tap.verdict), Some(&DeferReason::HumanTyping));
+    assert_eq!(reason(&by_tmux.verdict), Some(&DeferReason::HumanTyping));
+}
+
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
     fn quiet_keystroke_never_delivers(
         tap_ms in 0u64..3_000,

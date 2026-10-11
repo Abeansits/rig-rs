@@ -19,6 +19,7 @@ use crate::composer::{classify_stub, stub_drafting};
 use crate::error::Error;
 use crate::launch::now_ts;
 use crate::notify::emit;
+use crate::paste_check::{PasteHit, classify_paste, pasted_screen};
 use crate::query::{address_of, live_seats, pane_of};
 use crate::state::App;
 
@@ -33,6 +34,8 @@ pub(crate) struct Outbound {
     pub body: String,
     pub interact: bool,
     pub reason: Option<String>,
+    /// Retained so `rig send --verify` stays on the wire. Rendering is required
+    /// for every send, whether or not the flag is set.
     pub verify: bool,
 }
 
@@ -47,7 +50,11 @@ pub(crate) async fn deliver(app: &App, outbound: Outbound) -> Result<Value, Erro
     for seat in seats {
         match one(app, &outbound, &seat).await {
             Ok(row) => {
-                accepted = accepted.saturating_add(1);
+                if row.get("outcome").and_then(Value::as_str) == Some("contaminated") {
+                    failed = failed.saturating_add(1);
+                } else {
+                    accepted = accepted.saturating_add(1);
+                }
                 rows.push(row);
             }
             Err(err) => {
@@ -56,7 +63,8 @@ pub(crate) async fn deliver(app: &App, outbound: Outbound) -> Result<Value, Erro
             }
         }
     }
-    if accepted == 0 {
+    let stored = rows.iter().any(|row| row.get("outcome").is_some());
+    if !stored {
         let message = rows
             .first()
             .and_then(|row| row.get("error"))
@@ -65,7 +73,13 @@ pub(crate) async fn deliver(app: &App, outbound: Outbound) -> Result<Value, Erro
             .to_owned();
         return Err(Error::Message(message));
     }
-    let status = if failed == 0 { "ok" } else { "partial" };
+    let status = if failed == 0 {
+        "ok"
+    } else if accepted == 0 {
+        "failed"
+    } else {
+        "partial"
+    };
     Ok(json!({"status": status, "receipts": rows}))
 }
 
@@ -138,11 +152,11 @@ async fn guarded(
     let now = Instant::now();
     let first = verdict(app, address, pane, now).await?;
     if !matches!(first.0.verdict, GuardVerdict::Deliver) {
-        return Ok(receipt_row(app, outbound, address, &first.0, None).await);
+        return receipt_row(app, outbound, address, &first.0, None).await;
     }
     let second = verdict(app, address, pane, Instant::now()).await?;
     if !matches!(second.0.verdict, GuardVerdict::Deliver) {
-        return Ok(receipt_row(app, outbound, address, &second.0, None).await);
+        return receipt_row(app, outbound, address, &second.0, None).await;
     }
     paste_and_check(app, outbound, address, pane, bracketed, "").await
 }
@@ -186,36 +200,32 @@ async fn paste_and_check(
         bracketed,
         preserve_lf: true,
     };
+    tracing::debug!(verify = outbound.verify, seat = address, "paste");
     app.mux.paste(pane, &payload, opts).await?;
-    let after = app.mux.capture(pane, CaptureRange::Visible).await?;
-    let outcome = if clean(&before.text, &after.text, &payload) {
-        app.mux.send_keys(pane, &[Key::Enter]).await?;
-        DeliveryOutcome::Delivered
-    } else if after.text.contains(&payload) || after.text.contains(&outbound.body) {
-        emit(
-            app,
-            DomainEvent::AttentionRaised {
-                seat: address.to_owned(),
-                reason: "contaminated".to_owned(),
-                at: now_ts(),
-            },
-        )
-        .await;
-        DeliveryOutcome::Contaminated
-    } else if outbound.verify {
-        return Err(Error::Message(format!("send to {address} did not render")));
-    } else {
-        DeliveryOutcome::Delivered
+    let after = pasted_screen(app, pane, &before.text, &payload).await?;
+    let outcome = match classify_paste(&before.text, &after, &payload) {
+        PasteHit::Clean => {
+            app.mux.send_keys(pane, &[Key::Enter]).await?;
+            DeliveryOutcome::Delivered
+        }
+        PasteHit::Contaminated => {
+            emit(
+                app,
+                DomainEvent::AttentionRaised {
+                    seat: address.to_owned(),
+                    reason: "contaminated".to_owned(),
+                    at: now_ts(),
+                },
+            )
+            .await;
+            DeliveryOutcome::Contaminated
+        }
+        PasteHit::Missing => {
+            return Err(Error::Message(format!("send to {address} did not render")));
+        }
     };
     let degraded = matches!(classify_stub(&before.text, None), ComposerState::Unknown);
-    Ok(stored(app, outbound, address, outcome, degraded, interact_reason).await)
-}
-
-fn clean(before: &str, after: &str, payload: &str) -> bool {
-    let mut expected = String::new();
-    expected.push_str(before);
-    expected.push_str(payload);
-    after == expected
+    stored(app, outbound, address, outcome, degraded, interact_reason).await
 }
 
 async fn receipt_row(
@@ -224,7 +234,7 @@ async fn receipt_row(
     address: &str,
     evaluated: &crewmux_mux::Evaluated,
     interact_reason: Option<&str>,
-) -> Value {
+) -> Result<Value, Error> {
     let outcome = match evaluated.verdict {
         GuardVerdict::Escalate(_) => DeliveryOutcome::Escalated,
         GuardVerdict::Deliver => DeliveryOutcome::Delivered,
@@ -248,7 +258,7 @@ async fn stored(
     outcome: DeliveryOutcome,
     guard_degraded: bool,
     interact_reason: &str,
-) -> Value {
+) -> Result<Value, Error> {
     let cursor = app.cursor.fetch_add(1, Ordering::Relaxed).saturating_add(1);
     let fingerprint = obligation_fingerprint(&outbound.from, address, &outbound.body);
     let receipt = DeliveryReceipt {
@@ -259,14 +269,14 @@ async fn stored(
         at: now_ts(),
         interact_reason: (!interact_reason.is_empty()).then(|| interact_reason.to_owned()),
     };
-    let doc = serde_json::to_string(&receipt).unwrap_or_default();
+    let doc = serde_json::to_string(&receipt).map_err(|err| Error::Message(err.to_string()))?;
     let store = Arc::clone(&app.store);
-    drop(
-        tokio::task::spawn_blocking(move || {
-            store.write(move |conn| crewmux_store::insert_receipt(conn, cursor, &doc))
-        })
-        .await,
-    );
+    let inserted = tokio::task::spawn_blocking(move || {
+        store.write(move |conn| crewmux_store::insert_receipt(conn, cursor, &doc))
+    })
+    .await
+    .map_err(crate::state::join_err)?;
+    inserted.map_err(|err| Error::Message(format!("receipt: {err}")))?;
     if let Ok(destination) = SessionRef::new(address) {
         crate::inbox_http::record(
             app,
@@ -288,7 +298,7 @@ async fn stored(
         },
     )
     .await;
-    json!({
+    Ok(json!({
         "seat": address,
         "outcome": outcome_name(outcome),
         "guard_degraded": guard_degraded,
@@ -296,7 +306,7 @@ async fn stored(
         "cursor": cursor,
         "bracketed": interact_reason.is_empty(),
         "interact_reason": receipt.interact_reason,
-    })
+    }))
 }
 
 fn outcome_name(outcome: DeliveryOutcome) -> &'static str {
@@ -326,68 +336,4 @@ fn reason_text(readiness: &Readiness) -> String {
 
 fn seat_name(address: &str) -> &str {
     address.split_once('@').map_or(address, |(name, _)| name)
-}
-
-pub(crate) async fn send_route(
-    axum::extract::State(app): axum::extract::State<App>,
-    body: axum::body::Bytes,
-) -> axum::response::Response {
-    app.touch();
-    route(&app, &body, false).await
-}
-
-pub(crate) async fn broadcast_route(
-    axum::extract::State(app): axum::extract::State<App>,
-    body: axum::body::Bytes,
-) -> axum::response::Response {
-    app.touch();
-    route(&app, &body, true).await
-}
-
-async fn route(app: &App, body: &[u8], all: bool) -> axum::response::Response {
-    let parsed: SendBody = match serde_json::from_slice(body) {
-        Ok(parsed) => parsed,
-        Err(err) => return crate::http::fail(Error::Message(err.to_string())),
-    };
-    let targets = parsed
-        .to
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(str::to_owned)
-        .collect();
-    let outbound = Outbound {
-        from: parsed.from.unwrap_or_else(|| "operator@host".to_owned()),
-        targets,
-        rig: parsed.rig,
-        all: all || parsed.all,
-        body: parsed.body,
-        interact: parsed.dangerously_interact,
-        reason: parsed.reason,
-        verify: parsed.verify,
-    };
-    match deliver(app, outbound).await {
-        Ok(value) => crate::http::ok(value),
-        Err(err) => crate::http::fail(err),
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct SendBody {
-    #[serde(default)]
-    from: Option<String>,
-    #[serde(default)]
-    to: Option<String>,
-    #[serde(default)]
-    rig: Option<String>,
-    #[serde(default)]
-    all: bool,
-    body: String,
-    #[serde(default)]
-    dangerously_interact: bool,
-    #[serde(default)]
-    reason: Option<String>,
-    #[serde(default)]
-    verify: bool,
 }

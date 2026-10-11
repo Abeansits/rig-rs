@@ -100,6 +100,19 @@ pub fn insert_receipt(conn: &Connection, cursor: u64, doc: &str) -> Result<(), E
     Ok(())
 }
 
+/// Highest receipt cursor, or 0 when the table is empty.
+///
+/// # Errors
+///
+/// Returns a SQLite error.
+pub fn max_receipt_cursor(conn: &Connection) -> Result<u64, Error> {
+    let max: Option<i64> =
+        conn.query_row("SELECT MAX(cursor) FROM delivery_receipts", [], |row| {
+            row.get(0)
+        })?;
+    Ok(max.and_then(|value| u64::try_from(value).ok()).unwrap_or(0))
+}
+
 fn insert_item(conn: &Connection, item: &QueueItem) -> Result<(), Error> {
     let doc = serde_json::to_string(item).map_err(|err| Error::Event(err.to_string()))?;
     conn.execute(

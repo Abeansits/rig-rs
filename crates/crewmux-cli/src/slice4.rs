@@ -296,7 +296,11 @@ fn call(method: &str, path: &str, body: Option<&Value>, json: bool) -> Result<i3
     let code = value
         .get("status")
         .and_then(Value::as_str)
-        .map_or(0, |status| if status == "partial" { 3 } else { 0 });
+        .map_or(0, |status| match status {
+            "ok" => 0,
+            "partial" => 3,
+            _ => 1,
+        });
     Ok(code)
 }
 

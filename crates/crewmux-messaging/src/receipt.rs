@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryOutcome {
-    /// Paste and, when clean, Enter.
+    /// Enter was sent after a clean paste.
     Delivered,
     /// The guard asked us to wait.
     Deferred,
