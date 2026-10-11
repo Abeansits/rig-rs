@@ -156,13 +156,13 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-llvm-cov,cargo-nextest
-      - name: llvm-cov (nextest, ci profile)
+      - name: llvm-cov (nextest, coverage profile)
         env:
           INSTA_UPDATE: "no"
         run: |
-          # Exclude real-tmux tests: death_hook_doorbell_latency's 500ms budget
-          # times out under instrumentation; tmux-matrix already covers them.
-          cargo llvm-cov nextest --workspace --all-features --profile ci --no-tests=warn --locked --lcov --output-path lcov.info -- -E 'not test(/::tmux_it::/)'
+          # coverage profile excludes ::tmux_it:: (latency budget fails under
+          # instrumentation; tmux-matrix covers them) and ::differential::.
+          cargo llvm-cov nextest --workspace --all-features --profile coverage --no-tests=warn --locked --lcov --output-path lcov.info
           cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
