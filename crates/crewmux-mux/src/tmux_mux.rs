@@ -57,6 +57,7 @@ pub struct TmuxMux {
     exec: Arc<dyn TmuxExec>,
     socket: String,
     binary: String,
+    socket_path: String,
     bell: String,
     hub: Arc<tokio::sync::Mutex<Hub>>,
     events: broadcast::Sender<MuxEvent>,
@@ -140,10 +141,19 @@ impl TmuxMux {
             }
         };
         bell_tx.send_replace(Some(bell.clone()));
+        let socket_path = match read_socket_path(exec.as_ref()).await {
+            Ok(path) => path,
+            Err(err) => {
+                cancel.cancel();
+                control.abort();
+                return Err(err);
+            }
+        };
         Ok(Self {
             exec,
             socket: config.socket,
             binary,
+            socket_path,
             bell,
             hub,
             events,
@@ -159,6 +169,23 @@ impl TmuxMux {
     pub fn socket(&self) -> &str {
         &self.socket
     }
+}
+
+async fn read_socket_path(exec: &dyn TmuxExec) -> Result<String, MuxError> {
+    let out = exec
+        .run(&[
+            "display-message".to_owned(),
+            "-p".to_owned(),
+            "#{socket_path}".to_owned(),
+        ])
+        .await?;
+    let path = out.stdout.trim();
+    if path.is_empty() {
+        return Err(MuxError::Control(
+            "tmux did not report a socket path".to_owned(),
+        ));
+    }
+    Ok(path.to_owned())
 }
 
 async fn open_bell(exec: &dyn TmuxExec) -> Result<String, MuxError> {
@@ -342,6 +369,10 @@ impl Multiplexer for TmuxMux {
 
     fn events(&self) -> broadcast::Receiver<MuxEvent> {
         self.events.subscribe()
+    }
+
+    fn attach_program(&self) -> (String, String) {
+        (self.binary.clone(), self.socket_path.clone())
     }
 }
 

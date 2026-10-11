@@ -1,5 +1,6 @@
 //! Shared daemon state. Cheap to clone into axum tasks.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,11 +17,11 @@ use crate::error::Error;
 pub(crate) struct App {
     /// SQLite writer.
     pub store: Arc<crewmux_store::Store>,
-    /// tmux, or [`crewmux_mux::FakeMux`] when `RIG_FAKE_MUX=1`.
+    /// tmux, or [`crewmux_mux::FakeMux`] in debug builds that set `RIG_FAKE_MUX=1`.
     pub mux: Arc<dyn Multiplexer>,
-    /// `-L` socket name passed to `tmux attach`.
-    pub socket_name: String,
-    /// `RIG_STUB_SCRIPT`, captured at startup so tests can inject it without `set_var`.
+    /// One mutex per rig name so concurrent `up` calls cannot insert the same seat twice.
+    pub up_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Fallback when `RIG_STUB_SCRIPT` is unset. Each launch re-reads the environment.
     pub stub_script: Option<String>,
     /// Shutdown signal.
     pub cancel: CancellationToken,
@@ -34,6 +35,19 @@ impl App {
     /// Remember that a request is in progress so the idle reap waits.
     pub(crate) fn touch(&self) {
         self.activity.store(now_ms(), Ordering::Relaxed);
+    }
+
+    /// Serialize `up` for one rig name. The guard is held across the launch awaits.
+    pub(crate) async fn lock_rig(&self, name: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let mutex = {
+            let mut guard = self.up_locks.lock().await;
+            Arc::clone(
+                guard
+                    .entry(name.to_owned())
+                    .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+            )
+        };
+        mutex.lock_owned().await
     }
 }
 

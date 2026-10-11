@@ -98,6 +98,15 @@ seats:
     assert_eq!(err.path, "seats[1].name");
 }
 
+#[test]
+fn seat_names_reject_tmux_format_characters() {
+    let err = parse("name: pair\nseats:\n  - name: \"#{pane_id}\"\n    runtime: stub\n")
+        .expect_err("format");
+    assert!(err.message.contains("[A-Za-z0-9_-]"), "{err:?}");
+    let err = parse("name: pair\nseats:\n  - name: one.two\n    runtime: stub\n").expect_err("dot");
+    assert!(err.message.contains("[A-Za-z0-9_-]"), "{err:?}");
+}
+
 fn golden(err: &SpecError) -> String {
     format!(
         "{} at line {} column {} ({})",

@@ -20,6 +20,32 @@ mod spawn;
 
 pub use error::Error;
 pub use output::{print_stderr, print_stdout};
+
+/// Report whether a daemon is listening. Does not start one.
+///
+/// Exit `0` when `/healthz` answers 200. Exit `1` when it does not.
+#[must_use]
+pub fn daemon_status() -> i32 {
+    let home = crewmux_api::rig_home();
+    let socket = crewmux_api::daemon_socket(&home);
+    let response = crewmux_api::Client::over_uds(socket)
+        .with_timeout(std::time::Duration::from_millis(300))
+        .request(
+            crewmux_api::Healthz::METHOD,
+            crewmux_api::Healthz::PATH,
+            None,
+        );
+    match response {
+        Ok(response) if response.status == 200 => {
+            output::stdout_line(response.body.trim());
+            0
+        }
+        Ok(_) | Err(_) => {
+            output::stdout_line("daemon stopped");
+            1
+        }
+    }
+}
 pub use setup_plan::{SetupPlan, SetupStep};
 
 use std::os::unix::process::CommandExt;
@@ -36,7 +62,12 @@ use crate::paths::Paths;
 
 /// Parsed argv for every verb except `daemon`, which the binary dispatches itself.
 #[derive(Debug, Parser)]
-#[command(name = "rig", version = "0.0.0", about = "Run stub seats")]
+#[command(
+    name = "rig",
+    version = "0.0.0",
+    about = "Run stub seats",
+    arg_required_else_help = true
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

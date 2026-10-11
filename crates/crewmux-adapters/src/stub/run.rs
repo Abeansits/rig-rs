@@ -1,10 +1,12 @@
-// Derived from openrig packages/daemon/src/testing/stub-script.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
+// Derived from openrig packages/daemon/src/adapters/stub-script.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 
 //! `rig-stub-agent` process: banner, optional gate, composer, and echo.
 
+use std::io::BufRead;
+use std::os::fd::AsFd;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 
 use crate::error::Error;
 use crate::stub::script::{StubScript, parse_script};
@@ -44,31 +46,50 @@ async fn drive(script: StubScript) -> Result<(), Error> {
 }
 
 async fn echo_until(exit_at: Option<tokio::time::Instant>) -> Result<(), Error> {
-    let mut stdin = BufReader::new(tokio::io::stdin());
+    // Tokio's stdin read cannot be cancelled, so a timer cannot win while tmux
+    // holds the pty. Holding `Stdin::lock` also deadlocks process exit, which
+    // flushes stdio. A detached thread reads a dup'd fd instead.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    drop(std::thread::spawn(move || {
+        // Dup the fd so this read does not hold the stdio lock. `process::exit`
+        // flushes stdio and would deadlock on that lock until the pty closed.
+        let Ok(fd) = std::io::stdin().as_fd().try_clone_to_owned() else {
+            return;
+        };
+        let mut reader = std::io::BufReader::new(std::fs::File::from(fd));
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    if tx.send(std::mem::take(&mut line)).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }));
     let mut stdout = tokio::io::stdout();
-    let mut line = String::new();
     loop {
         if exit_due(exit_at) {
             return Ok(());
         }
-        let read = stdin.read_line(&mut line);
-        let result = match exit_at {
+        let line = match exit_at {
             Some(deadline) => {
                 let wait = deadline.saturating_duration_since(tokio::time::Instant::now());
                 tokio::select! {
                     () = tokio::time::sleep(wait) => return Ok(()),
-                    result = read => result,
+                    msg = rx.recv() => msg,
                 }
             }
-            None => read.await,
+            None => rx.recv().await,
         };
-        let n = result?;
-        if n == 0 {
+        let Some(line) = line else {
             return Ok(());
-        }
+        };
         stdout.write_all(line.as_bytes()).await?;
         stdout.flush().await?;
-        line.clear();
     }
 }
 

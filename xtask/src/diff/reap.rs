@@ -1,0 +1,230 @@
+//! Stop daemons a diff case started, and fail if any `rig daemon run` remains.
+
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use super::types::{HermeticHome, Side};
+use crate::error::{Error, io_err};
+
+/// Owns the scratch home's daemons until [`DaemonGuard::finish`].
+pub(crate) struct DaemonGuard<'a> {
+    home: &'a HermeticHome,
+    side: &'a Side,
+    port: Option<u16>,
+}
+
+impl<'a> DaemonGuard<'a> {
+    pub(crate) fn new(home: &'a HermeticHome, side: &'a Side, port: Option<u16>) -> Self {
+        Self { home, side, port }
+    }
+
+    /// `GET /healthz` target is up. Starts the product daemon when it is not.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when the daemon cannot be spawned or never answers.
+    pub(crate) fn ensure(&self) -> Result<(), Error> {
+        match self.side {
+            Side::Rs { bin } => ensure_rs(bin, self.home),
+            Side::Ts { node, pkg } => {
+                let port = self.port.unwrap_or(9);
+                ensure_ts(node, pkg, port, self.home)
+            }
+        }
+    }
+
+    /// Shut the daemon down and assert no `rig daemon run` for this home remains.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when a daemon process is still alive after SIGKILL.
+    pub(crate) fn finish(&self) -> Result<(), Error> {
+        let rig_home = self.home.rig_home();
+        let socket = crewmux_api::daemon_socket(&rig_home);
+        drop(
+            crewmux_api::Client::over_uds(&socket)
+                .with_timeout(Duration::from_secs(2))
+                .request("POST", "/shutdown", Some(b"{}")),
+        );
+        if let Side::Ts { node, pkg } = self.side {
+            drop(stop_ts(node, pkg, self.home));
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && !daemon_run_pids(&rig_home).is_empty() {
+            for pid in daemon_run_pids(&rig_home) {
+                signal(pid, "-TERM");
+            }
+            thread::park_timeout(Duration::from_millis(50));
+        }
+        for pid in daemon_run_pids(&rig_home) {
+            signal(pid, "-KILL");
+        }
+        thread::park_timeout(Duration::from_millis(50));
+        let left = daemon_run_pids(&rig_home);
+        if left.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::Message(format!(
+                "rig daemon run still alive for {}: {left:?}",
+                rig_home.display()
+            )))
+        }
+    }
+}
+
+fn ensure_rs(bin: &Path, home: &HermeticHome) -> Result<(), Error> {
+    let rig_home = home.rig_home();
+    std::fs::create_dir_all(rig_home.join("run"))
+        .map_err(|source| io_err("create daemon run dir", source))?;
+    let socket = crewmux_api::daemon_socket(&rig_home);
+    if health_ok(&socket) {
+        return Ok(());
+    }
+    let mut command = Command::new(bin);
+    command
+        .args(["daemon", "run"])
+        .env_clear()
+        .envs(home.child_env())
+        .current_dir(&home.home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command.process_group(0);
+    command
+        .spawn()
+        .map_err(|source| io_err("spawn rig daemon run", source))?;
+    wait_health(&socket)
+}
+
+fn ensure_ts(node: &Path, pkg: &Path, port: u16, home: &HermeticHome) -> Result<(), Error> {
+    let wrapper = pkg.join("packages/cli/dist/bin-wrapper.js");
+    let mut command = Command::new(node);
+    command
+        .arg(&wrapper)
+        .args([
+            "daemon",
+            "start",
+            "--no-kernel",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
+        .env_clear()
+        .envs(home.child_env())
+        .current_dir(&home.home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = command
+        .spawn()
+        .map_err(|source| io_err("spawn openrig daemon start", source))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|source| io_err("wait openrig daemon start", source))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(Error::Message(format!(
+            "openrig daemon start failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )))
+    }
+}
+
+fn stop_ts(node: &Path, pkg: &Path, home: &HermeticHome) -> Result<(), Error> {
+    let wrapper = pkg.join("packages/cli/dist/bin-wrapper.js");
+    let mut command = Command::new(node);
+    command
+        .arg(wrapper)
+        .args(["daemon", "stop"])
+        .env_clear()
+        .envs(home.child_env())
+        .current_dir(&home.home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+        .status()
+        .map_err(|source| io_err("openrig daemon stop", source))?;
+    Ok(())
+}
+
+fn health_ok(socket: &Path) -> bool {
+    crewmux_api::Client::over_uds(socket)
+        .with_timeout(Duration::from_millis(200))
+        .request("GET", "/healthz", None)
+        .is_ok_and(|response| response.status == 200)
+}
+
+fn wait_health(socket: &Path) -> Result<(), Error> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        if health_ok(socket) {
+            return Ok(());
+        }
+        thread::park_timeout(Duration::from_millis(50));
+    }
+    Err(Error::Message("daemon did not answer /healthz".to_owned()))
+}
+
+fn signal(pid: u32, name: &str) {
+    drop(
+        Command::new("kill")
+            .args([name, &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status(),
+    );
+}
+
+/// Process ids of `rig daemon run` whose environment names this `RIG_HOME`.
+#[must_use]
+pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
+    let needle = format!("RIG_HOME={}", rig_home.display());
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut pids = Vec::new();
+    for entry in entries.flatten() {
+        let Some(text) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Ok(pid) = text.parse::<u32>() else {
+            continue;
+        };
+        if pid == std::process::id() {
+            continue;
+        }
+        let dir: PathBuf = entry.path();
+        let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
+        let cmd = String::from_utf8_lossy(&cmdline);
+        if !cmd.contains("daemon") || !cmd.contains("run") {
+            continue;
+        }
+        let env = std::fs::read(dir.join("environ")).unwrap_or_default();
+        if String::from_utf8_lossy(&env).contains(&needle) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+/// Bind an ephemeral loopback port and release it.
+///
+/// # Errors
+///
+/// Returns [`Error`] when the socket cannot be bound.
+pub(crate) fn free_port() -> Result<u16, Error> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|source| io_err("bind ephemeral port", source))?;
+    let port = listener
+        .local_addr()
+        .map_err(|source| io_err("read ephemeral port", source))?
+        .port();
+    drop(listener);
+    Ok(port)
+}

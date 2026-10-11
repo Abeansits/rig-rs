@@ -49,15 +49,20 @@ async fn apply(app: &App, event: MuxEvent) -> Result<(), Error> {
     Ok(())
 }
 
-async fn mark_dead(app: &App, seat: &Seat) -> Result<(), Error> {
-    if matches!(seat.state, SeatState::Dead | SeatState::Stopped) {
-        return Ok(());
-    }
-    let mut updated = seat.clone();
-    let event = LifecycleService::mark_dead(&mut updated, now_ts());
-    let saved = updated;
+pub(crate) async fn mark_dead(app: &App, seat: &Seat) -> Result<(), Error> {
+    let id = seat.id;
     write(&app.store, move |conn| {
-        SeatRepo::upsert(conn, &saved)?;
+        let current = match SeatRepo::get(conn, &id) {
+            Ok(seat) => seat,
+            Err(crewmux_core::Error::SeatNotFound(_)) => return Ok(()),
+            Err(err) => return Err(err),
+        };
+        if matches!(current.state, SeatState::Dead | SeatState::Stopped) {
+            return Ok(());
+        }
+        let mut updated = current;
+        let event = LifecycleService::mark_dead(&mut updated, now_ts());
+        SeatRepo::upsert(conn, &updated)?;
         crewmux_core::EventLog::append(conn, &event)?;
         Ok(())
     })

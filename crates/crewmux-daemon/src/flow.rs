@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, StubAdapter};
-use crewmux_core::EventLog;
+use crewmux_core::{EventLog, SeatRepo, SeatState};
 use crewmux_mux::{FakeMux, Multiplexer};
 use crewmux_store::Store;
 use serde_json::Value;
@@ -31,7 +31,7 @@ async fn harness(script: Option<&str>) -> (App, Arc<FakeMux>) {
     let app = App {
         store,
         mux: shared,
-        socket_name: "rig-rs".to_owned(),
+        up_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         stub_script: script.map(str::to_owned),
         cancel: CancellationToken::new(),
         activity: Arc::new(AtomicU64::new(0)),
@@ -149,7 +149,7 @@ async fn capture_contains_the_prompt_and_lines_are_bounded() {
     assert_eq!(bounded.get("lines").and_then(Value::as_u64), Some(1));
 }
 
-/// PE-008: attach argv is `tmux -L rig-rs attach -t =<session>`.
+/// PE-008: attach argv is `<tmux> -S <socket> attach -t =<session>`.
 #[tokio::test]
 async fn attach_argv_uses_an_exact_session_target() {
     let (app, _mux) = harness(None).await;
@@ -159,8 +159,8 @@ async fn attach_argv_uses_an_exact_session_target() {
         argv,
         vec![
             "tmux".to_owned(),
-            "-L".to_owned(),
-            "rig-rs".to_owned(),
+            "-S".to_owned(),
+            "/tmp/rig-fake-rig-rs".to_owned(),
             "attach".to_owned(),
             "-t".to_owned(),
             "=one__pair".to_owned(),
@@ -245,4 +245,105 @@ seats:
     assert_eq!(seat_text(&listed, "bad", "code"), "invalid_cwd");
     assert!(mux.has_session("good__pair").await.expect("good"));
     assert!(!mux.has_session("bad__pair").await.expect("bad"));
+}
+
+#[tokio::test]
+async fn down_is_not_overwritten_by_death() {
+    let (app, _mux) = harness(None).await;
+    bring_up(&app, &two_stub("/tmp")).await.expect("up");
+    let seats = crate::db::read(&app.store, |conn| conn.list_all())
+        .await
+        .expect("seats");
+    let app_death = app.clone();
+    let hammer = tokio::spawn(async move {
+        for _ in 0..40 {
+            for seat in &seats {
+                crate::death::mark_dead(&app_death, seat)
+                    .await
+                    .expect("dead");
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+    down(&app, None).await.expect("down");
+    hammer.await.expect("hammer");
+    let listed = list_seats(&app).await.expect("ps");
+    assert_eq!(seat_text(&listed, "one", "state"), "stopped");
+    assert_eq!(seat_text(&listed, "two", "state"), "stopped");
+}
+
+#[tokio::test]
+async fn three_parallel_ups_do_not_collide() {
+    let (app, _mux) = harness(None).await;
+    let spec = two_stub("/tmp");
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..3 {
+        let app = app.clone();
+        let spec = spec.clone();
+        tasks.spawn(async move { bring_up(&app, &spec).await });
+    }
+    let mut ready = 0;
+    let mut already = 0;
+    while let Some(joined) = tasks.join_next().await {
+        let body = joined.expect("join").expect("up");
+        match body.get("status").and_then(Value::as_str) {
+            Some("ready") => ready += 1,
+            Some("already_running") => already += 1,
+            other => panic!("status {other:?} body {body}"),
+        }
+    }
+    assert_eq!(ready, 1);
+    assert_eq!(already, 2);
+}
+
+#[tokio::test]
+async fn restart_reconciles_a_half_launched_rig() {
+    let (app, mux) = harness(None).await;
+    bring_up(&app, &two_stub("/tmp")).await.expect("up");
+    let seats = crate::db::read(&app.store, |conn| conn.list_all())
+        .await
+        .expect("seats");
+    for seat in seats {
+        let mut launching = seat;
+        launching.state = SeatState::Launching;
+        let saved = launching;
+        crate::db::write(&app.store, move |conn| SeatRepo::upsert(conn, &saved))
+            .await
+            .expect("rewrite");
+    }
+    crate::reconcile::reconcile(&app).await.expect("reconcile");
+    assert!(!mux.has_session("one__pair").await.expect("one"));
+    assert!(!mux.has_session("two__pair").await.expect("two"));
+    let again = bring_up(&app, &two_stub("/tmp")).await.expect("again");
+    assert_eq!(again.get("status").and_then(Value::as_str), Some("ready"));
+}
+
+#[tokio::test]
+async fn capture_rejects_the_same_seat_name_in_two_rigs() {
+    let (app, _mux) = harness(None).await;
+    bring_up(&app, &two_stub("/tmp")).await.expect("first");
+    let other = "name: other\nseats:\n  - name: one\n    runtime: stub\n    cwd: /tmp\n";
+    bring_up(&app, other).await.expect("second");
+    let err = capture(&app, "one", None).await.expect_err("ambiguous");
+    assert!(err.to_string().contains("ambiguous"), "{err}");
+}
+
+#[test]
+fn launch_failures_keep_a_specific_code() {
+    assert_eq!(
+        crate::launch::attention_code("cwd does not exist: /missing"),
+        "invalid_cwd"
+    );
+    assert_eq!(
+        crate::launch::attention_code("permission denied"),
+        "permission_denied"
+    );
+    assert_eq!(
+        crate::launch::attention_code("no such file or directory"),
+        "not_found"
+    );
+    assert_eq!(
+        crate::launch::attention_code("adapter exploded"),
+        "launch_failed"
+    );
 }

@@ -10,10 +10,10 @@ The TypeScript pin is tag `v0.6.9`, commit `4b48ca21a9bd072aa05a08b3da6d9c0708e0
 2. List `steps`. Each step is `cli` (`argv`), `http` (`method`, `path`, optional `body`), `read_file` (path relative to the hermetic `HOME`), or `tmux_calls`.
 3. Set `normalize` in this order when the defaults are enough: `ulid`, `timestamp`, `socketpath`, `abspath`, `port`. The same raw value becomes the same placeholder inside one observation.
 4. Set `project` to `full`, `exit` (status only), `help-names` (sorted command names), or `health-shape` (`status=` plus sorted top-level keys).
-5. Set `needs` to skip the case and list it. The diff report prints those rows under `ignored`. `daemon-health` uses `UDS listener`. Slice-1 cases use `slice 1`.
+5. Set `needs` to skip the case and list it. The diff report prints those rows under `ignored`.
 6. Set `scenario` when the case stands in for a file under `packages/test-system/scenarios/`.
 
-`daemon-health` is `needs: "UDS listener"` until the product daemon listens on the Unix socket. `GET /healthz` over that socket is covered by `diff_uds_transport` against a test listener. `stub-seat` is `needs: "slice 1"`.
+`daemon-health` runs `GET /healthz` and compares the health-shape projection (`status=` plus sorted top-level keys). `stub-seat` runs the slice 1 acceptance document.
 
 `scenario-runner-probe` names `packages/test-system/scenarios/clean-lifecycle-no-residue.yaml` and runs `rig --version` plus the tmux shim. Spike S11 is not a YAML interpreter yet, so this probe shows the runner can target either side. It does not execute the scenario file.
 

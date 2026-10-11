@@ -171,13 +171,14 @@ impl AsRef<str> for RigName {
 pub struct SeatName(String);
 
 impl SeatName {
-    /// Reject an empty name.
+    /// Reject a name tmux would format-expand.
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains a newline.
+    /// Returns [`TypeError::Name`] when `text` is empty or contains a character
+    /// outside `[A-Za-z0-9_-]`.
     pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
-        validate_name(text.into()).map(Self)
+        validate_seat_name(text.into()).map(Self)
     }
 
     /// Borrow the name.
@@ -204,4 +205,16 @@ fn validate_name(text: String) -> Result<String, TypeError> {
         return Err(TypeError::Name(text));
     }
     Ok(text)
+}
+
+fn validate_seat_name(text: String) -> Result<String, TypeError> {
+    let ok = !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+    if ok {
+        Ok(text)
+    } else {
+        Err(TypeError::Name(text))
+    }
 }

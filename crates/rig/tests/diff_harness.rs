@@ -54,10 +54,7 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
     );
     let reports = self_reports(&cases, &bin).unwrap();
     let text = format_report(&reports);
-    assert!(
-        text.contains("daemon-health") && text.contains("needs UDS listener"),
-        "{text}"
-    );
+    assert!(text.contains("| daemon-health | Equal |"), "{text}");
     assert!(text.contains("| stub-seat | Equal |"), "{text}");
     assert!(text.contains("| up-ps-down-stub | Equal |"), "{text}");
     assert!(text.contains("| capture-stub | Equal |"), "{text}");
@@ -76,9 +73,16 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
 }
 
 #[test]
-#[ignore = "needs UDS listener"]
 fn daemon_health_against_product_daemon() {
-    panic!("the product daemon does not listen on the Unix socket yet");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
+    let cases = load_suite(&exceptions()).unwrap();
+    let case = cases
+        .into_iter()
+        .find(|case| case.case.id == "daemon-health")
+        .unwrap();
+    assert!(case.needs.is_none(), "daemon-health is enabled");
+    let ran = execute_rs(&case, &bin).unwrap();
+    assert!(ran.canonical.contains("status=ok"), "{}", ran.canonical);
 }
 
 #[test]

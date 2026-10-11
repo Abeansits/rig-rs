@@ -127,7 +127,8 @@ pub fn rig_home() -> PathBuf {
 /// Path of the rig-rs daemon socket under a `RIG_HOME`.
 ///
 /// Paths that would not fit in `sockaddr_un` are replaced with a short socket
-/// under `TMPDIR` (or `/tmp`). The client and the daemon share this function.
+/// under `$TMPDIR/rig-<uid>/` (or `/tmp/rig-<uid>/`). The client and the daemon
+/// share this function. The directory is private; callers must not chmod `TMPDIR`.
 #[must_use]
 pub fn daemon_socket(rig_home: &Path) -> PathBuf {
     let preferred = rig_home.join("run").join("daemon.sock");
@@ -138,17 +139,49 @@ pub fn daemon_socket(rig_home: &Path) -> PathBuf {
 }
 
 fn short_socket(preferred: &Path) -> PathBuf {
-    let name = format!(
+    let file = format!(
         "rig-{:016x}.sock",
         fnv64(preferred.as_os_str().as_encoded_bytes())
     );
+    let dir = format!("rig-{}", current_uid());
+    let under = |root: &Path| root.join(&dir).join(&file);
     if let Some(tmp) = std::env::var_os("TMPDIR") {
-        let candidate = PathBuf::from(&tmp).join(&name);
+        let candidate = under(Path::new(&tmp));
         if candidate.as_os_str().len() <= 100 {
             return candidate;
         }
     }
-    PathBuf::from("/tmp").join(name)
+    under(Path::new("/tmp"))
+}
+
+fn current_uid() -> u32 {
+    if let Ok(text) = std::fs::read_to_string("/proc/self/status") {
+        for line in text.lines() {
+            let Some(rest) = line.strip_prefix("Uid:") else {
+                continue;
+            };
+            if let Some(token) = rest.split_whitespace().next()
+                && let Ok(uid) = token.parse()
+            {
+                return uid;
+            }
+        }
+    }
+    let Ok(child) = std::process::Command::new("id")
+        .arg("-u")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return 0;
+    };
+    let Ok(output) = child.wait_with_output() else {
+        return 0;
+    };
+    String::from_utf8(output.stdout)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 fn fnv64(bytes: &[u8]) -> u64 {

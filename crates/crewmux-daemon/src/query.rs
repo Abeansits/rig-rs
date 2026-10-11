@@ -52,18 +52,23 @@ pub(crate) async fn attach_argv(app: &App, name: &str) -> Result<Vec<String>, Er
     let Some(session) = seat.tmux_session else {
         return Err(Error::Message(format!("seat {name} has no session")));
     };
-    Ok(tmux_attach(&app.socket_name, &session))
+    let (binary, socket_path) = app.mux.attach_program();
+    Ok(tmux_attach(&binary, &socket_path, &session))
 }
 
-pub(crate) fn tmux_attach(socket: &str, session: &str) -> Vec<String> {
+/// `rig attach` execs the daemon's tmux binary against the server socket path.
+///
+/// `-S` ignores the caller's `TMUX_TMPDIR`. `-L` would follow that variable and
+/// miss the server the daemon created.
+pub(crate) fn tmux_attach(binary: &str, socket_path: &str, session: &str) -> Vec<String> {
     let name: String = session
         .chars()
         .map(|ch| if ch == '.' || ch == ':' { '_' } else { ch })
         .collect();
     vec![
-        "tmux".to_owned(),
-        "-L".to_owned(),
-        socket.to_owned(),
+        binary.to_owned(),
+        "-S".to_owned(),
+        socket_path.to_owned(),
         "attach".to_owned(),
         "-t".to_owned(),
         format!("={name}"),
@@ -105,28 +110,36 @@ async fn rig_exists(app: &App, name: &str) -> Result<bool, Error> {
 }
 
 async fn stop_seat(app: &App, seat: &Seat, events: &mut Vec<Value>) -> Result<bool, Error> {
-    if seat.state == SeatState::Stopped {
+    let id = seat.id;
+    let prepared = write(&app.store, move |conn| {
+        let current = match SeatRepo::get(conn, &id) {
+            Ok(seat) => seat,
+            Err(crewmux_core::Error::SeatNotFound(_)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        if current.state == SeatState::Stopped {
+            return Ok(None);
+        }
+        let session = current.tmux_session.clone();
+        let mut updated = current;
+        let event = LifecycleService::mark_stopped(&mut updated, now_ts());
+        let name = updated.name.as_str().to_owned();
+        SeatRepo::upsert(conn, &updated)?;
+        crewmux_core::EventLog::append(conn, &event)?;
+        Ok(Some((event, name, session)))
+    })
+    .await?;
+    let Some((event, name, session)) = prepared else {
         return Ok(false);
-    }
+    };
     let mut killed = false;
-    if let Some(session) = &seat.tmux_session {
-        match app.mux.kill_session(session).await {
+    if let Some(session) = session {
+        match app.mux.kill_session(&session).await {
             Ok(()) => killed = true,
             Err(MuxError::NotFound(_)) => {}
             Err(err) => return Err(err.into()),
         }
     }
-    let mut updated = seat.clone();
-    let event = LifecycleService::mark_stopped(&mut updated, now_ts());
-    let name = updated.name.as_str().to_owned();
-    let saved = updated;
-    let stored = event.clone();
-    write(&app.store, move |conn| {
-        SeatRepo::upsert(conn, &saved)?;
-        crewmux_core::EventLog::append(conn, &stored)?;
-        Ok(())
-    })
-    .await?;
     events.push(event_value(&event, Some(&name)));
     Ok(killed)
 }
@@ -141,17 +154,28 @@ async fn attached(app: &App, seat: &Seat) -> Result<bool, Error> {
 
 async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
     let seats = read(&app.store, |conn| conn.list_all()).await?;
-    let mut found = None;
+    let mut live = Vec::new();
+    let mut resting = Vec::new();
     for seat in seats {
         if seat.name.as_str() != name {
             continue;
         }
-        if !matches!(seat.state, SeatState::Stopped | SeatState::Dead) {
-            return Ok(seat);
-        }
-        if found.is_none() {
-            found = Some(seat);
+        if matches!(seat.state, SeatState::Stopped | SeatState::Dead) {
+            resting.push(seat);
+        } else {
+            live.push(seat);
         }
     }
-    found.ok_or_else(|| Error::Message(format!("seat not found: {name}")))
+    if live.len() > 1 {
+        return Err(Error::Message(format!("seat {name} is ambiguous")));
+    }
+    if let Some(seat) = live.pop() {
+        return Ok(seat);
+    }
+    if resting.len() > 1 {
+        return Err(Error::Message(format!("seat {name} is ambiguous")));
+    }
+    resting
+        .pop()
+        .ok_or_else(|| Error::Message(format!("seat not found: {name}")))
 }

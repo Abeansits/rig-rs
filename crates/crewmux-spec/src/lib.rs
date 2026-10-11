@@ -37,6 +37,15 @@ fn validate(spec: &RigSpec, text: &str) -> Result<(), SpecError> {
     for (index, seat) in spec.seats.iter().enumerate() {
         let path = format!("seats[{index}].name");
         check_name(seat.name.as_str(), &path, text)?;
+        if !seat_name_ok(seat.name.as_str()) {
+            let (line, col) = locate_token(text, seat.name.as_str()).unwrap_or((1, 1));
+            return Err(SpecError::at(
+                line,
+                col,
+                path,
+                "seat name must match [A-Za-z0-9_-]",
+            ));
+        }
         if !seen.insert(seat.name.as_str()) {
             let (line, col) = second_token(text, seat.name.as_str()).unwrap_or((1, 1));
             return Err(SpecError::at(
@@ -48,6 +57,13 @@ fn validate(spec: &RigSpec, text: &str) -> Result<(), SpecError> {
         }
     }
     Ok(())
+}
+
+fn seat_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn check_name(name: &str, path: &str, text: &str) -> Result<(), SpecError> {

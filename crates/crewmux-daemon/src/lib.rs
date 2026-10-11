@@ -6,6 +6,7 @@ mod error;
 mod http;
 mod launch;
 mod query;
+mod reconcile;
 mod serve;
 mod settle;
 mod state;

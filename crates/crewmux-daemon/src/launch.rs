@@ -26,6 +26,7 @@ struct Up {
 
 pub(crate) async fn bring_up(app: &App, yaml: &str) -> Result<Value, Error> {
     let spec = crewmux_spec::parse(yaml)?;
+    let _guard = app.lock_rig(spec.name.as_str()).await;
     if let Some(body) = already_running(app, &spec).await? {
         return Ok(body);
     }
@@ -144,8 +145,8 @@ async fn launch_one(
         .await;
     };
     let mut env = BTreeMap::new();
-    if let Some(script) = &app.stub_script {
-        env.insert("RIG_STUB_SCRIPT".to_owned(), script.clone());
+    if let Some(script) = stub_script(app) {
+        env.insert("RIG_STUB_SCRIPT".to_owned(), script);
     }
     let outcome = adapter
         .launch(
@@ -162,7 +163,9 @@ async fn launch_one(
         LaunchOutcome::Ok { applied, .. } => {
             store_started(app, seat, session, applied, events).await
         }
-        LaunchOutcome::Failed { error, .. } => fail_seat(app, seat, &error, "invalid_cwd").await,
+        LaunchOutcome::Failed { error, .. } => {
+            fail_seat(app, seat, &error, attention_code(&error)).await
+        }
     }
 }
 
@@ -239,6 +242,26 @@ async fn fail_seat(
     let saved = updated.clone();
     write(&app.store, move |conn| SeatRepo::upsert(conn, &saved)).await?;
     Ok(updated)
+}
+
+fn stub_script(app: &App) -> Option<String> {
+    std::env::var("RIG_STUB_SCRIPT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| app.stub_script.clone())
+}
+
+pub(crate) fn attention_code(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("permission") || lower.contains("not permitted") {
+        "permission_denied"
+    } else if lower.contains("no such file") || lower.contains("not found") {
+        "not_found"
+    } else if lower.contains("cwd") || lower.contains("directory") {
+        "invalid_cwd"
+    } else {
+        "launch_failed"
+    }
 }
 
 pub(crate) fn now_ts() -> Timestamp {

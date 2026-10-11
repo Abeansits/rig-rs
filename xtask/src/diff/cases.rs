@@ -176,6 +176,7 @@ fn rule_from(name: &str) -> Result<NormRule, Error> {
         "abspath" => Ok(NormRule::AbsPath),
         "port" => Ok(NormRule::Port),
         "socketpath" => Ok(NormRule::SocketPath),
+        "getcwd" => Ok(NormRule::Getcwd),
         other => Err(Error::Message(format!(
             "unknown norm rule {other}; custom rules are constructed in code"
         ))),

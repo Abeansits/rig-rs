@@ -243,6 +243,9 @@ pub enum NormRule {
     Port,
     /// Paths that end in `.sock`.
     SocketPath,
+    /// dash's `getcwd() failed` line, including the JSON-escaped `\\n` form.
+    /// Stub cases opt in; other cases keep the line so a real error is visible.
+    Getcwd,
     /// Caller-supplied replacement. Every match becomes the static string.
     Custom(Regex, &'static str),
 }

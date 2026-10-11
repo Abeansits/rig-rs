@@ -2,7 +2,7 @@
   "id": "stub-seat",
   "project": "full",
   "expected_diff": "PE-007",
-  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port", "getcwd"],
   "steps": [
     {
       "op": "write_file",

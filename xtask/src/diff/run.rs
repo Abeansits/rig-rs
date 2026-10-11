@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use super::compare::project;
 use super::normalize::normalize_observation;
+use super::reap::{DaemonGuard, free_port};
 use super::types::HermeticHome;
 use super::types::{LoadedCase, Observation, Side, Step, Transport, canonical};
 use crate::error::{Error, io_err};
@@ -44,10 +45,20 @@ pub fn execute(case: &LoadedCase, side: &Side, ts_port: Option<u16>) -> Result<E
     let home_path = home.home.clone();
     let socket = home.tmux_socket.clone();
     let rig_home = home.rig_home();
+    let http = case
+        .case
+        .steps
+        .iter()
+        .any(|step| matches!(step, Step::Http { .. }));
+    let port = match (side, ts_port, http) {
+        (Side::Ts { .. }, Some(port), _) => Some(port),
+        (Side::Ts { .. }, None, true) => Some(free_port()?),
+        (Side::Ts { .. } | Side::Rs { .. }, _, _) => None,
+    };
     let transport = match side {
         Side::Rs { .. } => Transport::Uds(crewmux_api::daemon_socket(&rig_home)),
         Side::Ts { .. } => {
-            let port = ts_port.unwrap_or(9);
+            let port = port.unwrap_or(9);
             let addr = format!("127.0.0.1:{port}")
                 .parse()
                 .map_err(|_| Error::Message(format!("bad port {port}")))?;
@@ -55,10 +66,19 @@ pub fn execute(case: &LoadedCase, side: &Side, ts_port: Option<u16>) -> Result<E
         }
     };
     super::bind::bind_transport(side, &transport)?;
-    let mut obs = Observation::empty();
-    for step in &case.case.steps {
-        apply_step(step, side, &transport, &home, &mut obs)?;
+    let guard = DaemonGuard::new(&home, side, port);
+    if http {
+        guard.ensure()?;
     }
+    let mut obs = Observation::empty();
+    let stepped = (|| {
+        for step in &case.case.steps {
+            apply_step(step, side, &transport, &home, &mut obs)?;
+        }
+        Ok(())
+    })();
+    guard.finish()?;
+    stepped?;
     let roots = vec![home.root.path().to_path_buf(), home_path.clone(), rig_home];
     let normalized = normalize_observation(&obs, &case.case.normalize, &roots)?;
     let projected = project(normalized, case.project);

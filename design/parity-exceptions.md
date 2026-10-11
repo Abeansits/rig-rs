@@ -39,7 +39,7 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 
 ## PE-005: the stub script is `RIG_STUB_SCRIPT` key=value, not a JSON step list
 
-- **TS behaviour:** `packages/daemon/src/stub-script.ts` runs a JSON list of steps.
+- **TS behaviour:** `packages/daemon/src/adapters/stub-script.ts` runs a JSON list of steps.
 - **Rust behaviour:** the slice 1 acceptance script is comma-separated `ready_after_ms`, `exit_after_ms`, and `print_gate=<code>`. The fixture still prints `stub> ` and echoes submitted lines.
 - **Required test:** `crewmux_adapters::screen_tests::script_parses_gate_and_timers` and `gate_surfaces_as_attention`.
 
@@ -59,12 +59,22 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Snapshot:** `tests/diff/snapshots/stub-seat.rs.snap`, `tests/diff/snapshots/up-ps-down-stub.rs.snap`, and `tests/diff/snapshots/capture-stub.rs.snap` record that Rust side. `ExpectedDiff(PE-007)` applies only while the live Rust observation still matches the snapshot for that case. stderr, json, files, and tmux argv stay compared as ordinary fields.
 - **Why this is recorded:** this is the stdout and exit from a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). The acceptance spec requires this document and this JSON. Delete this heading and the three `.rs.snap` files when those two fields match v0.6.9. The harness then reports `stale exception`. The `capture-stub` and `stub-seat` TypeScript goldens use the cold-start capture error (`tmux_unavailable`). A leftover OpenRig daemon from an earlier run answers the same capture with `session_missing`, and the golden check fails. dash's `getcwd() failed` line is stripped before compare. CI runs one cold diff, which is the snapshot that is committed.
 - **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-007)` for `stub-seat`, `up-ps-down-stub`, and `capture-stub`.
+- **A v0.6.9-valid spec is not a comparable stub case.** Slice 1's parser accepts `name` plus `seats` and rejects the unknown keys `version`, `pods`, and `members`. A v0.6.9 document (`version: "0.2"`, pods, members, `agent_ref`) is rejected by Rust before any seat exists. OpenRig accepts that file and then resolves agent files and a runtime this slice does not launch. The two sides cannot both produce a stub seat from that file, so the comparison would be a spec-format mismatch rather than stub behaviour. No extra stub case was added.
 
 ## PE-008: `rig attach` execs tmux rather than `rig attach --self`
 
 - **TS behaviour:** `packages/cli` `rig attach --self` attaches the operator's terminal through the TypeScript client.
-- **Rust behaviour:** acceptance criterion 7 execs `tmux -L rig-rs attach -t =<session>` (exact-match target). An unknown seat exits 1.
-- **Required test:** `attach_execs_exact_tmux_target` and `attach_unknown_seat_exits_1`.
+- **Rust behaviour:** acceptance criterion 7 execs the daemon's resolved tmux binary with `-S <socket path> attach -t =<session>` (exact-match target). The path is the one that server reported (`display-message -p '#{socket_path}'`). `-L` plus the caller's `TMUX_TMPDIR` addresses a different server. An unknown seat exits 1.
+- **Required test:** `attach_execs_exact_tmux_target`, `attach_unknown_seat_exits_1`, and `attach_uses_the_server_socket_under_tmux_tmpdir`.
+
+## PE-009: `/healthz` is status and pid
+
+- **Covers:** stdout
+- **TS behaviour:** `GET /healthz` in `packages/daemon/src/server.ts` returns `status: "ok"` plus production fields: `pid`, `selfHostId`, `selfHostIdSource`, `eventLoop`, `routeTimings`, `bind`, `stuckSweep`, `wakeLadder`, and `slowOperations`.
+- **Rust behaviour:** slice 1 returns `{status, pid}`. The health-shape projection is `status=ok` and `keys=pid,status`. Exit status matches.
+- **Snapshot:** `tests/diff/snapshots/daemon-health.rs.snap` records that Rust side. `ExpectedDiff(PE-009)` applies only while the live Rust observation still matches it. stderr, exit, json, files, and tmux argv stay compared as ordinary fields.
+- **Why this is recorded:** a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`) shows the same `status=ok` and a longer key list on the TypeScript side. Delete this heading and the `.rs.snap` when `/healthz` carries the same top-level keys.
+- **Required test:** `daemon_health_against_product_daemon`. `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-009)` for `daemon-health`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

@@ -48,6 +48,8 @@ pub struct FakeMux {
     own_write: watch::Sender<Option<Instant>>,
     cancel: CancellationToken,
     tracker: TaskTracker,
+    /// `-L` name, used only to build the fake `-S` path.
+    label: String,
 }
 
 impl Default for FakeMux {
@@ -66,11 +68,13 @@ impl FakeMux {
     /// A fake that records `-L socket` on every argv.
     #[must_use]
     pub fn with_socket(socket: impl Into<String>) -> Self {
+        let socket = socket.into();
         let (events, _) = broadcast::channel(64);
         let (own_write, _) = watch::channel(None);
         Self {
+            label: socket.clone(),
             inner: Arc::new(Mutex::new(FakeInner {
-                socket: socket.into(),
+                socket,
                 sessions: HashMap::new(),
                 calls: Vec::new(),
                 clients: Vec::new(),
@@ -403,6 +407,10 @@ impl Multiplexer for FakeMux {
 
     fn events(&self) -> broadcast::Receiver<MuxEvent> {
         self.events.subscribe()
+    }
+
+    fn attach_program(&self) -> (String, String) {
+        ("tmux".to_owned(), format!("/tmp/rig-fake-{}", self.label))
     }
 }
 

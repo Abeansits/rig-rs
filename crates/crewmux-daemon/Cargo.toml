@@ -28,5 +28,10 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 
+[features]
+# In-memory multiplexer for debug test builds. Release binaries leave this off
+# together with `debug_assertions`, so `RIG_FAKE_MUX` is not a production switch.
+fake-mux = []
+
 [lints]
 workspace = true

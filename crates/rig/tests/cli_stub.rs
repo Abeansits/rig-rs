@@ -71,6 +71,8 @@ fn capture_lines_are_bounded() {
     let (code, shot, err) = json_out(env.rig().args(["capture", "one", "--lines", "1", "--json"]));
     assert_eq!(code, 0, "{err}");
     assert_eq!(shot.get("lines").and_then(Value::as_u64), Some(1));
+    let text = shot.get("text").and_then(Value::as_str).unwrap_or_default();
+    assert!(text.contains("stub> "), "{text}");
 }
 
 /// PE-008: `rig attach` execs `tmux -L rig-rs attach -t =<session>`.
@@ -104,7 +106,7 @@ fn attach_execs_exact_tmux_target() {
     let text = std::fs::read_to_string(&log).expect("argv");
     assert_eq!(
         text.lines().collect::<Vec<_>>(),
-        ["-L", "rig-rs", "attach", "-t", "=one__pair"]
+        ["-S", "/tmp/rig-fake-rig-rs", "attach", "-t", "=one__pair"]
     );
 }
 
@@ -181,6 +183,31 @@ fn exit_after_ps_shows_dead() {
 }
 
 #[test]
+fn stub_exits_while_stdin_stays_open() {
+    let mut child = std::process::Command::cargo_bin("rig-stub-agent")
+        .expect("stub bin")
+        .env("RIG_STUB_SCRIPT", "exit_after_ms=200")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("stub");
+    let _stdin = child.stdin.take().expect("stdin");
+    let started = Instant::now();
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "{status}");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(150),
+        "exited before exit_after_ms: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "exit_after_ms waited for stdin to close: {elapsed:?}"
+    );
+}
+
+#[test]
 fn partial_cwd_exits_3() {
     let env = Env::new();
     let missing = env.root.path().join("missing-cwd");
@@ -196,6 +223,50 @@ fn partial_cwd_exits_3() {
     );
     assert_eq!(code, 3, "{err} {up}");
     assert_eq!(up.get("status").and_then(Value::as_str), Some("partial"));
+}
+
+#[test]
+fn daemon_status_does_not_start_a_daemon() {
+    let env = Env::new();
+    let (code, out, err) = stdout(env.rig().args(["daemon", "status"]));
+    assert_eq!(code, 1, "{err} {out}");
+    assert!(out.contains("daemon stopped"), "{out}");
+    assert!(!env.rig_home.join("run/daemon.pid").exists(), "{err}");
+    let (code, out, err) = stdout(env.rig().args(["daemon", "status", "now"]));
+    assert_eq!(code, 1, "{err} {out}");
+    assert!(err.contains("one subcommand"), "{err}");
+    let (code, _, err) = stdout(env.rig().args(["daemon"]));
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("usage:"), "{err}");
+    let (code, _, err) = stdout(env.rig().args(["daemon", "explode"]));
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("unknown daemon command"), "{err}");
+    assert!(!crewmux_api::daemon_socket(&env.rig_home).exists());
+}
+
+#[test]
+fn sigterm_removes_the_socket_and_pid() {
+    let env = Env::new();
+    let spec = env.write_spec("two-stub.yaml", &two_stub(&env.home));
+    let (code, _, err) = json_out(
+        env.rig()
+            .args(["up", spec.to_str().expect("utf8"), "--json"]),
+    );
+    assert_eq!(code, 0, "{err}");
+    let pid_path = env.rig_home.join("run/daemon.pid");
+    let socket = crewmux_api::daemon_socket(&env.rig_home);
+    let pid = std::fs::read_to_string(&pid_path).expect("pid");
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", pid.trim()])
+        .status()
+        .expect("kill");
+    assert!(status.success());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && (socket.exists() || pid_path.exists()) {
+        std::thread::park_timeout(Duration::from_millis(20));
+    }
+    assert!(!socket.exists(), "socket survived SIGTERM");
+    assert!(!pid_path.exists(), "pid file survived SIGTERM");
 }
 
 #[test]

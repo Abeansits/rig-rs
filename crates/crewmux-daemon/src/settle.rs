@@ -115,18 +115,27 @@ async fn step(app: &App, item: &mut Pending, events: &mut Vec<Value>) -> Result<
 }
 
 async fn mark_ready(app: &App, seat: &Seat, events: &mut Vec<Value>) -> Result<(), Error> {
-    let mut updated = seat.clone();
-    let event = LifecycleService::mark_ready(&mut updated, now_ts());
-    let name = updated.name.as_str().to_owned();
-    let saved = updated.clone();
-    let stored = event.clone();
-    write(&app.store, move |conn| {
-        SeatRepo::upsert(conn, &saved)?;
-        crewmux_core::EventLog::append(conn, &stored)?;
-        Ok(())
+    let id = seat.id;
+    let stored = write(&app.store, move |conn| {
+        let current = match SeatRepo::get(conn, &id) {
+            Ok(seat) => seat,
+            Err(crewmux_core::Error::SeatNotFound(_)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        if !matches!(current.state, SeatState::Launching | SeatState::Planned) {
+            return Ok(None);
+        }
+        let mut updated = current;
+        let event = LifecycleService::mark_ready(&mut updated, now_ts());
+        let name = updated.name.as_str().to_owned();
+        SeatRepo::upsert(conn, &updated)?;
+        crewmux_core::EventLog::append(conn, &event)?;
+        Ok(Some((event, name)))
     })
     .await?;
-    events.push(event_value(&event, Some(&name)));
+    if let Some((event, name)) = stored {
+        events.push(event_value(&event, Some(&name)));
+    }
     Ok(())
 }
 

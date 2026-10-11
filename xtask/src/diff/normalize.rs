@@ -171,11 +171,7 @@ fn apply_all(
     patterns: &Patterns,
     masks: &mut Masks,
 ) -> String {
-    // dash prints this when tmux is spawned from a deleted cwd. It is not part
-    // of the OpenRig error, and it flickers between CI and a warm local daemon.
-    // The CLI embeds that stderr in a JSON string, so the newline is either a
-    // real newline or the two characters `\` `n`.
-    let mut current = strip_dash_getcwd(text);
+    let mut current = text.to_owned();
     for rule in rules {
         current = apply_one(&current, rule, roots, patterns, masks);
     }
@@ -194,6 +190,7 @@ fn apply_one(
         NormRule::Timestamp => replace_whole(&patterns.timestamp, text, &mut masks.timestamp, "TS"),
         NormRule::SocketPath => replace_whole(&patterns.socket, text, &mut masks.socket, "SOCK"),
         NormRule::Port => replace_ports(&patterns.port, text, masks),
+        NormRule::Getcwd => strip_dash_getcwd(text),
         NormRule::AbsPath => {
             let with_roots = replace_roots(text, roots, masks);
             replace_whole(&patterns.temp, &with_roots, &mut masks.path, "PATH")
