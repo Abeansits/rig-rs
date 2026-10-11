@@ -1,0 +1,42 @@
+# cargo-nextest config. Profiles: default (local), ci (CI gate), slow (opt-in heavy suites).
+[store]
+dir = "target/nextest"
+
+[profile.default]
+retries = 0
+slow-timeout = { period = "30s", terminate-after = 4 }
+fail-fast = true
+# Real-tmux / differential tests are behind per-crate cargo features (tmux-it, differential)
+# and are also filtered out here so a stray `--all-features` locally doesn't spawn tmux by surprise.
+default-filter = "not (test(/::tmux_it::/) | test(/::differential::/))"
+
+[profile.ci]
+retries = 0                      # flakes must be fixed, not retried; see TEST-LAYOUT.md
+fail-fast = false
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 3 }
+default-filter = "not test(/::differential::/)"
+
+[profile.ci.junit]
+path = "junit.xml"
+
+[profile.slow]
+fail-fast = false
+slow-timeout = { period = "120s", terminate-after = 5 }
+default-filter = "all()"
+
+# Anything touching a real tmux server runs serially (private -L sockets, but CPU/pty bound).
+[test-groups]
+tmux = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "test(/::tmux_it::/)"
+test-group = "tmux"
+
+[[profile.ci.overrides]]
+filter = "test(/::tmux_it::/)"
+test-group = "tmux"
+
+[[profile.slow.overrides]]
+filter = "test(/::tmux_it::/)"
+test-group = "tmux"

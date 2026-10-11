@@ -12,6 +12,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ---- Dev Bot's job (logic from main; actions pinned to commit SHAs) ----
   check:
     name: fmt, clippy, test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -20,24 +21,161 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Count workspace members
-        id: members
-        shell: bash
-        run: |
-          n=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["packages"]))')
-          echo "count=$n" >> "$GITHUB_OUTPUT"
-          echo "Workspace members: $n"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: fmt
-        if: steps.members.outputs.count != '0'
         run: cargo fmt --all --check
       - name: clippy
-        if: steps.members.outputs.count != '0'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: test
-        if: steps.members.outputs.count != '0'
         run: cargo test --workspace --locked
+
+  # ---- QA Bot additions (new jobs only) ----
+  nextest:
+    name: nextest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest
+      - name: Install tmux
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -qq && sudo apt-get install -y -qq tmux; else brew install tmux; fi
+          tmux -V
+      - name: nextest (ci profile; per-crate features; differential filtered out)
+        env:
+          INSTA_UPDATE: "no"
+          RIG_HOME: ${{ runner.temp }}/rig-home
+        run: cargo nextest run --workspace --all-targets --all-features --profile ci --no-tests=warn --locked
+      - name: doctests (nextest does not run them)
+        run: cargo test --workspace --doc --all-features --locked
+
+  deny:
+    name: cargo-deny (${{ matrix.check }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [advisories, bans licenses sources]
+    # New advisories shouldn't block unrelated PRs: advisories is required on main pushes
+    # but tolerated on PRs (the scheduled/main run will go red and get triaged).
+    continue-on-error: ${{ matrix.check == 'advisories' && github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-deny@0.20.2
+      # deny.toml ships with slice 0 (main).
+      - name: cargo deny
+        run: cargo deny --all-features check ${{ matrix.check }}
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read rust-version
+        id: msrv
+        shell: bash
+        run: |
+          v=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ -z "$v" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::workspace.package.rust-version not set; skipping MSRV until slice 0 sets it"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        if: steps.msrv.outputs.present == 'true'
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.msrv.outputs.present == 'true'
+      - name: cargo check at MSRV
+        if: steps.msrv.outputs.present == 'true'
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-targets --all-features --locked
+
+  guards:
+    name: guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: File size limit (800 lines, non-test .rs)
+        shell: bash
+        run: |
+          bad=$(find crates xtask -name '*.rs' -not -path '*/tests/*' 2>/dev/null | xargs -r awk 'FNR==1&&NR>1{if(n>800)print f": "n} {f=FILENAME;n=FNR} END{if(n>800)print f": "n}')
+          if [ -n "$bad" ]; then echo "$bad"; exit 1; fi
+      - name: No bare #[ignore] (must carry a reason)
+        shell: bash
+        run: |
+          if grep -rnE '#\[ignore\]' crates tests 2>/dev/null; then echo "use #[ignore = \"reason + issue\"]"; exit 1; fi
+      - name: No pending insta snapshots committed
+        shell: bash
+        run: |
+          if find . -name '*.snap.new' -o -name '*.pending-snap' | grep -q .; then echo "pending snapshots committed"; exit 1; fi
+      - name: Parity ledger references exist
+        shell: bash
+        run: |
+          f=tests/parity/LEDGER.md; [ -f "$f" ] || exit 0
+          rc=0
+          while IFS='|' read -r _ ts slice status rust _; do
+            status=$(echo "$status" | xargs); rust=$(echo "$rust" | xargs)
+            [ "$status" = ported ] || continue
+            for p in ${rust//,/ }; do p=${p%%::*}; p=${p//\`/}; [ -e "$p" ] || { echo "ledger: $ts -> missing $p"; rc=1; }; done
+          done < <(grep '^|' "$f" | tail -n +3)
+          exit $rc
+
+  coverage:
+    name: coverage (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - name: llvm-tools for the pinned toolchain
+        run: rustup component add llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: coverage
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-llvm-cov,cargo-nextest
+      - name: llvm-cov (nextest, ci profile)
+        env:
+          INSTA_UPDATE: "no"
+        run: |
+          cargo llvm-cov nextest --workspace --all-features --profile ci --no-tests=warn --locked --lcov --output-path lcov.info
+          cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: ignore
+
+  # Single required check for branch protection: add only "ci-pass" as required.
+  ci-pass:
+    name: ci-pass
+    if: always()
+    needs: [check, nextest, deny, msrv, guards]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All required jobs succeeded
+        shell: bash
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || { echo "a required job did not succeed"; exit 1; }; done
