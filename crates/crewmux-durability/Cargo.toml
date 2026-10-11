@@ -1,0 +1,15 @@
+[package]
+name = "crewmux-durability"
+version = "0.0.0"
+description = "Snapshots, checkpoints, restore, crash-cart and compaction control."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crewmux-core.workspace = true
+crewmux-adapters.workspace = true
+
+[lints]
+workspace = true

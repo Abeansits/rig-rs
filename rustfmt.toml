@@ -1,0 +1,7 @@
+edition = "2024"
+style_edition = "2024"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"
+# Nightly-only options (imports_granularity, group_imports) intentionally omitted: stable toolchain only.

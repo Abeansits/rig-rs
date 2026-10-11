@@ -1,0 +1,15 @@
+[package]
+name = "crewmux-store"
+version = "0.0.0"
+description = "SQLite persistence: schema, migrations and repositories implementing core ports."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crewmux-core.workspace = true
+crewmux-types.workspace = true
+
+[lints]
+workspace = true

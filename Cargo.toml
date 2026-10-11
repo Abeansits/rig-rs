@@ -1,11 +1,77 @@
 [workspace]
 resolver = "3"
-members = []
+members = ["crates/*", "xtask"]
 
 [workspace.package]
 edition = "2024"
+rust-version = "1.99"
 license = "Apache-2.0"
 publish = false
 
+# Internal crates only. External deps are added (cargo add, then hoisted here) when a slice needs them.
+[workspace.dependencies]
+crewmux-types = { path = "crates/crewmux-types" }
+crewmux-spec = { path = "crates/crewmux-spec" }
+crewmux-core = { path = "crates/crewmux-core" }
+crewmux-store = { path = "crates/crewmux-store" }
+crewmux-mux = { path = "crates/crewmux-mux" }
+crewmux-adapters = { path = "crates/crewmux-adapters" }
+crewmux-provider = { path = "crates/crewmux-provider" }
+crewmux-messaging = { path = "crates/crewmux-messaging" }
+crewmux-durability = { path = "crates/crewmux-durability" }
+crewmux-orchestration = { path = "crates/crewmux-orchestration" }
+crewmux-health = { path = "crates/crewmux-health" }
+crewmux-integrations = { path = "crates/crewmux-integrations" }
+crewmux-api = { path = "crates/crewmux-api" }
+crewmux-daemon = { path = "crates/crewmux-daemon" }
+crewmux-mcp = { path = "crates/crewmux-mcp" }
+crewmux-tui = { path = "crates/crewmux-tui" }
+crewmux-cli = { path = "crates/crewmux-cli" }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
+missing_docs = "warn"                 # escalate to deny for pub API of lib crates once stable
+unused_must_use = "deny"
+unreachable_pub = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+let_underscore_drop = "warn"
+
+[workspace.lints.clippy]
+# groups
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# pedantic noise we accept
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"          # re-enable for public lib APIs later
+must_use_candidate = "allow"
+# restriction picks (agent guardrails)
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "warn"
+indexing_slicing = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"                  # allow in the CLI output module via #[allow] with reason
+print_stderr = "deny"
+exit = "deny"                          # only main may exit
+mem_forget = "deny"
+undocumented_unsafe_blocks = "deny"
+allow_attributes_without_reason = "deny"
+allow_attributes = "warn"              # prefer #[expect(..., reason = "...")]
+string_slice = "deny"
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+large_futures = "warn"
+clone_on_ref_ptr = "warn"
+redundant_clone = "warn"
+needless_pass_by_value = "warn"
+rc_buffer = "warn"
+wildcard_enum_match_arm = "warn"
+as_conversions = "warn"
+cast_possible_truncation = "warn"
+float_cmp = "warn"
+too_many_lines = "warn"                # threshold in clippy.toml
+cognitive_complexity = "warn"
+# tests: allowed via clippy.toml allow-*-in-tests

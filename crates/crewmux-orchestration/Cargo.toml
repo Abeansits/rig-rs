@@ -1,0 +1,15 @@
+[package]
+name = "crewmux-orchestration"
+version = "0.0.0"
+description = "Workflow engine, scope, review, slices, mission control and context packs."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crewmux-core.workspace = true
+crewmux-spec.workspace = true
+
+[lints]
+workspace = true

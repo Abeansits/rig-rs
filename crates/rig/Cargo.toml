@@ -1,0 +1,21 @@
+[package]
+name = "rig"
+version = "0.0.0"
+description = "The rig binary: dispatches to the CLI, daemon, TUI and MCP server."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rig"
+path = "src/main.rs"
+
+[dependencies]
+crewmux-cli.workspace = true
+crewmux-daemon.workspace = true
+crewmux-tui.workspace = true
+crewmux-mcp.workspace = true
+
+[lints]
+workspace = true

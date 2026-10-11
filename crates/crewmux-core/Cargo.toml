@@ -1,0 +1,15 @@
+[package]
+name = "crewmux-core"
+version = "0.0.0"
+description = "Pure domain logic: rigs, seats, sessions, lifecycle, policies and events."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crewmux-types.workspace = true
+crewmux-spec.workspace = true
+
+[lints]
+workspace = true
