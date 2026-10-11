@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/capture-stub.json
+expression: "rs:capture-stub"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "{\"events\":[{\"kind\":\"rig_created\"},{\"kind\":\"seat_launched\",\"seat\":\"one\"},{\"kind\":\"seat_ready\",\"seat\":\"one\"}],\"rig\":\"pair\",\"seats\":[{\"name\":\"one\",\"runtime\":\"stub\",\"state\":\"ready\",\"tmux_session\":\"one__pair\"}],\"status\":\"ready\"}\n{\"lines\":1,\"seat\":\"one\",\"text\":\"stub>                 \"}\n",
+  "tmux_argv": []
+}

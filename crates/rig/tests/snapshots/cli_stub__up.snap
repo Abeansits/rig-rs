@@ -1,0 +1,43 @@
+---
+source: crates/rig/tests/cli_stub.rs
+expression: "serde_json::to_string_pretty(&up).expect(\"json\")"
+---
+{
+  "events": [
+    {
+      "kind": "rig_created"
+    },
+    {
+      "kind": "seat_launched",
+      "seat": "one"
+    },
+    {
+      "kind": "seat_launched",
+      "seat": "two"
+    },
+    {
+      "kind": "seat_ready",
+      "seat": "one"
+    },
+    {
+      "kind": "seat_ready",
+      "seat": "two"
+    }
+  ],
+  "rig": "pair",
+  "seats": [
+    {
+      "name": "one",
+      "runtime": "stub",
+      "state": "ready",
+      "tmux_session": "one__pair"
+    },
+    {
+      "name": "two",
+      "runtime": "stub",
+      "state": "ready",
+      "tmux_session": "two__pair"
+    }
+  ],
+  "status": "ready"
+}

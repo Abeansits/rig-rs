@@ -1,7 +1,7 @@
 // Derived from openrig packages/tui/src/types.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! Hit targets. A cell is a hit when `y == row && x1 <= x <= x2`.
 
-use crewmux_api::SeatId;
+use crewmux_api::SeatKey;
 
 use crate::state::{RowKey, Section};
 
@@ -25,7 +25,7 @@ pub enum Action {
     /// Switch the content pane.
     OpenSection(Section),
     /// Attach the seat with the external client.
-    Attach(SeatId),
+    Attach(SeatKey),
     /// Scroll the content pane by this many lines. Negative scrolls up.
     Scroll(i16),
     /// Follow a cross-link in the seat detail.

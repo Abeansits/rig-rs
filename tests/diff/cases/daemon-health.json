@@ -1,7 +1,7 @@
 {
   "id": "daemon-health",
   "project": "health-shape",
-  "needs": "UDS listener",
+  "expected_diff": "PE-009",
   "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
   "steps": [{ "op": "http", "method": "GET", "path": "/healthz" }]
 }

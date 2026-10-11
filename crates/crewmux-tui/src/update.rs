@@ -1,7 +1,9 @@
 // Derived from openrig packages/tui/src/state.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! Pure update. This function does not read the clock, the environment, or the terminal.
 
-use crewmux_api::{SeatId, SeatState, StreamEvent, StreamKind, StreamPayload};
+use crewmux_api::{SeatKey, SeatState, StreamEvent, StreamKind, StreamPayload};
+
+use crate::seat_bits::SeatBits;
 
 use crate::action::Action;
 use crate::msg::{
@@ -198,7 +200,7 @@ fn apply_activity(state: &mut State, payload: Option<&StreamPayload>) {
     flash(state, RowKey::Seat(seat));
 }
 
-fn set_seat_state(state: &mut State, id: &SeatId, next: SeatState) {
+fn set_seat_state(state: &mut State, id: &SeatKey, next: SeatState) {
     for seat in &mut state.snapshot.seats {
         if &seat.id == id {
             seat.state = next;
@@ -286,7 +288,7 @@ fn attach_selection(state: &mut State, cmds: &mut Vec<Cmd>) {
     attach_seat(state, &id, cmds);
 }
 
-fn attach_seat(state: &mut State, id: &SeatId, cmds: &mut Vec<Cmd>) {
+fn attach_seat(state: &mut State, id: &SeatKey, cmds: &mut Vec<Cmd>) {
     let Some(seat) = find_seat(&state.snapshot, id) else {
         state.notice = Some("seat is gone".to_owned());
         return;
@@ -307,14 +309,15 @@ fn attach_seat(state: &mut State, id: &SeatId, cmds: &mut Vec<Cmd>) {
 
 fn plan(
     state: &State,
-    id: &SeatId,
-    session: &crewmux_api::SessionId,
+    id: &SeatKey,
+    session: &crewmux_api::TmuxSession,
 ) -> Result<AttachTarget, String> {
     let socket = state.env.socket_name.clone();
     match state.env.inside_tmux.as_deref() {
         None => Ok(AttachTarget::Tmux {
             socket,
             session: session.clone(),
+            seat: id.clone(),
         }),
         Some(name) if name == state.env.socket_name => Ok(AttachTarget::SwitchClient {
             socket,
@@ -335,7 +338,7 @@ fn plan(
     }
 }
 
-fn select_seat(state: &mut State, id: &SeatId) {
+fn select_seat(state: &mut State, id: &SeatKey) {
     if find_seat(&state.snapshot, id).is_some() {
         state.selection = Some(RowKey::Seat(id.clone()));
     }

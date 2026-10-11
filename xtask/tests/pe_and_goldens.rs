@@ -155,6 +155,30 @@ fn pe_003_covers_stdout_only() {
 }
 
 #[test]
+fn pe_008_is_the_tmux_attach_exception() {
+    let root = workspace_root();
+    let text = fs::read_to_string(root.join("design/parity-exceptions.md")).unwrap();
+    let ids = pe_ids_in(&text);
+    assert!(ids.iter().any(|id| id.as_str() == "PE-008"));
+    assert!(text.contains("## PE-008: `rig attach` execs tmux"));
+    assert!(text.contains("## PE-004: No runtime writes"));
+    let ledger = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
+    assert!(ledger.contains(
+        "\"packages/cli/test/attach.test.ts\",\"1\",\"diverged\",\"attach_execs_exact_tmux_target\",\"PE-008\""
+    ));
+    assert!(ledger.contains(
+        "\"packages/daemon/test/claude-bootstrap-config-home.test.ts\",\"7\",\"diverged\",\"refuses_while_claude_running\",\"PE-004\""
+    ));
+}
+
+#[test]
+fn pe_007_covers_stdout_and_exit() {
+    let text = fs::read_to_string(workspace_root().join("design/parity-exceptions.md")).unwrap();
+    let covers = covers_for(&text, &PeId::parse("PE-007").unwrap()).unwrap();
+    assert_eq!(covers, vec![ObsField::Stdout, ObsField::Exit]);
+}
+
+#[test]
 fn expected_diff_without_covers_fails_to_load() {
     let dir = scratch("pe-bare-").unwrap();
     let markdown = dir.path().join("parity-exceptions.md");
@@ -219,9 +243,15 @@ fn update_writes_only_a_ts_snapshot() {
 }
 
 #[test]
-fn committed_rust_snapshots_match_the_slice_7_surface() {
+fn committed_rust_snapshots_match_the_merged_cli() {
     let dir = workspace_root().join("tests/diff/snapshots");
-    let help = observation("doctor\nhelp\nsetup", "", 0, Vec::new()).unwrap();
+    let help = observation(
+        "attach\ncapture\ndoctor\ndown\nhelp\nps\nsetup\nup",
+        "",
+        0,
+        Vec::new(),
+    )
+    .unwrap();
     let version = observation("rig 0.0.0\n", "", 0, vec![argv(&["tmux", "-V"])]).unwrap();
     assert_eq!(read_rs_golden(&dir, "help-top").unwrap(), help);
     assert_eq!(

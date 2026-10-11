@@ -1,6 +1,6 @@
 //! Messages and commands for the Elm loop.
 
-use crewmux_api::{SeatId, SessionId, Snapshot};
+use crewmux_api::{SeatKey, Snapshot, TmuxSession};
 use serde_json::Value;
 
 use crate::action::HitMap;
@@ -56,7 +56,7 @@ pub enum ControlCmd {
     /// Select a seat row.
     Select {
         /// Seat token.
-        seat: SeatId,
+        seat: SeatKey,
         /// Reply id.
         reply: ControlReplyId,
     },
@@ -75,7 +75,7 @@ pub enum ControlCmd {
     /// Attach a seat.
     Attach {
         /// Seat token.
-        seat: SeatId,
+        seat: SeatKey,
         /// Reply id.
         reply: ControlReplyId,
     },
@@ -96,14 +96,16 @@ pub enum AttachTarget {
         /// Socket name for `-L`.
         socket: String,
         /// Session name.
-        session: SessionId,
+        session: TmuxSession,
+        /// Seat name sent to `POST /api/seats/attach`.
+        seat: SeatKey,
     },
     /// `tmux switch-client -t =<session>` on the server we are already inside.
     SwitchClient {
         /// Socket name for `-L`.
         socket: String,
         /// Session name.
-        session: SessionId,
+        session: TmuxSession,
     },
     /// Herdr or Ghostty. The integrations crate performs the launch.
     /// `socket` and `session` are only used if that launch fails and the TUI falls back to tmux.
@@ -111,11 +113,11 @@ pub enum AttachTarget {
         /// Which launcher.
         kind: crewmux_api::LauncherKind,
         /// Seat being opened.
-        seat: SeatId,
+        seat: SeatKey,
         /// tmux socket name for the fallback attach.
         socket: String,
         /// tmux session for the fallback attach.
-        session: SessionId,
+        session: TmuxSession,
     },
 }
 

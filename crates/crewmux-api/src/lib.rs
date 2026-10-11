@@ -1,27 +1,31 @@
 //! Daemon API contract: request and response types, route table and typed client.
 //!
-//! Slice 0b added the blocking HTTP/1.1 client. Slice 13 adds the read models
-//! (`ListSeats`, `AttachInfo`, hydrate snapshot) and the `GET /api/events` path.
-//! Slice 1 must serve the read routes. `StreamEvent` is the slice 4 envelope
-//! (id, `type`, payload). The TUI follows that shape; it does not define a second one.
+//! Slice 1 owns the route table (`GET /api/seats`, `POST /api/seats/attach`).
+//! The TUI builds its snapshot from that list and asks the daemon for attach
+//! argv. `StreamEvent` is the slice 4 envelope the live tail decodes.
 
 mod client;
+mod dirs;
 mod endpoint;
 mod error;
 mod model;
 mod read;
 
-pub use client::{Client, Response, daemon_socket};
-pub use crewmux_types::{
-    LauncherKind, PodName, ReadinessCode, RigId, RigName, RuntimeKind, SeatId, SeatName, SeatState,
-    SessionId,
+pub use client::{
+    Client, MAX_SUN_PATH_BYTES, Response, daemon_bind_path, daemon_socket, path_bytes, rig_home,
+    tui_socket, tui_socket_path,
 };
+pub use crewmux_core::SeatState;
+pub use crewmux_types::{
+    LauncherKind, PodName, ReadinessCode, RigName, RuntimeKind, SeatKey, SeatName, TmuxSession,
+};
+pub use dirs::{create_private, open_private};
 pub use endpoint::{
-    AttachInfoRoute, Endpoint, Events, Hydrate, ListSeats, MAX_SUN_PATH_BYTES, Method, attach_path,
-    daemon_bind_path, fit_sun_path, path_bytes, tui_socket_path,
+    AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
+    Healthz, ListSeats, RigDown,
 };
 pub use error::Error;
 pub use model::{
-    ActivityItem, AttachInfo, HealthItem, HealthSummary, LauncherConfig, SeatList, SeatView,
-    Snapshot, StreamEvent, StreamKind, StreamPayload,
+    ActivityItem, HealthItem, HealthSummary, LauncherConfig, SeatView, Snapshot, StreamEvent,
+    StreamKind, StreamPayload,
 };

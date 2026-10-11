@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use crewmux_api::{LauncherKind, PodName, RigId, SeatId, Snapshot};
+use crewmux_api::{LauncherKind, PodName, RigName, SeatKey, Snapshot};
 
 use crate::action::HitMap;
 
@@ -60,16 +60,16 @@ impl Section {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RowKey {
     /// A rig.
-    Rig(RigId),
+    Rig(RigName),
     /// A pod inside a rig.
     Pod {
         /// Owning rig.
-        rig: RigId,
+        rig: RigName,
         /// Pod name.
         pod: PodName,
     },
     /// A seat.
-    Seat(SeatId),
+    Seat(SeatKey),
 }
 
 /// Where this TUI is allowed to attach. Read at startup and stored so `update` stays pure.

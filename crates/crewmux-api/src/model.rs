@@ -2,20 +2,19 @@
 //! until that lands, the fake API server in `crewmux-tui` test support serves these
 //! shapes. Slice 1 must keep the field names.
 
-use crewmux_types::{
-    LauncherKind, PodName, RigId, RigName, RuntimeKind, SeatId, SeatName, SeatState, SessionId,
-};
+use crewmux_core::SeatState;
+use crewmux_types::{LauncherKind, PodName, RigName, RuntimeKind, SeatKey, TmuxSession};
 use serde::{Deserialize, Serialize};
 
 /// One seat as the explorer shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatView {
     /// Stable id.
-    pub id: SeatId,
+    pub id: SeatKey,
     /// Display name.
-    pub name: SeatName,
+    pub name: SeatKey,
     /// Owning rig.
-    pub rig_id: RigId,
+    pub rig_id: RigName,
     /// Rig display name.
     pub rig_name: RigName,
     /// Pod display name.
@@ -25,27 +24,9 @@ pub struct SeatView {
     /// Runtime.
     pub runtime: RuntimeKind,
     /// tmux session, when the seat has a pane.
-    pub session: Option<SessionId>,
+    pub session: Option<TmuxSession>,
     /// Spec name for the seat-detail cross-link. Absent when the daemon has none.
     pub spec: Option<String>,
-}
-
-/// `GET /api/seats`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SeatList {
-    /// Every seat the daemon currently knows.
-    pub seats: Vec<SeatView>,
-}
-
-/// `GET /api/seats/{id}/attach`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttachInfo {
-    /// Seat the command attaches.
-    pub seat: SeatId,
-    /// tmux socket name passed to `-L` (the product default is `rig-rs`).
-    pub socket: String,
-    /// Exact session name. The client passes it as `-t =<session>`.
-    pub session: SessionId,
 }
 
 /// One health finding. Empty or absent means the daemon has not exposed health yet.
@@ -70,7 +51,7 @@ pub struct HealthSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActivityItem {
     /// Seat the line is about.
-    pub seat: SeatId,
+    pub seat: SeatKey,
     /// One-line summary.
     pub summary: String,
 }
@@ -135,7 +116,7 @@ pub enum StreamKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamPayload {
     /// Seat the event is about.
-    pub seat: SeatId,
+    pub seat: SeatKey,
     /// New lifecycle state. Set for `seat_state_changed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<SeatState>,

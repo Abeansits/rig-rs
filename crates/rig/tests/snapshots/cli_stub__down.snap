@@ -1,0 +1,18 @@
+---
+source: crates/rig/tests/cli_stub.rs
+expression: "serde_json::to_string_pretty(&down).expect(\"json\")"
+---
+{
+  "events": [
+    {
+      "kind": "seat_stopped",
+      "seat": "one"
+    },
+    {
+      "kind": "seat_stopped",
+      "seat": "two"
+    }
+  ],
+  "sessions_killed": 2,
+  "stopped": true
+}

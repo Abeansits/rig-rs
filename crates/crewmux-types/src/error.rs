@@ -1,14 +1,14 @@
-//! Errors for id and name newtypes.
+//! Errors from parsing ids and names.
 
 use thiserror::Error;
 
-/// A newtype rejected an empty or unsafe token.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum IdError {
-    /// The token was empty or only whitespace.
-    #[error("id is empty")]
-    Empty,
-    /// The token contained a character that would break a path or a socket name.
-    #[error("id contains a reserved character")]
-    Reserved,
+/// A newtype could not be built.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum TypeError {
+    /// The text was not a ULID.
+    #[error("invalid id: {0}")]
+    Id(String),
+    /// The name was empty or contained a control character.
+    #[error("invalid name: {0}")]
+    Name(String),
 }

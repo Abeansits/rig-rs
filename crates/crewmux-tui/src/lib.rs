@@ -14,6 +14,7 @@ mod input;
 mod msg;
 mod refresh;
 mod rows;
+mod seat_bits;
 mod sse;
 mod state;
 mod update;

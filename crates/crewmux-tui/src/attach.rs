@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::Arc;
 
-use crewmux_api::SessionId;
+use crewmux_api::TmuxSession;
 
 use crate::guard::TerminalGuard;
 use crate::msg::{AttachOutcome, AttachTarget};
@@ -14,7 +14,9 @@ use crate::msg::{AttachOutcome, AttachTarget};
 #[must_use]
 pub fn tmux_argv(target: &AttachTarget) -> Option<Vec<String>> {
     match target {
-        AttachTarget::Tmux { socket, session } => Some(attach_argv(socket, session, "attach")),
+        AttachTarget::Tmux {
+            socket, session, ..
+        } => Some(attach_argv(socket, session, "attach")),
         AttachTarget::SwitchClient { socket, session } => {
             Some(attach_argv(socket, session, "switch-client"))
         }
@@ -22,7 +24,7 @@ pub fn tmux_argv(target: &AttachTarget) -> Option<Vec<String>> {
     }
 }
 
-fn attach_argv(socket: &str, session: &SessionId, verb: &str) -> Vec<String> {
+fn attach_argv(socket: &str, session: &TmuxSession, verb: &str) -> Vec<String> {
     vec![
         "-L".to_owned(),
         socket.to_owned(),
@@ -36,11 +38,11 @@ fn attach_argv(socket: &str, session: &SessionId, verb: &str) -> Vec<String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchRequest {
     /// Seat label.
-    pub seat: crewmux_api::SeatId,
+    pub seat: crewmux_api::SeatKey,
     /// tmux socket name.
     pub socket: String,
     /// tmux session.
-    pub session: SessionId,
+    pub session: TmuxSession,
 }
 
 /// Launcher failure. The message is shown with the tmux fallback.
@@ -68,11 +70,12 @@ pub async fn perform(
     target: AttachTarget,
     launch: Option<LaunchFn>,
     guard: &mut dyn TerminalGuard,
+    daemon: &std::path::Path,
 ) -> AttachOutcome {
     if let Err(err) = guard.suspend() {
         return AttachOutcome::Failed(err.to_string());
     }
-    let outcome = execute(target, launch).await;
+    let outcome = execute(target, launch, daemon).await;
     if let Err(err) = guard.resume() {
         return match outcome {
             AttachOutcome::SessionGone => AttachOutcome::SessionGone,
@@ -84,7 +87,11 @@ pub async fn perform(
     outcome
 }
 
-async fn execute(target: AttachTarget, launch: Option<LaunchFn>) -> AttachOutcome {
+async fn execute(
+    target: AttachTarget,
+    launch: Option<LaunchFn>,
+    daemon: &std::path::Path,
+) -> AttachOutcome {
     match &target {
         AttachTarget::Launcher {
             seat,
@@ -92,18 +99,59 @@ async fn execute(target: AttachTarget, launch: Option<LaunchFn>) -> AttachOutcom
             session,
             ..
         } => launch_or_fallback(launch, seat.clone(), socket.clone(), session.clone()).await,
-        AttachTarget::Tmux { .. } | AttachTarget::SwitchClient { .. } => match tmux_argv(&target) {
+        AttachTarget::Tmux { seat, .. } => {
+            let name = seat.as_str().to_owned();
+            let path = daemon.to_path_buf();
+            let socket = socket_of(&target).to_owned();
+            let session = session_of(&target).clone();
+            let from_daemon = tokio::task::spawn_blocking(move || {
+                crewmux_api::Client::over_uds(path).attach_argv(&name)
+            })
+            .await;
+            if let Ok(Ok(argv)) = from_daemon
+                && let Some((program, args)) = argv.split_first()
+            {
+                return run_program(program, args, &socket, &session).await;
+            }
+            match tmux_argv(&target) {
+                Some(args) => finish_tmux(&args, &socket, &session).await,
+                None => AttachOutcome::Failed("nothing to attach".to_owned()),
+            }
+        }
+        AttachTarget::SwitchClient { .. } => match tmux_argv(&target) {
             Some(args) => finish_tmux(&args, socket_of(&target), session_of(&target)).await,
             None => AttachOutcome::Failed("nothing to attach".to_owned()),
         },
     }
 }
 
+async fn run_program(
+    program: &str,
+    args: &[String],
+    socket: &str,
+    session: &TmuxSession,
+) -> AttachOutcome {
+    let status = match tokio::process::Command::new(program)
+        .args(args)
+        .status()
+        .await
+    {
+        Ok(status) => status,
+        Err(err) => return AttachOutcome::Failed(err.to_string()),
+    };
+    match session_alive(socket, session).await {
+        Ok(false) => AttachOutcome::SessionGone,
+        Ok(true) if status.success() => AttachOutcome::Detached,
+        Ok(true) => AttachOutcome::Failed(format!("tmux exited {status}")),
+        Err(err) => AttachOutcome::Failed(err.to_string()),
+    }
+}
+
 async fn launch_or_fallback(
     launch: Option<LaunchFn>,
-    seat: crewmux_api::SeatId,
+    seat: crewmux_api::SeatKey,
     socket: String,
-    session: SessionId,
+    session: TmuxSession,
 ) -> AttachOutcome {
     let Some(launch) = launch else {
         return fallback(&socket, &session, "no launcher is configured").await;
@@ -119,7 +167,7 @@ async fn launch_or_fallback(
     }
 }
 
-async fn fallback(socket: &str, session: &SessionId, reason: &str) -> AttachOutcome {
+async fn fallback(socket: &str, session: &TmuxSession, reason: &str) -> AttachOutcome {
     let args = attach_argv(socket, session, "attach");
     let outcome = finish_tmux(&args, socket, session).await;
     match outcome {
@@ -132,7 +180,7 @@ async fn fallback(socket: &str, session: &SessionId, reason: &str) -> AttachOutc
     }
 }
 
-async fn finish_tmux(args: &[String], socket: &str, session: &SessionId) -> AttachOutcome {
+async fn finish_tmux(args: &[String], socket: &str, session: &TmuxSession) -> AttachOutcome {
     let status = match run_tmux(args).await {
         Ok(status) => status,
         Err(err) => return AttachOutcome::Failed(err.to_string()),
@@ -145,7 +193,7 @@ async fn finish_tmux(args: &[String], socket: &str, session: &SessionId) -> Atta
     }
 }
 
-async fn session_alive(socket: &str, session: &SessionId) -> io::Result<bool> {
+async fn session_alive(socket: &str, session: &TmuxSession) -> io::Result<bool> {
     let args = vec![
         "-L".to_owned(),
         socket.to_owned(),
@@ -171,7 +219,7 @@ fn socket_of(target: &AttachTarget) -> &str {
     }
 }
 
-fn session_of(target: &AttachTarget) -> &SessionId {
+fn session_of(target: &AttachTarget) -> &TmuxSession {
     match target {
         AttachTarget::Tmux { session, .. }
         | AttachTarget::SwitchClient { session, .. }

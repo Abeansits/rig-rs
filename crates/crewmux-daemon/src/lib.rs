@@ -1,8 +1,21 @@
-//! The daemon: HTTP server, event streams, composition root and supervisors.
-//!
-//! The only route this crate serves today is the temporary fan-out in
-//! [`interim_events`]. Slice 4 replaces that module. Slice 1 mounts read routes
-//! on the same socket later. Clients, including the TUI, depend on `crewmux-api`
-//! and not on this crate.
+//! The daemon: HTTP on a Unix socket, stub-seat launch, and pane death.
 
-pub mod interim_events;
+mod db;
+mod death;
+mod error;
+mod events;
+mod http;
+mod launch;
+mod query;
+mod reconcile;
+mod runtime;
+mod serve;
+mod settle;
+mod state;
+mod view;
+
+pub use error::Error;
+pub use serve::run;
+
+#[cfg(test)]
+mod flow;

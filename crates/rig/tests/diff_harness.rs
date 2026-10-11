@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
-use xtask::diff::{
-    CaseOutcome, DiffVerdict, execute_rs, exit_code, format_report, load_suite, self_reports,
-    workspace_root,
-};
+#[cfg(feature = "tmux-it")]
+use xtask::diff::{CaseOutcome, DiffVerdict, exit_code, format_report, self_reports};
+use xtask::diff::{execute_rs, load_suite, workspace_root};
 
 #[test]
 fn diff_selftest() {
@@ -41,6 +40,7 @@ fn diff_selftest() {
 }
 
 #[test]
+#[cfg(feature = "tmux-it")]
 fn initial_cases_are_equal_or_listed_as_ignored() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
     let cases = load_suite(&exceptions()).unwrap();
@@ -54,12 +54,12 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
     );
     let reports = self_reports(&cases, &bin).unwrap();
     let text = format_report(&reports);
+    assert!(text.contains("| daemon-health | Equal |"), "{text}");
+    assert!(text.contains("| stub-seat | Equal |"), "{text}");
+    assert!(text.contains("| up-ps-down-stub | Equal |"), "{text}");
+    assert!(text.contains("| capture-stub | Equal |"), "{text}");
     assert!(
-        text.contains("daemon-health") && text.contains("needs UDS listener"),
-        "{text}"
-    );
-    assert!(
-        text.contains("stub-seat") && text.contains("needs slice 1"),
+        text.contains("deferred until the daemon paste command exists"),
         "{text}"
     );
     for report in &reports {
@@ -73,19 +73,47 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
 }
 
 #[test]
-#[ignore = "needs UDS listener"]
+#[cfg(feature = "tmux-it")]
 fn daemon_health_against_product_daemon() {
-    panic!("the product daemon does not listen on the Unix socket yet");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
+    let cases = load_suite(&exceptions()).unwrap();
+    let case = cases
+        .into_iter()
+        .find(|case| case.case.id == "daemon-health")
+        .unwrap();
+    assert!(case.needs.is_none(), "daemon-health is enabled");
+    let ran = execute_rs(&case, &bin).unwrap();
+    assert!(ran.canonical.contains("status=ok"), "{}", ran.canonical);
 }
 
 #[test]
-#[ignore = "needs slice 1"]
 fn stub_seat_against_product_cli() {
-    panic!("seat scenarios wait on slice 1");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
+    let cases = load_suite(&exceptions()).unwrap();
+    let case = cases
+        .into_iter()
+        .find(|case| case.case.id == "stub-seat")
+        .unwrap();
+    assert!(case.needs.is_none(), "stub-seat is still ignored");
+    let left = execute_rs(&case, &bin).unwrap();
+    let right = execute_rs(&case, &bin).unwrap();
+    assert_eq!(left.canonical, right.canonical);
 }
 
 fn exceptions() -> PathBuf {
     workspace_root().join("design/parity-exceptions.md")
+}
+
+/// `RIG_REQUIRE_TMUX` fails the load when the binary is missing. The macOS
+/// `cargo test` job does not set it and does not enable `tmux-it`.
+#[test]
+fn missing_tmux_fails_when_required() {
+    if std::env::var_os("RIG_REQUIRE_TMUX").is_none() {
+        return;
+    }
+    let found = std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("tmux").is_file()));
+    assert!(found, "RIG_REQUIRE_TMUX is set and tmux is not on PATH");
 }
 
 fn mtime(path: &Path) -> std::io::Result<SystemTime> {

@@ -3,8 +3,8 @@
 use std::time::Instant;
 
 use crewmux_api::{
-    HealthSummary, PodName, ReadinessCode, RigId, RigName, RuntimeKind, SeatId, SeatName,
-    SeatState, SeatView, SessionId, Snapshot,
+    HealthSummary, PodName, ReadinessCode, RigName, RuntimeKind, SeatKey, SeatState, SeatView,
+    Snapshot, TmuxSession,
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -21,14 +21,14 @@ fn seat(id: &str, name: &str, state: SeatState) -> SeatView {
 
 fn seat_runtime(id: &str, name: &str, state: SeatState, runtime: RuntimeKind) -> SeatView {
     SeatView {
-        id: SeatId::parse(id).expect("seat"),
-        name: SeatName::parse(name).expect("name"),
-        rig_id: RigId::parse("rig-1").expect("rig"),
-        rig_name: RigName::parse("demo").expect("rig name"),
+        id: SeatKey::parse(id).expect("seat"),
+        name: SeatKey::parse(name).expect("name"),
+        rig_id: RigName::new("rig-1").expect("rig"),
+        rig_name: RigName::new("demo").expect("rig name"),
         pod: PodName::parse("pod").expect("pod"),
         state,
         runtime,
-        session: Some(SessionId::parse("sess").expect("session")),
+        session: Some(TmuxSession::parse("sess").expect("session")),
         spec: Some("demo".to_owned()),
     }
 }
@@ -80,7 +80,7 @@ fn attention(cols: u16, rows: u16) -> State {
 fn flashed(cols: u16, rows: u16) -> State {
     let mut state = sized(cols, rows, vec![seat("s1", "alpha", SeatState::Ready)]);
     state.flashes.push(RowFlash {
-        key: RowKey::Seat(SeatId::parse("s1").expect("seat")),
+        key: RowKey::Seat(SeatKey::parse("s1").expect("seat")),
         at: state.now,
     });
     state

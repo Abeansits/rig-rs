@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crewmux_api::{RigId, SeatId, SeatState, Snapshot, StreamEvent, StreamKind, StreamPayload};
+use crewmux_api::{RigName, SeatKey, SeatState, Snapshot, StreamEvent, StreamKind, StreamPayload};
 use parking_lot::Mutex;
 use proptest::prelude::*;
 use tokio_util::sync::CancellationToken;
@@ -212,7 +212,7 @@ fn disclosure_fixture_matches_the_hit_map() {
             .unwrap_or("")
             .contains("ADR-0004")
     );
-    let key = RowKey::Rig(RigId::parse("rig-1").expect("rig"));
+    let key = RowKey::Rig(RigName::new("rig-1").expect("rig"));
     let hits = HitMap {
         targets: vec![
             HitTarget {
@@ -263,7 +263,7 @@ fn disclosure_fixture_matches_the_hit_map() {
 
 #[test]
 fn disclosure_hit_beats_the_row() {
-    let key = RowKey::Rig(RigId::parse("rig-1").expect("rig"));
+    let key = RowKey::Rig(RigName::new("rig-1").expect("rig"));
     let hits = HitMap {
         targets: vec![
             HitTarget {
@@ -547,10 +547,10 @@ fn hydrate_groups_pods_under_the_rig() {
     let state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
     let snapshot = Snapshot {
         seats: vec![crewmux_api::SeatView {
-            id: SeatId::parse("s1").expect("seat"),
-            name: crewmux_api::SeatName::parse("alpha").expect("name"),
-            rig_id: RigId::parse("rig-1").expect("rig"),
-            rig_name: crewmux_api::RigName::parse("demo").expect("rig name"),
+            id: SeatKey::parse("s1").expect("seat"),
+            name: crewmux_api::SeatKey::parse("alpha").expect("name"),
+            rig_id: RigName::new("rig-1").expect("rig"),
+            rig_name: crewmux_api::RigName::new("demo").expect("rig name"),
             pod: crewmux_api::PodName::parse("pod").expect("pod"),
             state: SeatState::Ready,
             runtime: crewmux_api::RuntimeKind::Stub,
@@ -571,10 +571,10 @@ fn hydrate_groups_pods_under_the_rig() {
 fn seat_state_change_flashes_that_row() {
     let mut state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
     state.snapshot.seats.push(crewmux_api::SeatView {
-        id: SeatId::parse("s1").expect("seat"),
-        name: crewmux_api::SeatName::parse("alpha").expect("name"),
-        rig_id: RigId::parse("rig-1").expect("rig"),
-        rig_name: crewmux_api::RigName::parse("demo").expect("rig name"),
+        id: SeatKey::parse("s1").expect("seat"),
+        name: crewmux_api::SeatKey::parse("alpha").expect("name"),
+        rig_id: RigName::new("rig-1").expect("rig"),
+        rig_name: crewmux_api::RigName::new("demo").expect("rig name"),
         pod: crewmux_api::PodName::parse("pod").expect("pod"),
         state: SeatState::Ready,
         runtime: crewmux_api::RuntimeKind::Stub,
@@ -585,7 +585,7 @@ fn seat_state_change_flashes_that_row() {
         id: 1,
         kind: StreamKind::SeatStateChanged,
         payload: Some(StreamPayload {
-            seat: SeatId::parse("s1").expect("seat"),
+            seat: SeatKey::parse("s1").expect("seat"),
             state: Some(SeatState::Dead),
             summary: None,
         }),

@@ -18,6 +18,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 crewmux-types.workspace = true
 serde.workspace = true
+rustix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

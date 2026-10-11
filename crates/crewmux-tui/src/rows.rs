@@ -1,7 +1,9 @@
 // Derived from openrig packages/tui/src/state.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! Group a flat seat list into rigs and pods, and the lines each section paints.
 
-use crewmux_api::{PodName, ReadinessCode, RigId, RigName, SeatId, SeatState, SeatView, Snapshot};
+use crewmux_api::{PodName, ReadinessCode, RigName, SeatKey, SeatState, SeatView, Snapshot};
+
+use crate::seat_bits::{RuntimeBits, SeatBits};
 
 use crate::action::{Action, CrossLink};
 use crate::state::{RowKey, Section, State};
@@ -33,7 +35,7 @@ pub(crate) struct VisibleRow {
 /// A rig and the pods first seen under it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RigNode {
-    id: RigId,
+    id: RigName,
     name: RigName,
     pods: Vec<PodNode>,
 }
@@ -116,7 +118,7 @@ pub(crate) fn disclosure_keys(snapshot: &Snapshot) -> Vec<RowKey> {
 
 /// Find a seat by id.
 #[must_use]
-pub(crate) fn find_seat<'a>(snapshot: &'a Snapshot, id: &SeatId) -> Option<&'a SeatView> {
+pub(crate) fn find_seat<'a>(snapshot: &'a Snapshot, id: &SeatKey) -> Option<&'a SeatView> {
     snapshot.seats.iter().find(|seat| &seat.id == id)
 }
 
@@ -161,7 +163,7 @@ fn detail_lines(state: &State) -> Vec<ContentRow> {
     detail_for(state, &id)
 }
 
-fn detail_for(state: &State, id: &SeatId) -> Vec<ContentRow> {
+fn detail_for(state: &State, id: &SeatKey) -> Vec<ContentRow> {
     let Some(seat) = find_seat(&state.snapshot, id) else {
         return vec![plain("seat is gone")];
     };

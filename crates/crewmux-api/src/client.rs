@@ -11,7 +11,16 @@ use std::time::Duration;
 
 use crate::error::Error;
 
-/// How long a single daemon request may block.
+/// macOS `sun_path` is about 104 bytes. The TUI guards at 100.
+pub const MAX_SUN_PATH_BYTES: usize = 100;
+
+/// Byte length of a path, which is what `sun_path` counts.
+#[must_use]
+pub fn path_bytes(path: &Path) -> usize {
+    path.as_os_str().len()
+}
+
+/// How long a single daemon request may block, unless [`Client::with_timeout`] says otherwise.
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One HTTP response.
@@ -27,6 +36,7 @@ pub struct Response {
 #[derive(Debug, Clone)]
 pub struct Client {
     target: Target,
+    timeout: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +51,7 @@ impl Client {
     pub fn over_uds(path: impl Into<PathBuf>) -> Self {
         Self {
             target: Target::Uds(path.into()),
+            timeout: IO_TIMEOUT,
         }
     }
 
@@ -49,7 +60,15 @@ impl Client {
     pub fn over_tcp(addr: SocketAddr) -> Self {
         Self {
             target: Target::Tcp(addr),
+            timeout: IO_TIMEOUT,
         }
+    }
+
+    /// Override the read and write timeout. `rig up` uses this; probes stay short.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// `GET /healthz`.
@@ -83,26 +102,126 @@ impl Client {
                     target: target.clone(),
                     source,
                 })?;
-                prepare_stream(&mut stream, &target)?;
+                prepare_stream(&mut stream, &target, self.timeout)?;
                 exchange(&mut stream, &target, &head, payload)
             }
             Target::Tcp(addr) => {
                 let target = addr.to_string();
-                let mut stream = TcpStream::connect(addr).map_err(|source| Error::Connect {
-                    target: target.clone(),
-                    source,
-                })?;
-                prepare_stream(&mut stream, &target)?;
+                let mut stream =
+                    TcpStream::connect_timeout(addr, self.timeout).map_err(|source| {
+                        Error::Connect {
+                            target: target.clone(),
+                            source,
+                        }
+                    })?;
+                prepare_stream(&mut stream, &target, self.timeout)?;
                 exchange(&mut stream, &target, &head, payload)
             }
         }
     }
 }
 
+/// `RIG_HOME`, or `~/.rig-rs` when the variable is unset.
+#[must_use]
+pub fn rig_home() -> PathBuf {
+    if let Some(value) = std::env::var_os("RIG_HOME") {
+        return PathBuf::from(value);
+    }
+    std::env::var_os("HOME").map_or_else(
+        || PathBuf::from(".rig-rs"),
+        |home| PathBuf::from(home).join(".rig-rs"),
+    )
+}
+
 /// Path of the rig-rs daemon socket under a `RIG_HOME`.
+///
+/// Paths that would not fit in `sockaddr_un` are replaced with a short socket
+/// under `$TMPDIR/rig-<uid>/` (or `/tmp/rig-<uid>/`). The client and the daemon
+/// share this function. The directory is private; callers must not chmod `TMPDIR`.
 #[must_use]
 pub fn daemon_socket(rig_home: &Path) -> PathBuf {
-    rig_home.join("run").join("daemon.sock")
+    let preferred = rig_home.join("run").join("daemon.sock");
+    if preferred.as_os_str().len() <= 100 {
+        return preferred;
+    }
+    short_socket(&preferred)
+}
+
+/// `$RIG_HOME/run/tui.sock`, with the same `sun_path` fallback as [`daemon_socket`].
+#[must_use]
+pub fn tui_socket(rig_home: &Path) -> PathBuf {
+    let preferred = rig_home.join("run").join("tui.sock");
+    if preferred.as_os_str().len() <= 100 {
+        return preferred;
+    }
+    short_socket(&preferred)
+}
+
+/// Daemon socket path. `tmp` and `uid` are ignored; slice 1's [`daemon_socket`] picks the fallback.
+#[must_use]
+pub fn daemon_bind_path(rig_home: &Path, _tmp: &Path, _uid: u32) -> PathBuf {
+    daemon_socket(rig_home)
+}
+
+/// TUI control socket. `tmp` and `uid` are ignored; see [`tui_socket`].
+#[must_use]
+pub fn tui_socket_path(rig_home: &Path, _tmp: &Path, _uid: u32) -> PathBuf {
+    tui_socket(rig_home)
+}
+
+fn short_socket(preferred: &Path) -> PathBuf {
+    let file = format!(
+        "rig-{:016x}.sock",
+        fnv64(preferred.as_os_str().as_encoded_bytes())
+    );
+    let dir = format!("rig-{}", current_uid());
+    let under = |root: &Path| root.join(&dir).join(&file);
+    if let Some(tmp) = std::env::var_os("TMPDIR") {
+        let candidate = under(Path::new(&tmp));
+        if candidate.as_os_str().len() <= 100 {
+            return candidate;
+        }
+    }
+    under(Path::new("/tmp"))
+}
+
+fn current_uid() -> u32 {
+    if let Ok(text) = std::fs::read_to_string("/proc/self/status") {
+        for line in text.lines() {
+            let Some(rest) = line.strip_prefix("Uid:") else {
+                continue;
+            };
+            if let Some(token) = rest.split_whitespace().next()
+                && let Ok(uid) = token.parse()
+            {
+                return uid;
+            }
+        }
+    }
+    let Ok(child) = std::process::Command::new("id")
+        .arg("-u")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return 0;
+    };
+    let Ok(output) = child.wait_with_output() else {
+        return 0;
+    };
+    String::from_utf8(output.stdout)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn fnv64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
 }
 
 fn validate_method(method: &str) -> Result<(), Error> {
@@ -126,15 +245,19 @@ fn build_head(method: &str, path: &str, payload: &[u8]) -> String {
     )
 }
 
-fn prepare_stream(stream: &mut impl TimeoutStream, target: &str) -> Result<(), Error> {
+fn prepare_stream(
+    stream: &mut impl TimeoutStream,
+    target: &str,
+    timeout: Duration,
+) -> Result<(), Error> {
     stream
-        .set_read_timeout(Some(IO_TIMEOUT))
+        .set_read_timeout(Some(timeout))
         .map_err(|source| Error::Exchange {
             target: target.to_owned(),
             source,
         })?;
     stream
-        .set_write_timeout(Some(IO_TIMEOUT))
+        .set_write_timeout(Some(timeout))
         .map_err(|source| Error::Exchange {
             target: target.to_owned(),
             source,

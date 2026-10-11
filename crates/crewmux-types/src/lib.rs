@@ -1,19 +1,43 @@
 //! Shared IDs, enums, wire DTOs, and the tmux version parser.
 //!
-//! [`tmux_version`] is the canonical parser. Slice 1b re-exports it instead of
-//! keeping a second copy next to the tmux control modules.
-//!
-//! Seat identity stays in [`id`] and [`status`] so other slices can add their
-//! own modules beside these.
+//! [`Key`] is the multiplexer key enum. Seat ids, runtimes, and readiness
+//! codes are the slice 1 vocabulary. [`tmux_version`] is the canonical parser;
+//! slice 1b re-exports it from `crewmux-mux`.
 
 mod doctor;
 mod error;
 mod id;
-mod status;
+mod readiness;
+mod runtime;
+mod ui;
+
 pub mod tmux_version;
 
 pub use doctor::{CheckStatus, DoctorCheck};
-pub use error::IdError;
-pub use id::{PodId, PodName, RigId, RigName, SeatId, SeatName, SessionId};
-pub use status::{LauncherKind, ReadinessCode, RuntimeKind, SeatState};
+pub use error::TypeError;
+pub use id::{RigId, RigName, SeatId, SeatName, SessionId};
+pub use readiness::ReadinessCode;
+pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use tmux_version::{Version, parse_version};
+pub use ui::{LauncherKind, PodName, SeatKey, TmuxSession};
+
+/// A key delivered with `send-keys`.
+///
+/// [`Key::Literal`] is a single line. Multi-line text goes through paste.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Key {
+    /// Carriage return.
+    Enter,
+    /// Escape.
+    Escape,
+    /// Control-C.
+    CtrlC,
+    /// Up arrow.
+    Up,
+    /// Down arrow.
+    Down,
+    /// Tab.
+    Tab,
+    /// Literal text with no newline.
+    Literal(String),
+}

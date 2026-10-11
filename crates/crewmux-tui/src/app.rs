@@ -176,6 +176,7 @@ impl Hydrator {
 
 struct App {
     state: State,
+    daemon_socket: PathBuf,
     launch: Option<LaunchFn>,
     gate: SingleFlight,
     slot: Arc<Mutex<Option<Result<Snapshot, HydrateFail>>>>,
@@ -189,6 +190,7 @@ struct App {
 impl App {
     fn new(config: Config, size: Size) -> Self {
         let slot = Arc::new(Mutex::new(None));
+        let daemon_socket = config.daemon_socket.clone();
         let hydrator = Hydrator {
             socket: config.daemon_socket,
             slot: Arc::clone(&slot),
@@ -201,6 +203,7 @@ impl App {
         state.env = config.env;
         Self {
             state,
+            daemon_socket,
             launch: config.launch,
             gate,
             slot,
@@ -460,7 +463,7 @@ async fn finish_attach(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> Result<Option<Msg>, Error> {
     let mut guard = CrosstermGuard;
-    let outcome = attach::perform(target, app.launch.clone(), &mut guard).await;
+    let outcome = attach::perform(target, app.launch.clone(), &mut guard, &app.daemon_socket).await;
     if let Err(err) = terminal.clear() {
         tracing::debug!(error = %err, "clear after attach");
     }

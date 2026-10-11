@@ -21,11 +21,11 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Required tests:** `codex_gates.rs::login_screens_are_login_required` (cx-1, cx-2, cx-3 give `LoginRequired`; cx-0 gives `HardFailure`); `codex_launch.rs::not_logged_in_preflight_short_circuits` (stub `codex` binary on PATH printing not-logged-in; asserts no tmux session is created and the seat state is `attention_required/login_required`); `readiness.rs::stable_inconclusive_escalates_before_timeout` (FakeMux plus a fake Clock).
 - **Pending:** confirm the current `codex login status` output and exit codes against a real logged-in and logged-out codex. The fixtures come from codex-cli 0.162.1.
 
-## PE-003: the scaffold `rig` binary has no CLI surface yet
+## PE-003: slice 1 `rig` help and version are a subset of v0.6.9
 
 - **Covers:** stdout
 - **TS behaviour:** `rig --help` lists the v0.6.9 command names (`add`, `adopt`, `agent`, … `workspace`). `rig --version` prints `0.6.9` and exits 0.
-- **Rust behaviour today:** `rig --help` lists `doctor`, `help`, and `setup`. `rig --version` prints `rig 0.0.0`. That is the slice 7 command surface, not the v0.6.9 command list or the `0.6.9` version string. The exit status matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
+- **Rust behaviour today:** the merged CLI prints clap help for `attach`, `capture`, `doctor`, `down`, `help`, `ps`, `setup`, and `up`, and `rig --version` prints `rig 0.0.0`. The help-name projection is those names sorted. The exit status still matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
 - **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
 - **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. Delete this heading, and the two `.rs.snap` files, when the CLI prints the same command names and `0.6.9` version text. The harness then reports `stale exception` because the Rust output no longer matches the snapshot (or the two sides are equal).
 - **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`. `excepted_exit_code_is_unexpected`, `excepted_stderr_panic_is_unexpected`, and `excepted_extra_tmux_call_is_unexpected` each return `Unexpected`. `changed_rust_snapshot_is_stale` reports `stale exception`.
@@ -37,6 +37,12 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Evidence:** the config-writes spike. Compare-and-swap with verify still dropped a fraction of a concurrent writer's updates, which is why the guard exists.
 - **Required test:** `crewmux-provider/tests/claude_guard.rs::refuses_while_claude_running`. `cargo xtask lint claude-json` fails when any non-test Rust file outside `crates/crewmux-provider/src/claude/trust.rs` names that user-config basename.
 
+## PE-005: the stub script is `RIG_STUB_SCRIPT` key=value, not a JSON step list
+
+- **TS behaviour:** `packages/daemon/src/adapters/stub-script.ts` runs a JSON list of steps.
+- **Rust behaviour:** the slice 1 acceptance script is comma-separated `ready_after_ms`, `exit_after_ms`, and `print_gate=<code>`. The fixture still prints `stub> ` and echoes submitted lines.
+- **Required test:** `crewmux_adapters::screen_tests::script_parses_gate_and_timers` and `gate_surfaces_as_attention`.
+
 ## PE-006: setup and doctor reports differ from v0.6.9
 
 - **Covers:** stdout
@@ -44,6 +50,31 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Rust behaviour:** `rig setup` prints a `SetupPlan` (`write`, `extract`, `offer_install`, `skip`). Node, ABI, ui_dist, cmux, and daemon_dist checks are not part of `rig doctor`. Install steps stay offers unless `--yes` is passed. Herdr stays attach-only.
 - **Required tests:** `crates/rig/tests/setup_flow.rs` and `crates/rig/tests/doctor_json.rs`.
 - **Snapshot:** `tests/diff/snapshots/setup-dry-run.rs.snap` and `tests/diff/snapshots/doctor-help.rs.snap`. `ExpectedDiff(PE-006)` applies only while those Rust observations still match.
+
+## PE-007: slice 1 stub up, ps, capture, and down speak the acceptance JSON
+
+- **Covers:** stdout, exit
+- **TS behaviour:** `rig up` of the slice 1 document (`name` plus a `seats` list) exits 1. v0.6.9 reports `seats` as an unknown key and refuses the file. `rig ps --json` then prints `[]`. `rig capture <seat> --json` reports the session missing or tmux unreachable. `rig down --json` without a rig argument is `commander.missingArgument`. stderr stays empty. The cases record no tmux argv, and that list is empty on both sides.
+- **Rust behaviour:** the same document is the slice 1 spec. `rig up --json` auto-starts the daemon and prints `{status, rig, seats, events}` with both seats `ready`. `rig ps --json` lists rig, seat, runtime, state, tmux session, and `attached: false`. `rig capture --json` returns the screen text, including `stub> `. `rig down --json` prints `{stopped, sessions_killed, events}`. The process exits 0.
+- **Snapshot:** `tests/diff/snapshots/stub-seat.rs.snap`, `tests/diff/snapshots/up-ps-down-stub.rs.snap`, and `tests/diff/snapshots/capture-stub.rs.snap` record that Rust side. `ExpectedDiff(PE-007)` applies only while the live Rust observation still matches the snapshot for that case. stderr, json, files, and tmux argv stay compared as ordinary fields.
+- **Why this is recorded:** this is the stdout and exit from a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). The acceptance spec requires this document and this JSON. Delete this heading and the three `.rs.snap` files when those two fields match v0.6.9. The harness then reports `stale exception`. The `capture-stub` and `stub-seat` TypeScript goldens use the cold-start capture error (`tmux_unavailable`). A leftover OpenRig daemon from an earlier run answers the same capture with `session_missing`, and the golden check fails. dash's `getcwd() failed` line is stripped before compare. CI runs one cold diff, which is the snapshot that is committed.
+- **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-007)` for `stub-seat`, `up-ps-down-stub`, and `capture-stub`.
+- **A v0.6.9-valid spec is not a comparable stub case.** Slice 1's parser accepts `name` plus `seats` and rejects the unknown keys `version`, `pods`, and `members`. A v0.6.9 document (`version: "0.2"`, pods, members, `agent_ref`) is rejected by Rust before any seat exists. OpenRig accepts that file and then resolves agent files and a runtime this slice does not launch. The two sides cannot both produce a stub seat from that file, so the comparison would be a spec-format mismatch rather than stub behaviour. No extra stub case was added.
+
+## PE-008: `rig attach` execs tmux rather than `rig attach --self`
+
+- **TS behaviour:** `packages/cli` `rig attach --self` attaches the operator's terminal through the TypeScript client.
+- **Rust behaviour:** acceptance criterion 7 execs the daemon's resolved tmux binary with `-S <socket path> attach -t =<session>` (exact-match target). The path is the one that server reported (`display-message -p '#{socket_path}'`). `-L` plus the caller's `TMUX_TMPDIR` addresses a different server. An unknown seat exits 1.
+- **Required test:** `attach_execs_exact_tmux_target`, `attach_unknown_seat_exits_1`, and `attach_uses_the_server_socket_under_tmux_tmpdir`.
+
+## PE-009: `/healthz` is status and pid
+
+- **Covers:** stdout
+- **TS behaviour:** `GET /healthz` in `packages/daemon/src/server.ts` returns `status: "ok"` plus production fields: `pid`, `selfHostId`, `selfHostIdSource`, `eventLoop`, `routeTimings`, `bind`, `stuckSweep`, `wakeLadder`, and `slowOperations`.
+- **Rust behaviour:** slice 1 returns `{status, pid}`. The health-shape projection is `status=ok` and `keys=pid,status`. Exit status matches.
+- **Snapshot:** `tests/diff/snapshots/daemon-health.rs.snap` records that Rust side. `ExpectedDiff(PE-009)` applies only while the live Rust observation still matches it. stderr, exit, json, files, and tmux argv stay compared as ordinary fields.
+- **Why this is recorded:** a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`) shows the same `status=ok` and a longer key list on the TypeScript side. Delete this heading and the `.rs.snap` when `/healthz` carries the same top-level keys.
+- **Required test:** `daemon_health_against_product_daemon`. `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-009)` for `daemon-health`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

@@ -1,0 +1,5 @@
+---
+source: crates/crewmux-spec/tests/parse.rs
+expression: golden(&err)
+---
+unknown variant `pi`, expected one of claude-code, codex, opencode, terminal, stub at line 4 column 14 (pi)

@@ -1,4 +1,4 @@
-# cargo-nextest config. Profiles: default (local), ci (CI gate), slow (opt-in heavy suites).
+# cargo-nextest config. Profiles: default (local), ci (CI gate), coverage (llvm-cov), slow (opt-in heavy suites).
 [store]
 dir = "target/nextest"
 
@@ -34,18 +34,39 @@ fail-fast = false
 slow-timeout = { period = "120s", terminate-after = 5 }
 default-filter = "all()"
 
-# Anything touching a real tmux server runs serially (private -L sockets, but CPU/pty bound).
+# Anything touching a real tmux server runs serially (private -L sockets, but CPU/pty bound)
+# and takes every test thread. A 500ms death budget and a 64 KiB paste both miss when
+# other tests keep the machine busy. Paste and fidelity stay in their own group.
 [test-groups]
 tmux = { max-threads = 1 }
+tmux-heavy = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = "test(/::tmux_it::/)"
+filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
+threads-required = "num-test-threads"
 
 [[profile.ci.overrides]]
-filter = "test(/::tmux_it::/)"
+filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
+
+[[profile.ci.overrides]]
+filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
+threads-required = "num-test-threads"
 
 [[profile.slow.overrides]]
-filter = "test(/::tmux_it::/)"
+filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
+
+[[profile.slow.overrides]]
+filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
+threads-required = "num-test-threads"

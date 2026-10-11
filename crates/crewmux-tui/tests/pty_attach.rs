@@ -17,8 +17,8 @@ mod tmux_it {
     use std::time::{Duration, Instant};
 
     use crewmux_api::{
-        AttachInfo, PodName, RigId, RigName, RuntimeKind, SeatId, SeatName, SeatState, SeatView,
-        SessionId, Snapshot, daemon_bind_path, tui_socket_path,
+        PodName, RigName, RuntimeKind, SeatKey, SeatState, SeatView, Snapshot, TmuxSession,
+        daemon_bind_path, tui_socket_path,
     };
     use nix::poll::{PollFd, PollFlags, poll};
     use nix::pty::openpty;
@@ -115,13 +115,13 @@ mod tmux_it {
     }
 
     fn router(sock_name: &str) -> Result<axum::Router, String> {
-        let seat = SeatId::parse("s1").map_err(|err| err.to_string())?;
-        let session = SessionId::parse("seat").map_err(|err| err.to_string())?;
+        let seat = SeatKey::parse("s1").map_err(|err| err.to_string())?;
+        let session = TmuxSession::parse("seat").map_err(|err| err.to_string())?;
         let view = SeatView {
-            id: seat.clone(),
-            name: SeatName::parse("alpha").map_err(|err| err.to_string())?,
-            rig_id: RigId::parse("rig-1").map_err(|err| err.to_string())?,
-            rig_name: RigName::parse("demo").map_err(|err| err.to_string())?,
+            id: seat,
+            name: SeatKey::parse("alpha").map_err(|err| err.to_string())?,
+            rig_id: RigName::new("rig-1").map_err(|err| err.to_string())?,
+            rig_name: RigName::new("demo").map_err(|err| err.to_string())?,
             pod: PodName::parse("pod").map_err(|err| err.to_string())?,
             state: SeatState::Ready,
             runtime: RuntimeKind::ClaudeCode,
@@ -134,16 +134,12 @@ mod tmux_it {
                 health: None,
                 activity: vec![],
             },
-            attach: AttachInfo {
-                seat,
-                socket: sock_name.to_owned(),
-                session,
-            },
+            socket: sock_name.to_owned(),
+            session: session.as_str().to_owned(),
         };
         Ok(axum::Router::new()
-            .route("/api/snapshot", axum::routing::get(snapshot))
             .route("/api/seats", axum::routing::get(seats))
-            .route("/api/seats/{seat}/attach", axum::routing::get(attach))
+            .route("/api/seats/attach", axum::routing::post(attach))
             .route("/api/events", axum::routing::get(events))
             .with_state(fixture))
     }
@@ -151,32 +147,35 @@ mod tmux_it {
     #[derive(Clone)]
     struct Fixture {
         snapshot: Snapshot,
-        attach: AttachInfo,
-    }
-
-    async fn snapshot(
-        axum::extract::State(fixture): axum::extract::State<Fixture>,
-    ) -> axum::Json<Snapshot> {
-        axum::Json(fixture.snapshot)
+        socket: String,
+        session: String,
     }
 
     async fn seats(
         axum::extract::State(fixture): axum::extract::State<Fixture>,
-    ) -> axum::Json<crewmux_api::SeatList> {
-        axum::Json(crewmux_api::SeatList {
-            seats: fixture.snapshot.seats,
-        })
+    ) -> axum::Json<serde_json::Value> {
+        let Some(seat) = fixture.snapshot.seats.first() else {
+            return axum::Json(serde_json::json!({"rigs": []}));
+        };
+        axum::Json(serde_json::json!({
+            "rigs": [{
+                "name": seat.rig_name.as_str(),
+                "seats": [{
+                    "name": seat.name.as_str(),
+                    "runtime": seat.runtime,
+                    "state": seat.state.as_str(),
+                    "tmux_session": seat.session.as_ref().map(ToString::to_string),
+                }]
+            }]
+        }))
     }
 
     async fn attach(
         axum::extract::State(fixture): axum::extract::State<Fixture>,
-        axum::extract::Path(seat): axum::extract::Path<String>,
-    ) -> Result<axum::Json<AttachInfo>, axum::http::StatusCode> {
-        if seat == fixture.attach.seat.as_str() {
-            Ok(axum::Json(fixture.attach))
-        } else {
-            Err(axum::http::StatusCode::NOT_FOUND)
-        }
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({
+            "argv": ["tmux", "-L", fixture.socket, "attach", "-t", format!("={}", fixture.session)]
+        }))
     }
 
     async fn events() -> axum::response::sse::Sse<
@@ -190,7 +189,7 @@ mod tmux_it {
             .json_data(serde_json::json!({
                 "id": 1,
                 "type": "activity",
-                "payload": {"seat": "s1", "summary": "ok"}
+                "payload": {"seat": "alpha", "summary": "ok"}
             }))
             .unwrap_or_else(|_| Event::default().data("{}"));
         let once = stream::once(async move { Ok(event) });
@@ -465,7 +464,7 @@ mod tmux_it {
             .set_read_timeout(Some(Duration::from_secs(2)))
             .map_err(|err| err.to_string())?;
         stream
-            .write_all(b"{\"cmd\":\"select\",\"seat\":\"s1\"}\n")
+            .write_all(b"{\"cmd\":\"select\",\"seat\":\"alpha\"}\n")
             .map_err(|err| err.to_string())?;
         let mut line = String::new();
         BufReader::new(&stream)

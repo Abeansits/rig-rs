@@ -1,0 +1,10 @@
+{
+  "id": "tmux-paste-argv",
+  "project": "full",
+  "needs": "deferred until the daemon paste command exists (slice 1); library argv is covered by paste unit tests",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [
+    { "op": "cli", "argv": ["--version"] },
+    { "op": "tmux_calls" }
+  ]
+}

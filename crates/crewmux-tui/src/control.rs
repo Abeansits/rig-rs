@@ -10,7 +10,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
-use crewmux_api::{MAX_SUN_PATH_BYTES, SeatId, path_bytes};
+use crewmux_api::{MAX_SUN_PATH_BYTES, SeatKey, path_bytes};
 
 use crate::error::Error;
 use crate::msg::{ControlCmd, ControlReplyId};
@@ -82,7 +82,7 @@ fn seat_cmd(value: &Value, reply: ControlReplyId, select: bool) -> ControlCmd {
     let Some(seat) = value
         .get("seat")
         .and_then(Value::as_str)
-        .and_then(|raw| SeatId::parse(raw).ok())
+        .and_then(|raw| SeatKey::parse(raw).ok())
     else {
         return ControlCmd::Unknown {
             verb: if select { "select" } else { "attach" }.to_owned(),

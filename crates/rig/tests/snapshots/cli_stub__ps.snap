@@ -1,0 +1,27 @@
+---
+source: crates/rig/tests/cli_stub.rs
+expression: "serde_json::to_string_pretty(&listed).expect(\"json\")"
+---
+{
+  "rigs": [
+    {
+      "name": "pair",
+      "seats": [
+        {
+          "attached": false,
+          "name": "one",
+          "runtime": "stub",
+          "state": "ready",
+          "tmux_session": "one__pair"
+        },
+        {
+          "attached": false,
+          "name": "two",
+          "runtime": "stub",
+          "state": "ready",
+          "tmux_session": "two__pair"
+        }
+      ]
+    }
+  ]
+}

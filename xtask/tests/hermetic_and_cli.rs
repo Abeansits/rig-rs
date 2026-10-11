@@ -118,14 +118,45 @@ fn missing_typescript_tree_exits_2_and_does_not_skip() {
 fn self_mode_exits_0_and_update_with_self_is_a_usage_error() {
     let dir = tempfile::TempDir::with_prefix("rigrs-bin-").unwrap();
     let bin = dir.path().join("rig");
-    fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::write(
+        &bin,
+        r#"#!/usr/bin/env python3
+import os, socket, sys
+if sys.argv[1:3] == ["daemon", "run"]:
+    path = os.path.join(os.environ["RIG_HOME"], "run", "daemon.sock")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(8)
+    body = b'{"status":"ok","pid":1}'
+    head = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+        + str(len(body)).encode()
+        + b"\r\nConnection: close\r\n\r\n"
+    )
+    while True:
+        conn, _addr = server.accept()
+        conn.recv(65536)
+        conn.sendall(head + body)
+        conn.close()
+raise SystemExit(0)
+"#,
+    )
+    .unwrap();
     fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
     let bin_text = bin.display().to_string();
     let (code, stdout, stderr) = run(&["diff", "--self", "--bin", &bin_text], None, &[]).unwrap();
     assert_eq!(code, 0, "{stdout}\n{stderr}");
     assert!(stdout.contains("| version | Equal |"), "{stdout}");
-    assert!(stdout.contains("needs UDS listener"), "{stdout}");
-    assert!(stdout.contains("needs slice 1"), "{stdout}");
+    assert!(stdout.contains("| daemon-health | Equal |"), "{stdout}");
+    assert!(
+        stdout.contains("deferred until the daemon paste command exists"),
+        "{stdout}"
+    );
     let (code, _stdout, stderr) = run(
         &["diff", "--self", "--update", "--bin", &bin_text],
         None,

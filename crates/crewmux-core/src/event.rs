@@ -1,29 +1,69 @@
-//! Pure domain events. Slice 1 owns the lifecycle set (`RigCreated`, `SeatLaunched`, …).
-//! The variants here feed the temporary `GET /api/events` fan-out. Slice 4's
-//! envelope wraps them; this enum is not the wire format.
+//! Domain events appended in causal order.
 
-use crewmux_types::{SeatId, SeatState};
+use crewmux_types::{RigId, RigName, SeatId, SessionId};
+use serde::{Deserialize, Serialize};
 
-/// A fact the daemon can publish. The HTTP stream maps these onto the API `StreamEvent`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+use crate::clock::Timestamp;
+
+/// Monotonic position in the event log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Seq(pub u64);
+
+/// Something that happened to a rig or seat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DomainEvent {
-    /// A seat moved to a new lifecycle state.
-    SeatStateChanged {
-        /// Seat that changed.
-        seat: SeatId,
-        /// State after the change.
-        state: SeatState,
+    /// `plan_up` accepted a spec.
+    RigCreated {
+        /// New rig.
+        rig: RigId,
+        /// Spec name.
+        name: RigName,
+        /// When.
+        at: Timestamp,
     },
-    /// The seat's pane died.
+    /// A tmux session was created for a seat.
+    SeatLaunched {
+        /// Seat.
+        seat: SeatId,
+        /// Session row.
+        session: SessionId,
+        /// When.
+        at: Timestamp,
+    },
+    /// The composer matched.
+    SeatReady {
+        /// Seat.
+        seat: SeatId,
+        /// When.
+        at: Timestamp,
+    },
+    /// `rig down` killed the session.
+    SeatStopped {
+        /// Seat.
+        seat: SeatId,
+        /// When.
+        at: Timestamp,
+    },
+    /// The pane process exited.
     SeatDied {
-        /// Seat that died.
+        /// Seat.
         seat: SeatId,
+        /// When.
+        at: Timestamp,
     },
-    /// A line of recent activity for a seat.
-    Activity {
-        /// Seat the line belongs to.
-        seat: SeatId,
-        /// One-line summary. Nothing is injected into the seat's prompt (ADR-0009).
-        summary: String,
-    },
+}
+
+impl DomainEvent {
+    /// Wire kind, used by `rig up --json`.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::RigCreated { .. } => "rig_created",
+            Self::SeatLaunched { .. } => "seat_launched",
+            Self::SeatReady { .. } => "seat_ready",
+            Self::SeatStopped { .. } => "seat_stopped",
+            Self::SeatDied { .. } => "seat_died",
+        }
+    }
 }

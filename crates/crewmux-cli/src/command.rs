@@ -1,28 +1,13 @@
-//! Argument parser for `rig setup` and `rig doctor`.
+//! Argument types for `rig setup` and `rig doctor`.
+//!
+//! The binary parser lives in `lib.rs` so `up`, `ps`, `setup`, and `doctor`
+//! share one clap command tree.
 
 use std::collections::BTreeSet;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 use crate::error::Error;
-
-/// Top-level `rig` command.
-#[derive(Debug, Parser)]
-#[command(name = "rig", version, about = "Provider setup and environment checks")]
-pub struct Cli {
-    /// Subcommand.
-    #[command(subcommand)]
-    pub command: Option<Command>,
-}
-
-/// `setup` or `doctor`.
-#[derive(Debug, Subcommand)]
-pub enum Command {
-    /// Plan or apply provider, tmux, skill, and install steps.
-    Setup(SetupArgs),
-    /// Read-only version and environment checks.
-    Doctor(DoctorArgs),
-}
 
 /// Flags for `rig setup`.
 #[derive(Debug, Parser)]
@@ -30,7 +15,7 @@ pub enum Command {
     clippy::struct_excessive_bools,
     reason = "each field is a separate command-line switch"
 )]
-pub struct SetupArgs {
+pub(crate) struct SetupArgs {
     /// Print the plan and write nothing.
     #[arg(long)]
     pub dry_run: bool,
@@ -59,7 +44,7 @@ pub struct SetupArgs {
 
 /// Flags for `rig doctor`.
 #[derive(Debug, Parser)]
-pub struct DoctorArgs {
+pub(crate) struct DoctorArgs {
     /// Print the report as JSON.
     #[arg(long)]
     pub json: bool,

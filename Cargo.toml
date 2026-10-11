@@ -8,8 +8,27 @@ rust-version = "1.99"
 license = "Apache-2.0"
 publish = false
 
-# Internal crates only. External deps are added (cargo add, then hoisted here) when a slice needs them.
+# Internal crates, plus external deps hoisted here when a slice needs them.
+# Slice 1b: tokio (argv exec + tasks), tokio-util (cancellation + task tracking),
+# async-trait (dyn Multiplexer), thiserror (MuxError), bytes (pane output),
+# tracing (structured logs), ulid (unique paste buffer names), proptest (decoder).
 [workspace.dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+proptest = "1.12.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+tracing = "0.1.44"
+ulid = { version = "3.0.0", features = ["serde"] }
+# `flock` for the daemon lock and the autostart lock (`fs` on crewmux-daemon
+# and crewmux-cli) and `getuid` / `test_kill_process` (`process`).
+# The mux crate uses `process` for the Linux SIGCHLD reap nudge.
+# Provider tests use `process` to reap leftover tmux sockets.
+# `cargo add -p crewmux-daemon rustix --features fs,process`
+# `cargo add -p crewmux-cli rustix --features fs`
+# `cargo add -p crewmux-provider --dev rustix --features process`
+rustix = "1.1.5"
 crewmux-types = { path = "crates/crewmux-types" }
 crewmux-spec = { path = "crates/crewmux-spec" }
 crewmux-core = { path = "crates/crewmux-core" }
@@ -28,32 +47,30 @@ crewmux-mcp = { path = "crates/crewmux-mcp" }
 crewmux-tui = { path = "crates/crewmux-tui" }
 crewmux-cli = { path = "crates/crewmux-cli" }
 # Slice 0b harness. Versions come from `cargo add` (crates.io, 2026-10-11), then hoisted.
-thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.152"
+# Slice 1. Versions are whatever `cargo add` resolved (crates.io, 2026-10-11), then hoisted.
+# serde-saphyr: RigSpec YAML (ADR-0007). rusqlite + rusqlite_migration: schema v1 (ADR-0003).
+# axum: HTTP/1.1 over the Unix socket (ADR-0006). clap: the `rig` verb tree.
+# anyhow: binaries only (`rig`, and the CLI crate which is the binary's command layer).
+anyhow = "1.0.104"
+assert_cmd = "2.2.2"
+axum = { version = "0.8.9", features = ["json"] }
+futures-util = "0.3.34"
+nix = { version = "0.31.3", features = ["term", "signal", "poll"] }
+parking_lot = "0.12.5"
+ratatui = { version = "0.30.2", features = ["crossterm"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+clap = { version = "4.6.7", features = ["derive"] }
 regex = "1.13.1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite_migration = "2.6.0"
+serde-saphyr = "1.3.0"
 tempfile = "3.27.0"
 insta = "1.49.0"
 # Slice 7. Versions come from `cargo add` (crates.io, 2026-10-11), then hoisted.
 toml_edit = "0.25.17"
-clap = { version = "4.6.7", features = ["derive"] }
-anyhow = "1.0.104"
-assert_cmd = "2.2.2"
 predicates = "3.1.4"
-proptest = "1.12.0"
-# Slice 13. Versions come from `cargo add` (crates.io, 2026-10-11), then hoisted.
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net", "fs", "process", "signal"] }
-tokio-util = { version = "0.7.20", features = ["rt"] }
-axum = { version = "0.8.9", features = ["json"] }
-tracing = "0.1.44"
-parking_lot = "0.12.5"
-ratatui = { version = "0.30.2", features = ["crossterm"] }
-crossterm = { version = "0.29.0", features = ["event-stream"] }
-futures-util = "0.3.34"
-# AC10 pty harness. `cargo add` (crates.io), then hoisted. nix wraps openpty/termios/poll;
-# rustix sets the window size without an ioctl macro in this repo.
-nix = { version = "0.31.3", features = ["term", "signal", "poll"] }
-rustix = { version = "1.1.5", features = ["termios", "process"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

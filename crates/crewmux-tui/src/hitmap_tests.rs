@@ -3,9 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use crewmux_api::{
-    PodName, RigId, RigName, RuntimeKind, SeatId, SeatName, SeatState, SeatView, Snapshot,
-};
+use crewmux_api::{PodName, RigName, RuntimeKind, SeatKey, SeatState, SeatView, Snapshot};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use serde_json::Value;
@@ -182,9 +180,9 @@ fn expanded_pod() -> State {
         .into_iter()
         .map(|name| SeatView {
             id: seat_id(name),
-            name: SeatName::parse(name).expect("name"),
-            rig_id: RigId::parse("openrig-build").expect("rig"),
-            rig_name: RigName::parse("openrig-build").expect("rig name"),
+            name: SeatKey::parse(name).expect("name"),
+            rig_id: RigName::new("openrig-build").expect("rig"),
+            rig_name: RigName::new("openrig-build").expect("rig name"),
             pod: PodName::parse("dev50").expect("pod"),
             state: SeatState::Ready,
             runtime: RuntimeKind::ClaudeCode,
@@ -208,8 +206,8 @@ fn expanded_pod() -> State {
     state
 }
 
-fn seat_id(name: &str) -> SeatId {
-    SeatId::parse(name).expect("seat")
+fn seat_id(name: &str) -> SeatKey {
+    SeatKey::parse(name).expect("seat")
 }
 
 fn paint_hits(state: &State) -> HitMap {

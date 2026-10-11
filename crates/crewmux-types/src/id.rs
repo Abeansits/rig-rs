@@ -1,89 +1,220 @@
-//! Id and name newtypes. Slice 1 may wrap these in ULIDs; the wire form stays a string.
+//! ULID newtypes for rigs, seats, and sessions, plus name newtypes.
 
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 
-use crate::error::IdError;
+use crate::error::TypeError;
 
-macro_rules! token {
-    ($(#[$doc:meta])* $name:ident) => {
-        $(#[$doc])*
-        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
+/// Opaque rig identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RigId(Ulid);
 
-        impl $name {
-            /// Parse a non-empty token with no path or whitespace characters.
-            ///
-            /// # Errors
-            ///
-            /// Returns [`IdError`] when `raw` is empty or contains a reserved character.
-            pub fn parse(raw: &str) -> Result<Self, IdError> {
-                validate_token(raw)?;
-                Ok(Self(raw.to_owned()))
-            }
+impl RigId {
+    /// A new random id.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Ulid::generate())
+    }
 
-            /// Borrow the token.
-            #[must_use]
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl AsRef<str> for $name {
-            fn as_ref(&self) -> &str {
-                &self.0
-            }
-        }
-    };
+    /// The underlying ULID.
+    #[must_use]
+    pub const fn as_ulid(self) -> Ulid {
+        self.0
+    }
 }
 
-token!(
-    /// Seat identity. Slice 1 owns the ULID generator; this slice accepts any safe token.
-    SeatId
-);
-token!(
-    /// Rig identity.
-    RigId
-);
-token!(
-    /// Pod identity within a rig. Pods are named, not globally unique.
-    PodId
-);
-token!(
-    /// tmux session identity for a seat.
-    SessionId
-);
-token!(
-    /// Human-readable rig name.
-    RigName
-);
-token!(
-    /// Human-readable pod name.
-    PodName
-);
-token!(
-    /// Human-readable seat name.
-    SeatName
-);
-
-fn validate_token(raw: &str) -> Result<(), IdError> {
-    if raw.is_empty() || raw.chars().all(char::is_whitespace) {
-        return Err(IdError::Empty);
+impl Default for RigId {
+    fn default() -> Self {
+        Self::new()
     }
-    if raw.chars().any(reserved) {
-        return Err(IdError::Reserved);
-    }
-    Ok(())
 }
 
-fn reserved(ch: char) -> bool {
-    ch.is_whitespace() || matches!(ch, '/' | '\\' | '\0')
+impl fmt::Display for RigId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for RigId {
+    type Err = TypeError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Ulid::from_str(text)
+            .map(Self)
+            .map_err(|err| TypeError::Id(err.to_string()))
+    }
+}
+
+/// Opaque seat identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SeatId(Ulid);
+
+impl SeatId {
+    /// A new random id.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Ulid::generate())
+    }
+
+    /// The underlying ULID.
+    #[must_use]
+    pub const fn as_ulid(self) -> Ulid {
+        self.0
+    }
+}
+
+impl Default for SeatId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for SeatId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for SeatId {
+    type Err = TypeError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Ulid::from_str(text)
+            .map(Self)
+            .map_err(|err| TypeError::Id(err.to_string()))
+    }
+}
+
+/// Opaque session identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionId(Ulid);
+
+impl SessionId {
+    /// A new random id.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Ulid::generate())
+    }
+
+    /// The underlying ULID.
+    #[must_use]
+    pub const fn as_ulid(self) -> Ulid {
+        self.0
+    }
+}
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for SessionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for SessionId {
+    type Err = TypeError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Ulid::from_str(text)
+            .map(Self)
+            .map_err(|err| TypeError::Id(err.to_string()))
+    }
+}
+
+/// Rig name as written in a spec. Not an id.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RigName(String);
+
+impl RigName {
+    /// Reject an empty name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError::Name`] when `text` is empty or contains a newline.
+    pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
+        validate_name(text.into()).map(Self)
+    }
+
+    /// Borrow the name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for RigName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl AsRef<str> for RigName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Seat name as written in a spec. Not an id.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SeatName(String);
+
+impl SeatName {
+    /// Reject a name tmux would format-expand.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError::Name`] when `text` is empty or contains a character
+    /// outside `[A-Za-z0-9_-]`.
+    pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
+        validate_seat_name(text.into()).map(Self)
+    }
+
+    /// Borrow the name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SeatName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl AsRef<str> for SeatName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+fn validate_name(text: String) -> Result<String, TypeError> {
+    if text.is_empty() || text.chars().any(char::is_control) {
+        return Err(TypeError::Name(text));
+    }
+    Ok(text)
+}
+
+fn validate_seat_name(text: String) -> Result<String, TypeError> {
+    let ok = !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+    if ok {
+        Ok(text)
+    } else {
+        Err(TypeError::Name(text))
+    }
 }
