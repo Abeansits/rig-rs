@@ -21,14 +21,26 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Required tests:** `codex_gates.rs::login_screens_are_login_required` (cx-1, cx-2, cx-3 give `LoginRequired`; cx-0 gives `HardFailure`); `codex_launch.rs::not_logged_in_preflight_short_circuits` (stub `codex` binary on PATH printing not-logged-in; asserts no tmux session is created and the seat state is `attention_required/login_required`); `readiness.rs::stable_inconclusive_escalates_before_timeout` (FakeMux plus a fake Clock).
 - **Pending:** confirm the current `codex login status` output and exit codes against a real logged-in and logged-out codex. The fixtures come from codex-cli 0.162.1.
 
-## PE-003: the scaffold `rig` binary has no CLI surface yet
+## PE-003: slice 1 `rig` help and version are a subset of v0.6.9
 
 - **Covers:** stdout
 - **TS behaviour:** `rig --help` lists the v0.6.9 command names (`add`, `adopt`, `agent`, … `workspace`). `rig --version` prints `0.6.9` and exits 0.
-- **Rust behaviour today:** `crates/rig` is the slice 0 scaffold (`fn main() {}`). It exits 0 and prints nothing, so the help-name projection is empty and the version text is empty. The exit status matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
-- **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side: empty stdout, exit 0, empty stderr, and the same `tmux_argv` as v0.6.9. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
+- **Rust behaviour today:** slice 1 prints clap help for `up`, `ps`, `capture`, `attach`, `down`, and `help`, and `rig --version` prints `rig 0.0.0`. The help-name projection is those names sorted. The exit status still matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
+- **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
 - **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. Delete this heading, and the two `.rs.snap` files, when the CLI prints the same command names and `0.6.9` version text. The harness then reports `stale exception` because the Rust output no longer matches the snapshot (or the two sides are equal).
 - **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`. `excepted_exit_code_is_unexpected`, `excepted_stderr_panic_is_unexpected`, and `excepted_extra_tmux_call_is_unexpected` each return `Unexpected`. `changed_rust_snapshot_is_stale` reports `stale exception`.
+
+## PE-004: `rig attach` execs tmux rather than `rig attach --self`
+
+- **TS behaviour:** `packages/cli` `rig attach --self` attaches the operator's terminal through the TypeScript client.
+- **Rust behaviour:** acceptance criterion 7 execs `tmux -L rig-rs attach -t =<session>` (exact-match target). An unknown seat exits 1.
+- **Required test:** `attach_execs_exact_tmux_target` and `attach_unknown_seat_exits_1`.
+
+## PE-005: the stub script is `RIG_STUB_SCRIPT` key=value, not a JSON step list
+
+- **TS behaviour:** `packages/daemon/src/stub-script.ts` runs a JSON list of steps.
+- **Rust behaviour:** the slice 1 acceptance script is comma-separated `ready_after_ms`, `exit_after_ms`, and `print_gate=<code>`. The fixture still prints `stub> ` and echoes submitted lines.
+- **Required test:** `crewmux_adapters::screen_tests::script_parses_gate_and_timers` and `gate_surfaces_as_attention`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

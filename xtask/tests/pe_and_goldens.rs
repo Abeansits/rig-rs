@@ -219,14 +219,12 @@ fn update_writes_only_a_ts_snapshot() {
 }
 
 #[test]
-fn committed_rust_snapshots_match_empty_stdout() {
+fn committed_rust_snapshots_match_the_slice1_cli() {
     let dir = workspace_root().join("tests/diff/snapshots");
-    for (id, tmux) in [
-        ("help-top", Vec::new()),
-        ("scenario-runner-probe", vec![argv(&["tmux", "-V"])]),
-    ] {
+    let help = observation("attach\ncapture\ndown\nhelp\nps\nup", "", 0, Vec::new()).unwrap();
+    let version = observation("rig 0.0.0\n", "", 0, vec![argv(&["tmux", "-V"])]).unwrap();
+    for (id, expected) in [("help-top", help), ("scenario-runner-probe", version)] {
         let snap = read_rs_golden(&dir, id).unwrap();
-        let expected = observation("", "", 0, tmux).unwrap();
         assert_eq!(snap, expected, "{id}");
         let ts = read_ts_golden(&dir, id).unwrap();
         assert_ne!(ts, snap, "{id}");

@@ -2,10 +2,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use tokio::sync::{Mutex, broadcast, watch};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::Key;
 use crate::Multiplexer;
@@ -29,6 +31,8 @@ struct FakeInner {
     calls: Vec<Vec<String>>,
     clients: Vec<ClientInfo>,
     capture: Capture,
+    screens: HashMap<String, Capture>,
+    script_stubs: bool,
     in_mode: bool,
     scripted: Option<GuardInputs>,
     fail_paste: bool,
@@ -41,6 +45,8 @@ pub struct FakeMux {
     inner: Arc<Mutex<FakeInner>>,
     events: broadcast::Sender<MuxEvent>,
     own_write: watch::Sender<Option<Instant>>,
+    cancel: CancellationToken,
+    tracker: TaskTracker,
 }
 
 impl Default for FakeMux {
@@ -68,6 +74,8 @@ impl FakeMux {
                 calls: Vec::new(),
                 clients: Vec::new(),
                 capture: Capture::new(String::new(), (0, 0)),
+                screens: HashMap::new(),
+                script_stubs: false,
                 in_mode: false,
                 scripted: None,
                 fail_paste: false,
@@ -76,7 +84,58 @@ impl FakeMux {
             })),
             events,
             own_write,
+            cancel: CancellationToken::new(),
+            tracker: TaskTracker::new(),
         }
+    }
+
+    /// Honour `RIG_STUB_SCRIPT` on later [`create_session`](Multiplexer::create_session) calls.
+    pub async fn enable_stub_scripts(&self) {
+        self.inner.lock().await.script_stubs = true;
+    }
+
+    fn arm_stub(&self, session: &str, pane_id: &str, plan: &crate::fake_script::StubPlan) {
+        if plan.ready_after_ms > 0 {
+            let inner = Arc::clone(&self.inner);
+            let token = self.cancel.clone();
+            let session = session.to_owned();
+            let delay = plan.ready_after_ms;
+            let text = crate::fake_script::render_stub(plan);
+            self.tracker.spawn(async move {
+                tokio::select! {
+                    () = token.cancelled() => {}
+                    () = tokio::time::sleep(Duration::from_millis(delay)) => {
+                        let mut guard = inner.lock().await;
+                        guard.screens.insert(session, Capture::new(text, (0, 0)));
+                    }
+                }
+            });
+        }
+        let Some(delay) = plan.exit_after_ms else {
+            return;
+        };
+        let inner = Arc::clone(&self.inner);
+        let events = self.events.clone();
+        let token = self.cancel.clone();
+        let session = session.to_owned();
+        let pane_id = pane_id.to_owned();
+        self.tracker.spawn(async move {
+            tokio::select! {
+                () = token.cancelled() => {}
+                () = tokio::time::sleep(Duration::from_millis(delay)) => {
+                    let mut guard = inner.lock().await;
+                    if let Some(info) = guard.sessions.get_mut(&session) {
+                        info.dead = true;
+                        info.dead_status = Some(0);
+                    }
+                    drop(guard);
+                    drop(events.send(MuxEvent::PaneDied {
+                        pane_id,
+                        status: Some(0),
+                    }));
+                }
+            }
+        });
     }
 
     /// Argv recorded so far, including `tmux -L <socket> -f /dev/null`.
@@ -124,6 +183,13 @@ impl FakeMux {
             return;
         }
         drop(self.events.send(event));
+    }
+}
+
+impl Drop for FakeMux {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.tracker.close();
     }
 }
 
@@ -200,6 +266,27 @@ impl Multiplexer for FakeMux {
         guard.sessions.insert(session.clone(), info);
         let panes: Vec<PaneInfo> = guard.sessions.values().cloned().collect();
         guard.hub.note_panes(&panes);
+        let script = scripted_plan(&guard, spec);
+        if let Some(plan) = &script {
+            let text = if plan.ready_after_ms == 0 {
+                crate::fake_script::render_stub(plan)
+            } else {
+                crate::fake_script::banner().to_owned()
+            };
+            guard
+                .screens
+                .insert(session.clone(), Capture::new(text, (0, 0)));
+            guard.clients.push(ClientInfo {
+                tty: String::new(),
+                session: session.clone(),
+                activity: SystemTime::UNIX_EPOCH,
+                control_mode: true,
+            });
+        }
+        drop(guard);
+        if let Some(plan) = script {
+            self.arm_stub(&session, &pane_id, &plan);
+        }
         Ok(PaneRef {
             session,
             window: Some(0),
@@ -219,6 +306,7 @@ impl Multiplexer for FakeMux {
         if guard.sessions.remove(&name).is_none() {
             return Err(MuxError::NotFound(name));
         }
+        guard.screens.remove(&name);
         Ok(())
     }
 
@@ -253,8 +341,15 @@ impl Multiplexer for FakeMux {
         Ok(receipt)
     }
 
-    async fn capture(&self, _pane: &PaneRef, _range: CaptureRange) -> Result<Capture, MuxError> {
-        Ok(self.inner.lock().await.capture.clone())
+    async fn capture(&self, pane: &PaneRef, range: CaptureRange) -> Result<Capture, MuxError> {
+        let guard = self.inner.lock().await;
+        let session = canonical_session_name(&pane.session);
+        let capture = guard
+            .screens
+            .get(&session)
+            .cloned()
+            .unwrap_or_else(|| guard.capture.clone());
+        Ok(slice_capture(capture, range))
     }
 
     async fn subscribe_output(&self, pane: &PaneRef) -> Result<OutputStream, MuxError> {
@@ -308,4 +403,24 @@ impl Multiplexer for FakeMux {
     fn events(&self) -> broadcast::Receiver<MuxEvent> {
         self.events.subscribe()
     }
+}
+
+fn scripted_plan(guard: &FakeInner, spec: &SessionSpec) -> Option<crate::fake_script::StubPlan> {
+    if !guard.script_stubs {
+        return None;
+    }
+    let raw = spec.env.get("RIG_STUB_SCRIPT").map_or("", String::as_str);
+    Some(crate::fake_script::parse_stub(raw))
+}
+
+fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
+    let lines = match range {
+        CaptureRange::Visible => return capture,
+        CaptureRange::LastLines(n) => usize::from(n),
+        CaptureRange::History(n) => usize::try_from(n).unwrap_or(usize::MAX),
+    };
+    let kept: Vec<&str> = capture.text.lines().collect();
+    let skip = kept.len().saturating_sub(lines);
+    let text = kept.into_iter().skip(skip).collect::<Vec<_>>().join("\n");
+    Capture::new(text, capture.cursor)
 }

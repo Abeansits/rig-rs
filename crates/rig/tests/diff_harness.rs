@@ -58,8 +58,11 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
         text.contains("daemon-health") && text.contains("needs UDS listener"),
         "{text}"
     );
+    assert!(text.contains("| stub-seat | Equal |"), "{text}");
+    assert!(text.contains("| up-ps-down-stub | Equal |"), "{text}");
+    assert!(text.contains("| capture-stub | Equal |"), "{text}");
     assert!(
-        text.contains("stub-seat") && text.contains("needs slice 1"),
+        text.contains("needs slice 1 daemon paste command"),
         "{text}"
     );
     for report in &reports {
@@ -79,9 +82,17 @@ fn daemon_health_against_product_daemon() {
 }
 
 #[test]
-#[ignore = "needs slice 1"]
 fn stub_seat_against_product_cli() {
-    panic!("seat scenarios wait on slice 1");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
+    let cases = load_suite(&exceptions()).unwrap();
+    let case = cases
+        .into_iter()
+        .find(|case| case.case.id == "stub-seat")
+        .unwrap();
+    assert!(case.needs.is_none(), "stub-seat is still ignored");
+    let left = execute_rs(&case, &bin).unwrap();
+    let right = execute_rs(&case, &bin).unwrap();
+    assert_eq!(left.canonical, right.canonical);
 }
 
 fn exceptions() -> PathBuf {

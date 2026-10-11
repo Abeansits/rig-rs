@@ -5,7 +5,12 @@
 //! reject it for this side. No new daemon routes are declared here.
 
 mod client;
+mod endpoint;
 mod error;
 
-pub use client::{Client, Response, daemon_socket};
+pub use client::{Client, Response, daemon_socket, rig_home};
+pub use endpoint::{
+    AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
+    Healthz, ListSeats, RigDown,
+};
 pub use error::Error;

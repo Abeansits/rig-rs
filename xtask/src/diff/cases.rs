@@ -46,6 +46,10 @@ enum StepFile {
     ReadFile {
         path: String,
     },
+    WriteFile {
+        path: String,
+        body: String,
+    },
     TmuxCalls,
 }
 
@@ -149,8 +153,20 @@ fn step_from(step: StepFile) -> Result<Step, Error> {
             }
             Ok(Step::ReadFile(PathBuf::from(path)))
         }
+        StepFile::WriteFile { path, body } => {
+            relative_path(&path).map(|path| Step::WriteFile { path, body })
+        }
         StepFile::TmuxCalls => Ok(Step::TmuxCalls),
     }
+}
+
+fn relative_path(path: &str) -> Result<PathBuf, Error> {
+    if path.starts_with('/') || path.split(['/', '\\']).any(|part| part == "..") {
+        return Err(Error::Message(format!(
+            "path {path} must stay relative to the hermetic HOME"
+        )));
+    }
+    Ok(PathBuf::from(path))
 }
 
 fn rule_from(name: &str) -> Result<NormRule, Error> {

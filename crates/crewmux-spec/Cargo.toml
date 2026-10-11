@@ -9,6 +9,13 @@ publish.workspace = true
 
 [dependencies]
 crewmux-types.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde-saphyr.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

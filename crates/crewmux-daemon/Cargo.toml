@@ -11,6 +11,8 @@ publish.workspace = true
 crewmux-api.workspace = true
 crewmux-store.workspace = true
 crewmux-core.workspace = true
+crewmux-spec.workspace = true
+crewmux-types.workspace = true
 crewmux-adapters.workspace = true
 crewmux-messaging.workspace = true
 crewmux-durability.workspace = true
@@ -18,6 +20,13 @@ crewmux-orchestration.workspace = true
 crewmux-health.workspace = true
 crewmux-integrations.workspace = true
 crewmux-mux.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

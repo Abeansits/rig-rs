@@ -13,6 +13,7 @@ mod decode;
 mod error;
 mod exec;
 mod fake;
+mod fake_script;
 mod hashutil;
 mod hub;
 mod parse;

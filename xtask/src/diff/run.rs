@@ -1,7 +1,7 @@
 //! Execute a case against one side and compare two sides.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::Value;
@@ -83,6 +83,7 @@ fn apply_step(
             run_http(transport, method.as_str(), path, body.as_ref(), obs)
         }
         Step::ReadFile(path) => read_home_file(home, path, obs),
+        Step::WriteFile { path, body } => write_home_file(home, path, body),
         Step::TmuxCalls => collect_tmux(home, obs),
     }
 }
@@ -162,6 +163,24 @@ fn run_http(
         i32::from(response.status)
     };
     Ok(())
+}
+
+fn write_home_file(home: &HermeticHome, relative: &Path, body: &str) -> Result<(), Error> {
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err(Error::Message(
+            "refusing to write outside the hermetic HOME".to_owned(),
+        ));
+    }
+    let full = home.home.join(relative);
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|source| io_err(format!("create {}", parent.display()), source))?;
+    }
+    fs::write(&full, body).map_err(|source| io_err(format!("write {}", full.display()), source))
 }
 
 fn read_home_file(

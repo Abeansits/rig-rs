@@ -148,6 +148,13 @@ pub enum Step {
     },
     /// Read a file relative to the hermetic `HOME`.
     ReadFile(PathBuf),
+    /// Write `body` to a path relative to the hermetic `HOME`.
+    WriteFile {
+        /// Relative path.
+        path: PathBuf,
+        /// File contents.
+        body: String,
+    },
     /// Copy the tmux shim's argv log into the observation.
     TmuxCalls,
 }

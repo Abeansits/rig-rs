@@ -12,6 +12,9 @@ crewmux-api.workspace = true
 crewmux-spec.workspace = true
 crewmux-provider.workspace = true
 crewmux-integrations.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

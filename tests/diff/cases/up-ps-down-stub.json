@@ -1,0 +1,15 @@
+{
+  "id": "up-ps-down-stub",
+  "project": "full",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [
+    {
+      "op": "write_file",
+      "path": "two-stub.yaml",
+      "body": "name: pair\nseats:\n  - name: one\n    runtime: stub\n  - name: two\n    runtime: stub\n"
+    },
+    { "op": "cli", "argv": ["up", "two-stub.yaml", "--json"] },
+    { "op": "cli", "argv": ["ps", "--json"] },
+    { "op": "cli", "argv": ["down", "--json"] }
+  ]
+}

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::error::Error;
 
-/// How long a single daemon request may block.
+/// How long a single daemon request may block, unless [`Client::with_timeout`] says otherwise.
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One HTTP response.
@@ -27,6 +27,7 @@ pub struct Response {
 #[derive(Debug, Clone)]
 pub struct Client {
     target: Target,
+    timeout: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ impl Client {
     pub fn over_uds(path: impl Into<PathBuf>) -> Self {
         Self {
             target: Target::Uds(path.into()),
+            timeout: IO_TIMEOUT,
         }
     }
 
@@ -49,7 +51,15 @@ impl Client {
     pub fn over_tcp(addr: SocketAddr) -> Self {
         Self {
             target: Target::Tcp(addr),
+            timeout: IO_TIMEOUT,
         }
+    }
+
+    /// Override the read and write timeout. `rig up` uses this; probes stay short.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// `GET /healthz`.
@@ -83,26 +93,71 @@ impl Client {
                     target: target.clone(),
                     source,
                 })?;
-                prepare_stream(&mut stream, &target)?;
+                prepare_stream(&mut stream, &target, self.timeout)?;
                 exchange(&mut stream, &target, &head, payload)
             }
             Target::Tcp(addr) => {
                 let target = addr.to_string();
-                let mut stream = TcpStream::connect(addr).map_err(|source| Error::Connect {
-                    target: target.clone(),
-                    source,
-                })?;
-                prepare_stream(&mut stream, &target)?;
+                let mut stream =
+                    TcpStream::connect_timeout(addr, self.timeout).map_err(|source| {
+                        Error::Connect {
+                            target: target.clone(),
+                            source,
+                        }
+                    })?;
+                prepare_stream(&mut stream, &target, self.timeout)?;
                 exchange(&mut stream, &target, &head, payload)
             }
         }
     }
 }
 
+/// `RIG_HOME`, or `~/.rig-rs` when the variable is unset.
+#[must_use]
+pub fn rig_home() -> PathBuf {
+    if let Some(value) = std::env::var_os("RIG_HOME") {
+        return PathBuf::from(value);
+    }
+    std::env::var_os("HOME").map_or_else(
+        || PathBuf::from(".rig-rs"),
+        |home| PathBuf::from(home).join(".rig-rs"),
+    )
+}
+
 /// Path of the rig-rs daemon socket under a `RIG_HOME`.
+///
+/// Paths that would not fit in `sockaddr_un` are replaced with a short socket
+/// under `TMPDIR` (or `/tmp`). The client and the daemon share this function.
 #[must_use]
 pub fn daemon_socket(rig_home: &Path) -> PathBuf {
-    rig_home.join("run").join("daemon.sock")
+    let preferred = rig_home.join("run").join("daemon.sock");
+    if preferred.as_os_str().len() <= 100 {
+        return preferred;
+    }
+    short_socket(&preferred)
+}
+
+fn short_socket(preferred: &Path) -> PathBuf {
+    let name = format!(
+        "rig-{:016x}.sock",
+        fnv64(preferred.as_os_str().as_encoded_bytes())
+    );
+    if let Some(tmp) = std::env::var_os("TMPDIR") {
+        let candidate = PathBuf::from(&tmp).join(&name);
+        if candidate.as_os_str().len() <= 100 {
+            return candidate;
+        }
+    }
+    PathBuf::from("/tmp").join(name)
+}
+
+fn fnv64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
 }
 
 fn validate_method(method: &str) -> Result<(), Error> {
@@ -126,15 +181,19 @@ fn build_head(method: &str, path: &str, payload: &[u8]) -> String {
     )
 }
 
-fn prepare_stream(stream: &mut impl TimeoutStream, target: &str) -> Result<(), Error> {
+fn prepare_stream(
+    stream: &mut impl TimeoutStream,
+    target: &str,
+    timeout: Duration,
+) -> Result<(), Error> {
     stream
-        .set_read_timeout(Some(IO_TIMEOUT))
+        .set_read_timeout(Some(timeout))
         .map_err(|source| Error::Exchange {
             target: target.to_owned(),
             source,
         })?;
     stream
-        .set_write_timeout(Some(IO_TIMEOUT))
+        .set_write_timeout(Some(timeout))
         .map_err(|source| Error::Exchange {
             target: target.to_owned(),
             source,
