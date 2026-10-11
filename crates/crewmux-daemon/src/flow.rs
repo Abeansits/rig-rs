@@ -74,6 +74,13 @@ fn flag(calls: &[Vec<String>], name: &str, value: &str) -> bool {
     })
 }
 
+fn seat<'a>(seats: &'a [crewmux_core::Seat], name: &str) -> &'a crewmux_core::Seat {
+    seats
+        .iter()
+        .find(|seat| seat.name.as_str() == name)
+        .expect(name)
+}
+
 fn seat_text(body: &Value, name: &str, field: &str) -> String {
     let seats = body
         .pointer("/rigs/0/seats")
@@ -111,6 +118,50 @@ async fn up_two_stubs_are_ready_with_geometry_and_causal_events() {
     assert!(flag(&calls, "-y", "27"), "{calls:?}");
     assert!(mux.has_session("one__pair").await.expect("has"));
     assert!(mux.has_session("two__pair").await.expect("has"));
+}
+
+#[tokio::test]
+async fn up_relaunches_a_dead_seat_beside_a_ready_one() {
+    let (app, mux) = harness(None).await;
+    let spec = two_stub("/tmp");
+    bring_up(&app, &spec).await.expect("up");
+    let before = crate::db::read(&app.store, |conn| conn.list_all())
+        .await
+        .expect("seats");
+    let one_before = seat(&before, "one").clone();
+    let two_before = seat(&before, "two").clone();
+    crate::death::mark_dead(&app, &two_before)
+        .await
+        .expect("dead");
+    assert!(mux.has_session("two__pair").await.expect("leftover"));
+    let again = bring_up(&app, &spec).await.expect("again");
+    assert_eq!(again.get("status").and_then(Value::as_str), Some("ready"));
+    let events = events_of(&again);
+    assert!(
+        events
+            .iter()
+            .any(|(kind, name)| kind == "seat_launched" && name.as_deref() == Some("two")),
+        "{events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|(_, name)| name.as_deref() == Some("one")),
+        "{events:?}"
+    );
+    let after = crate::db::read(&app.store, |conn| conn.list_all())
+        .await
+        .expect("after");
+    let one = seat(&after, "one");
+    let two = seat(&after, "two");
+    assert_eq!(one.id, one_before.id);
+    assert_eq!(two.id, two_before.id);
+    assert_eq!(one.state, SeatState::Ready);
+    assert_eq!(two.state, SeatState::Ready);
+    assert_eq!(one.pane_id, one_before.pane_id);
+    assert_ne!(two.pane_id, two_before.pane_id);
+    assert!(mux.has_session("one__pair").await.expect("one"));
+    assert!(mux.has_session("two__pair").await.expect("two"));
 }
 
 #[tokio::test]

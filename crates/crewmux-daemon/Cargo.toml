@@ -27,6 +27,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+rustix = { workspace = true, features = ["fs", "process"] }
 
 [features]
 # In-memory multiplexer for debug test builds. Release binaries leave this off

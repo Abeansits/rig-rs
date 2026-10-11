@@ -63,12 +63,55 @@ async fn already_running(app: &App, spec: &RigSpec) -> Result<Option<Value>, Err
         write(&app.store, move |conn| clear_rig(conn, &rig_id)).await?;
         return Ok(None);
     }
+    if seats.iter().any(|seat| seat.state == SeatState::Dead) {
+        return relaunch_dead(app, spec.name.as_str(), &seats)
+            .await
+            .map(Some);
+    }
     Ok(Some(json!({
         "status": "already_running",
         "rig": spec.name.as_str(),
         "seats": seats.iter().map(|seat| seat_value(seat, None)).collect::<Vec<_>>(),
         "events": [],
     })))
+}
+
+/// Relaunch dead seats in place. Ready seats keep their ids and sessions.
+async fn relaunch_dead(
+    app: &App,
+    rig_name: &str,
+    seats: &[crewmux_core::Seat],
+) -> Result<Value, Error> {
+    let mut events = Vec::new();
+    let mut launching = Vec::new();
+    for seat in seats.iter().filter(|seat| seat.state == SeatState::Dead) {
+        clear_leftover_session(app, rig_name, seat.name.as_str()).await?;
+        let next = launch_one(app, seat, SessionId::new(), rig_name, &mut events).await?;
+        launching.push(next);
+    }
+    crate::settle::settle(app, &mut launching, &mut events).await?;
+    let rig_id = seats
+        .first()
+        .map(|seat| seat.rig_id)
+        .ok_or_else(|| Error::Message("rig has no seats".to_owned()))?;
+    let stored = read(&app.store, move |conn| conn.list_by_rig(&rig_id)).await?;
+    Ok(json!({
+        "status": status_of(&stored),
+        "rig": rig_name,
+        "seats": stored.iter().map(|seat| seat_value(seat, None)).collect::<Vec<_>>(),
+        "events": events,
+    }))
+}
+
+async fn clear_leftover_session(app: &App, rig_name: &str, seat_name: &str) -> Result<(), Error> {
+    let session_name = format!("{seat_name}__{rig_name}");
+    if !app.mux.has_session(&session_name).await? {
+        return Ok(());
+    }
+    match app.mux.kill_session(&session_name).await {
+        Ok(()) | Err(crewmux_mux::MuxError::NotFound(_)) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 async fn insert_plan(app: &App, spec: &RigSpec) -> Result<Up, Error> {

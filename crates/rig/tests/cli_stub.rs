@@ -73,6 +73,38 @@ fn capture_lines_are_bounded() {
     assert_eq!(shot.get("lines").and_then(Value::as_u64), Some(1));
     let text = shot.get("text").and_then(Value::as_str).unwrap_or_default();
     assert!(text.contains("stub> "), "{text}");
+    let (code, plain, err) = stdout(env.rig().args(["capture", "one"]));
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        plain.contains("stub> "),
+        "plain capture should print pane content: {plain}"
+    );
+}
+
+/// A recycled pid in `daemon.pid` is not the daemon. The lock and the socket
+/// decide liveness, so `up` still starts.
+#[test]
+fn stale_pid_does_not_block_the_daemon() {
+    let env = Env::new();
+    let run = env.rig_home.join("run");
+    std::fs::create_dir_all(&run).expect("run");
+    let mut sleep = std::process::Command::new("sleep")
+        .arg("30")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("sleep");
+    std::fs::write(run.join("daemon.pid"), sleep.id().to_string()).expect("pid");
+    let spec = env.write_spec("two-stub.yaml", &two_stub(&env.home));
+    let (code, up, err) = json_out(
+        env.rig()
+            .args(["up", spec.to_str().expect("utf8"), "--json"]),
+    );
+    drop(sleep.kill());
+    drop(sleep.wait());
+    assert_eq!(code, 0, "{err} {up}");
+    assert_eq!(up.get("status").and_then(Value::as_str), Some("ready"));
 }
 
 /// PE-008: `rig attach` execs `tmux -L rig-rs attach -t =<session>`.

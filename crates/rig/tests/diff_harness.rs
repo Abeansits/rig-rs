@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
-use xtask::diff::{
-    CaseOutcome, DiffVerdict, execute_rs, exit_code, format_report, load_suite, self_reports,
-    workspace_root,
-};
+#[cfg(feature = "tmux-it")]
+use xtask::diff::{CaseOutcome, DiffVerdict, exit_code, format_report, self_reports};
+use xtask::diff::{execute_rs, load_suite, workspace_root};
 
 #[test]
 fn diff_selftest() {
@@ -41,6 +40,7 @@ fn diff_selftest() {
 }
 
 #[test]
+#[cfg(feature = "tmux-it")]
 fn initial_cases_are_equal_or_listed_as_ignored() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
     let cases = load_suite(&exceptions()).unwrap();
@@ -52,11 +52,6 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
         scenario.scenario.as_deref(),
         Some("packages/test-system/scenarios/clean-lifecycle-no-residue.yaml")
     );
-    // daemon-health starts `rig daemon run`, which connects tmux before it
-    // listens. The macOS cargo test job has no tmux; nextest installs it.
-    if !tmux_on_path() {
-        return;
-    }
     let reports = self_reports(&cases, &bin).unwrap();
     let text = format_report(&reports);
     assert!(text.contains("| daemon-health | Equal |"), "{text}");
@@ -78,10 +73,8 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
 }
 
 #[test]
+#[cfg(feature = "tmux-it")]
 fn daemon_health_against_product_daemon() {
-    if !tmux_on_path() {
-        return;
-    }
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_rig"));
     let cases = load_suite(&exceptions()).unwrap();
     let case = cases
@@ -111,19 +104,16 @@ fn exceptions() -> PathBuf {
     workspace_root().join("design/parity-exceptions.md")
 }
 
-/// True when `tmux` is on `PATH`.
-///
-/// The macOS `cargo test` job does not install tmux. That is not a healthz
-/// failure: nextest installs tmux and runs these cases. `RIG_REQUIRE_TMUX`
-/// still fails the job when the binary is missing.
-fn tmux_on_path() -> bool {
+/// `RIG_REQUIRE_TMUX` fails the load when the binary is missing. The macOS
+/// `cargo test` job does not set it and does not enable `tmux-it`.
+#[test]
+fn missing_tmux_fails_when_required() {
+    if std::env::var_os("RIG_REQUIRE_TMUX").is_none() {
+        return;
+    }
     let found = std::env::var_os("PATH")
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("tmux").is_file()));
-    assert!(
-        found || std::env::var_os("RIG_REQUIRE_TMUX").is_none(),
-        "RIG_REQUIRE_TMUX is set and tmux is not on PATH"
-    );
-    found
+    assert!(found, "RIG_REQUIRE_TMUX is set and tmux is not on PATH");
 }
 
 fn mtime(path: &Path) -> std::io::Result<SystemTime> {

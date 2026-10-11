@@ -428,6 +428,7 @@ dependencies = [
  "crewmux-spec",
  "crewmux-store",
  "crewmux-types",
+ "rustix",
  "serde_json",
  "thiserror",
  "tokio",

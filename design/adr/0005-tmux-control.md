@@ -31,6 +31,10 @@ elsewhere, so the seat window and its pane process would survive `down`.
 `kill_session` unlinks that window from `crewmux-control` and then kills the
 session. The bell window is only in the control session and stays.
 
+## Slice 1b AC14 pane-death latency
+
+Linux max under 100ms over 15 trials; macOS median under 100ms with a hard cap of 250ms.
+
 ## list-clients format
 
 Human-client reads use

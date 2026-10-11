@@ -7,6 +7,7 @@ mod http;
 mod launch;
 mod query;
 mod reconcile;
+mod runtime;
 mod serve;
 mod settle;
 mod state;

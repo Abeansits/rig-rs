@@ -69,52 +69,58 @@ while True:
                         .env_remove("TMUX_TMPDIR")
                         .status(),
                 );
-                if let Some(path) = socket_file(&self.socket) {
-                    drop(std::fs::remove_file(path));
-                }
+                drop(std::fs::remove_file(socket_file(&self.socket)));
             }
         }
 
-        fn socket_dir() -> Option<PathBuf> {
-            let status = std::fs::read_to_string("/proc/self/status").ok()?;
-            let uid = status.lines().find_map(|line| {
-                let rest = line.strip_prefix("Uid:")?;
-                rest.split_whitespace().next()?.parse::<u32>().ok()
-            })?;
-            Some(PathBuf::from(format!("/tmp/tmux-{uid}")))
+        fn socket_dir() -> PathBuf {
+            PathBuf::from(format!("/tmp/tmux-{}", rustix::process::getuid().as_raw()))
         }
 
-        fn socket_file(name: &str) -> Option<PathBuf> {
-            Some(socket_dir()?.join(name))
+        fn socket_file(name: &str) -> PathBuf {
+            socket_dir().join(name)
         }
 
         async fn reap_stale_sockets() {
-            let Some(dir) = socket_dir() else {
-                return;
-            };
+            let dir = socket_dir();
             let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
                 return;
             };
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let name = entry.file_name();
-                let name = name.to_string_lossy();
+                let Some(name) = name.to_str() else {
+                    continue;
+                };
                 if !name.starts_with("rig-rs-") {
                     continue;
                 }
-                let output = Command::new("tmux")
-                    .args(["-L", name.as_ref(), "-f", "/dev/null", "list-sessions"])
-                    .env_remove("TMUX")
-                    .env_remove("TMUX_TMPDIR")
-                    .output()
-                    .await;
-                let Ok(output) = output else {
-                    continue;
-                };
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !output.status.success() && stderr.contains("no server running") {
-                    drop(tokio::fs::remove_file(entry.path()).await);
-                }
+                reap_one(name, &entry.path()).await;
             }
+        }
+
+        async fn reap_one(name: &str, path: &Path) {
+            let output = Command::new("tmux")
+                .args(["-L", name, "-f", "/dev/null", "list-sessions"])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
+                .output()
+                .await;
+            let Ok(output) = output else {
+                return;
+            };
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let dead = !output.status.success() && stderr.contains("no server running");
+            if !dead {
+                drop(
+                    Command::new("tmux")
+                        .args(["-L", name, "-f", "/dev/null", "kill-server"])
+                        .env_remove("TMUX")
+                        .env_remove("TMUX_TMPDIR")
+                        .output()
+                        .await,
+                );
+            }
+            drop(tokio::fs::remove_file(path).await);
         }
 
         fn next_socket() -> String {
