@@ -47,7 +47,6 @@ while True:
 
         impl Server {
             async fn boot() -> Self {
-                reap_stale_sockets().await;
                 let socket = next_socket();
                 let mux = TmuxMux::connect(TmuxConfig {
                     binary: PathBuf::from("tmux"),
@@ -62,6 +61,9 @@ while True:
 
         impl Drop for Server {
             fn drop(&mut self) {
+                if !crewmux_mux::socket_owned_by(&self.socket, std::process::id()) {
+                    return;
+                }
                 drop(
                     std::process::Command::new("tmux")
                         .args(["-L", &self.socket, "-f", "/dev/null", "kill-server"])
@@ -79,84 +81,6 @@ while True:
 
         fn socket_file(name: &str) -> PathBuf {
             socket_dir().join(name)
-        }
-
-        async fn reap_stale_sockets() {
-            let dir = socket_dir();
-            let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
-                return;
-            };
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let name = entry.file_name();
-                let Some(name) = name.to_str() else {
-                    continue;
-                };
-                if !name.starts_with("rig-rs-") {
-                    continue;
-                }
-                let Some(pid) = owner_pid(name) else {
-                    continue;
-                };
-                if !process_dead(pid) {
-                    continue;
-                }
-                reap_one(name, &entry.path()).await;
-            }
-        }
-
-        fn owner_pid(name: &str) -> Option<u32> {
-            let rest = name.strip_prefix("rig-rs-")?;
-            let token = rest.split('-').next()?;
-            let pid = token.parse::<u32>().ok()?;
-            if pid <= 1 { None } else { Some(pid) }
-        }
-
-        fn process_dead(pid: u32) -> bool {
-            let Ok(raw) = i32::try_from(pid) else {
-                return false;
-            };
-            let Some(pid) = rustix::process::Pid::from_raw(raw) else {
-                return false;
-            };
-            matches!(
-                rustix::process::test_kill_process(pid),
-                Err(err) if err == rustix::io::Errno::SRCH
-            )
-        }
-
-        #[test]
-        fn stale_socket_owner_is_the_pid_in_the_name() {
-            assert_eq!(owner_pid("rig-rs-42-7"), Some(42));
-            assert_eq!(owner_pid("rig-rs-42"), Some(42));
-            assert_eq!(owner_pid("rig-rs"), None);
-            assert_eq!(owner_pid("rig-rs-0"), None);
-            assert_eq!(owner_pid("rig-rs-1"), None);
-            assert!(!process_dead(std::process::id()));
-        }
-
-        async fn reap_one(name: &str, path: &Path) {
-            let output = Command::new("tmux")
-                .args(["-L", name, "-f", "/dev/null", "list-sessions"])
-                .env_remove("TMUX")
-                .env_remove("TMUX_TMPDIR")
-                .output()
-                .await;
-            let Ok(output) = output else {
-                return;
-            };
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let dead = !output.status.success() && stderr.contains("no server running");
-            if !dead {
-                drop(
-                    Command::new("tmux")
-                        .args(["-L", name, "-f", "/dev/null", "kill-server"])
-                        .env_remove("TMUX")
-                        .env_remove("TMUX_TMPDIR")
-                        .output()
-                        .await,
-                );
-            }
-            drop(tokio::fs::remove_file(path).await);
         }
 
         fn next_socket() -> String {

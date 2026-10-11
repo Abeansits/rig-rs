@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crewmux_api::MAX_CHAT_BODY;
+
 use crate::autostart::ensure_daemon;
 use crate::error::Error;
 use crate::output;
@@ -68,10 +70,18 @@ pub(super) fn run(rig: &str, json: bool) -> Result<i32, Error> {
     }
 }
 
-/// A frame this long is past the chat body cap plus the SSE envelope.
-const MAX_LINE: usize = 128 * 1024;
+/// JSON encodes a control byte as `\u00XX`. Quotes and backslashes expand less.
+const JSON_ESCAPE_PER_BYTE: usize = 6;
+/// SSE `id` / `event` lines plus the `ChatWatchEvent` object around `body`.
+const WATCH_ENVELOPE: usize = 8 * 1024;
+/// Largest SSE line watch will print. A max body, fully escaped, still fits.
+const MAX_LINE: usize = MAX_CHAT_BODY * JSON_ESCAPE_PER_BYTE + WATCH_ENVELOPE;
 /// Repeated oversized-frame errors mean the stream is not making progress.
 const SKIP_LIMIT: u32 = 4;
+
+fn line_too_long(len: usize) -> bool {
+    len > MAX_LINE
+}
 
 fn emit_lines(pending: &mut Vec<u8>, json: bool, discarding: &mut bool) {
     if *discarding {
@@ -83,14 +93,14 @@ fn emit_lines(pending: &mut Vec<u8>, json: bool, discarding: &mut bool) {
         *pending = rest;
         *discarding = false;
     }
-    if pending.len() > MAX_LINE && !pending.contains(&b'\n') {
+    if line_too_long(pending.len()) && !pending.contains(&b'\n') {
         output::stderr_line("warning: skipped an oversized chat frame");
         pending.clear();
         *discarding = true;
         return;
     }
     for line in take_lines(pending) {
-        if line.len() > MAX_LINE {
+        if line_too_long(line.len()) {
             output::stderr_line("warning: skipped an oversized chat frame");
             continue;
         }
@@ -146,4 +156,22 @@ fn timed_out(err: &std::io::Error) -> bool {
 
 fn oversized(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::InvalidData
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_CHAT_BODY, WATCH_ENVELOPE, line_too_long};
+
+    #[test]
+    fn escaped_quote_and_nul_bodies_fit_on_one_line() {
+        let quotes = MAX_CHAT_BODY
+            .saturating_mul(2)
+            .saturating_add(WATCH_ENVELOPE);
+        let nuls = MAX_CHAT_BODY
+            .saturating_mul(6)
+            .saturating_add(WATCH_ENVELOPE);
+        assert!(!line_too_long(quotes));
+        assert!(!line_too_long(nuls));
+        assert!(line_too_long(nuls.saturating_add(1)));
+    }
 }

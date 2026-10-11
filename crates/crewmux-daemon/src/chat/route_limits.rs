@@ -122,6 +122,67 @@ async fn garbage_last_event_id_is_400() {
     assert_eq!(json(&response.body)["error"], "invalid cursor");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn topic_body_is_capped_at_max_chat_body() {
+    let harness = super::route_support::boot().await;
+    let rig = rig(&harness.app, "pair").await;
+    let path = format!("/api/rigs/{rig}/chat/topic");
+    let over = topic_json("plan", &"b".repeat(MAX_CHAT_BODY.saturating_add(1)));
+    let rejected = exchange(
+        &harness.sock,
+        "POST",
+        &path,
+        Some(over.into_bytes()),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(rejected.status, 413, "{}", rejected.body);
+    assert_eq!(json(&rejected.body)["error"], "message is too large");
+    let at_cap = topic_json("plan", &"c".repeat(MAX_CHAT_BODY));
+    let stored = exchange(
+        &harness.sock,
+        "POST",
+        &path,
+        Some(at_cap.into_bytes()),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(stored.status, 201, "len {}", stored.body.len());
+    let empty = topic_json("other", "");
+    let accepted = exchange(
+        &harness.sock,
+        "POST",
+        &path,
+        Some(empty.into_bytes()),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(accepted.status, 201, "{}", accepted.body);
+    let history = exchange(
+        &harness.sock,
+        "GET",
+        &format!("/api/rigs/{rig}/chat/history"),
+        None,
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(history.status, 200);
+    let rows = json(&history.body);
+    let list = rows.as_array().expect("array");
+    assert_eq!(list.len(), 2);
+    let capped = list
+        .iter()
+        .find(|row| row.get("topic").and_then(|v| v.as_str()) == Some("plan"));
+    let body = capped
+        .and_then(|row| row.get("body"))
+        .and_then(|v| v.as_str());
+    assert_eq!(body.map(str::len), Some(MAX_CHAT_BODY));
+}
+
+fn topic_json(topic: &str, body: &str) -> String {
+    serde_json::json!({"topic": topic, "body": body}).to_string()
+}
+
 fn oversized_body() -> String {
     let mut body = String::from("{\"body\":\"");
     body.push_str(&"a".repeat(MAX_CHAT_BODY.saturating_add(1)));

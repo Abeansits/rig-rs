@@ -100,6 +100,9 @@ mod live {
             let socket = crewmux_api::daemon_socket(&self.rig_home);
             let client = crewmux_api::Client::over_uds(socket).with_timeout(Duration::from_secs(2));
             drop(client.request("POST", "/shutdown", Some(b"{}")));
+            if !owned_socket(&self.socket) {
+                return;
+            }
             let mut kill = Command::new("tmux");
             kill.args(["-L", &self.socket, "kill-server"])
                 .env_remove("TMUX")
@@ -380,6 +383,17 @@ mod live {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    fn owned_socket(socket: &str) -> bool {
+        let pid = std::process::id().to_string();
+        let Some(rest) = socket.strip_prefix("rig-rs-") else {
+            return false;
+        };
+        match rest.split_once('-') {
+            Some((head, tail)) => head == pid && !tail.is_empty(),
+            None => rest == pid,
+        }
     }
 
     fn process_alive(pid: u32) -> bool {

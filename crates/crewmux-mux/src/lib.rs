@@ -27,7 +27,7 @@ pub use crewmux_types::Key;
 pub use crewmux_types::tmux_version::{self, Version, parse_version};
 pub use error::MuxError;
 pub use fake::FakeMux;
-pub use tmux_mux::{TmuxConfig, TmuxMux};
+pub use tmux_mux::{TmuxConfig, TmuxMux, socket_owned_by};
 pub use types::{
     CONTROL_SESSION, Capture, CaptureRange, ClientInfo, DeathStream, Geometry, GuardInputs,
     MuxEvent, OptScope, OutputStream, PANE_RING_BYTES, PaneInfo, PaneRef, PasteOpts, PasteReceipt,

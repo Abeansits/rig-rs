@@ -70,16 +70,38 @@ pub struct TmuxMux {
 impl Drop for TmuxMux {
     fn drop(&mut self) {
         self.cancel.cancel();
-        let binary = self.binary.clone();
-        let socket = self.socket.clone();
-        let killer = std::thread::spawn(move || kill_server(&binary, &socket));
-        drop(killer.join());
+        // Only a socket this process named may be torn down. The shared
+        // `rig-rs` server, and any server a parent process created, stay up.
+        if socket_owned_by(&self.socket, std::process::id()) {
+            let binary = self.binary.clone();
+            let socket = self.socket.clone();
+            let killer = std::thread::spawn(move || kill_owned_server(&binary, &socket));
+            drop(killer.join());
+        }
         self.control.abort();
         self.tracker.close();
     }
 }
 
-fn kill_server(binary: &str, socket: &str) {
+/// `rig-rs-<pid>` or `rig-rs-<pid>-<suffix>` for `pid`.
+///
+/// The bare name `rig-rs` is the shared default and is never owned.
+#[must_use]
+pub fn socket_owned_by(socket: &str, pid: u32) -> bool {
+    let Some(rest) = socket.strip_prefix("rig-rs-") else {
+        return false;
+    };
+    let own = pid.to_string();
+    match rest.split_once('-') {
+        Some((head, tail)) => head == own && !tail.is_empty(),
+        None => rest == own,
+    }
+}
+
+fn kill_owned_server(binary: &str, socket: &str) {
+    if !socket_owned_by(socket, std::process::id()) {
+        return;
+    }
     let mut command = std::process::Command::new(binary);
     command
         .args(["-L", socket, "-f", "/dev/null", "kill-server"])
@@ -443,5 +465,18 @@ mod tests {
 
     fn erase(exec: Arc<VersionOnly>) -> Arc<dyn TmuxExec> {
         exec
+    }
+
+    #[test]
+    fn only_a_pid_prefixed_socket_is_owned() {
+        assert!(super::socket_owned_by("rig-rs-42", 42));
+        assert!(super::socket_owned_by("rig-rs-42-7", 42));
+        assert!(super::socket_owned_by("rig-rs-42-e2e", 42));
+        assert!(!super::socket_owned_by("rig-rs", 42));
+        assert!(!super::socket_owned_by("rig-rs-", 42));
+        assert!(!super::socket_owned_by("rig-rs-42-", 42));
+        assert!(!super::socket_owned_by("rig-rs-420-1", 42));
+        assert!(!super::socket_owned_by("rig-rs-7", 42));
+        assert!(!super::socket_owned_by("other-42", 42));
     }
 }
