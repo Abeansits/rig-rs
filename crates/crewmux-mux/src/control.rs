@@ -141,6 +141,55 @@ async fn drive_client(ctx: &ControlCtx, boot: &mut Boot, reconnecting: bool) -> 
     outcome
 }
 
+enum ReadAction {
+    Continue,
+    Stop(Drive),
+}
+
+fn drive_unless_ready(ready: bool, err: MuxError) -> Drive {
+    if ready {
+        Drive::Exited
+    } else {
+        Drive::Failed(err)
+    }
+}
+
+fn note_confirm(joined: Result<(), tokio::task::JoinError>) {
+    if let Err(err) = joined {
+        tracing::debug!(error = %err, "death confirm ended");
+    }
+}
+
+async fn consume_read(
+    state: &mut DriveState<'_>,
+    buf: &mut [u8],
+    read: std::io::Result<usize>,
+) -> ReadAction {
+    let n = match read {
+        Ok(n) => n,
+        Err(err) => return ReadAction::Stop(drive_unless_ready(state.ready, err.into())),
+    };
+    if n == 0 {
+        return ReadAction::Stop(drive_unless_ready(
+            state.ready,
+            MuxError::Control("control client closed before it was ready".into()),
+        ));
+    }
+    let owned = buf.get(..n).unwrap_or_default().to_vec();
+    match dispatch_chunk(state, &owned).await {
+        Ok(Step::Continue) => ReadAction::Continue,
+        Ok(Step::Stop) => ReadAction::Stop(drive_unless_ready(
+            state.ready,
+            MuxError::Control("control client exited before it was ready".into()),
+        )),
+        Err(err) if state.ready => {
+            tracing::warn!(error = %err, "control line");
+            ReadAction::Continue
+        }
+        Err(err) => ReadAction::Stop(Drive::Failed(err)),
+    }
+}
+
 async fn read_client(state: &mut DriveState<'_>, stdout: &mut ChildStdout) -> Drive {
     let mut buf = vec![0_u8; 8192];
     loop {
@@ -148,47 +197,11 @@ async fn read_client(state: &mut DriveState<'_>, stdout: &mut ChildStdout) -> Dr
             biased;
             () = state.ctx.cancel.cancelled() => return Drive::Cancelled,
             Some(joined) = state.confirms.join_next(), if !state.confirms.is_empty() => {
-                if let Err(err) = joined {
-                    tracing::debug!(error = %err, "death confirm ended");
-                }
+                note_confirm(joined);
             }
             read = stdout.read(&mut buf) => {
-                let step = match read {
-                    Ok(0) => return if state.ready {
-                        Drive::Exited
-                    } else {
-                        Drive::Failed(MuxError::Control(
-                            "control client closed before it was ready".into(),
-                        ))
-                    },
-                    Err(err) => return if state.ready {
-                        Drive::Exited
-                    } else {
-                        Drive::Failed(err.into())
-                    },
-                    Ok(n) => {
-                        let owned = buf.get(..n).unwrap_or_default().to_vec();
-                        dispatch_chunk(state, &owned).await
-                    }
-                };
-                match step {
-                    Ok(Step::Continue) => {}
-                    Ok(Step::Stop) => {
-                        return if state.ready {
-                            Drive::Exited
-                        } else {
-                            Drive::Failed(MuxError::Control(
-                                "control client exited before it was ready".into(),
-                            ))
-                        };
-                    }
-                    Err(err) => {
-                        if state.ready {
-                            tracing::warn!(error = %err, "control line");
-                        } else {
-                            return Drive::Failed(err);
-                        }
-                    }
+                if let ReadAction::Stop(drive) = consume_read(state, &mut buf, read).await {
+                    return drive;
                 }
             }
         }

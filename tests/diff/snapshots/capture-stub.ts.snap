@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/capture-stub.json
+expression: "ts:capture-stub"
+---
+{
+  "exit": 1,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "{\"error\":\"Source is YAML but not a valid rig spec: seats: unknown key \\\"seats\\\"; refusing the spec because normalization would otherwise discard it and alter the requested topology\"}\n{\"ok\":false,\"sessionName\":\"one\",\"reason\":\"tmux_unavailable\",\"error\":\"The tmux server could not be reached (Command failed: tmux has-session -t '=one'\\nerror connecting to <PATH:1> (No such file or directory)\\n). Whether session 'one' exists was not determined. Nothing was captured.\"}\n",
+  "tmux_argv": []
+}

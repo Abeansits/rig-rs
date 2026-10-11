@@ -11,21 +11,39 @@ publish.workspace = true
 name = "rig"
 path = "src/main.rs"
 
+[[bin]]
+name = "rig-stub-agent"
+path = "src/bin/rig-stub-agent.rs"
+required-features = ["stub-agent"]
+
 [dependencies]
 crewmux-cli.workspace = true
 crewmux-daemon.workspace = true
 crewmux-tui.workspace = true
 crewmux-mcp.workspace = true
 anyhow.workspace = true
+crewmux-adapters.workspace = true
+
+[features]
+default = ["stub-agent", "fake-mux"]
+# Test fixture binary. Release builds pass `--no-default-features` to leave it out.
+stub-agent = []
+# Debug-only `RIG_FAKE_MUX`. A release build ignores the variable.
+fake-mux = ["crewmux-daemon/fake-mux"]
+# Real tmux end-to-end tests. Off unless `--features tmux-it` or `--all-features`.
+# Depends on the fixture binary so `cargo test --all-features` can launch it.
+tmux-it = ["stub-agent"]
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-xtask = { path = "../../xtask" }
 assert_cmd.workspace = true
+crewmux-api.workspace = true
+crewmux-provider.workspace = true
 insta.workspace = true
 predicates.workspace = true
-tempfile.workspace = true
-crewmux-provider.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+xtask = { path = "../../xtask" }

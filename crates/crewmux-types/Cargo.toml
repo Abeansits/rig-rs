@@ -12,6 +12,8 @@ workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+ulid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 proptest.workspace = true

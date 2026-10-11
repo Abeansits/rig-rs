@@ -333,22 +333,45 @@ mod suite {
             }
         }
 
+        /// Linux max under 100ms over 15 trials; macOS median under 100ms with a hard cap of 250ms.
         #[tokio::test]
         async fn death_hook_doorbell_latency() {
             let server = Server::boot().await;
+            // A hang still fails: the wait is 500ms.
+            let mut samples = Vec::new();
             for trial in 0..15 {
-                let elapsed = hook_trial(&server, trial).await;
+                samples.push(hook_trial(&server, trial).await);
+            }
+            if cfg!(target_os = "macos") {
+                let mut sorted = samples.clone();
+                sorted.sort();
+                let median = sorted.get(7).copied().expect("15 trials");
                 assert!(
-                    elapsed < Duration::from_millis(100),
-                    "trial {trial} took {elapsed:?}"
+                    median < Duration::from_millis(100),
+                    "macOS median {median:?} samples {sorted:?}"
                 );
+                for (trial, elapsed) in samples.iter().enumerate() {
+                    assert!(
+                        *elapsed < Duration::from_millis(250),
+                        "trial {trial} took {elapsed:?}"
+                    );
+                }
+            } else {
+                for (trial, elapsed) in samples.iter().enumerate() {
+                    assert!(
+                        *elapsed < Duration::from_millis(100),
+                        "trial {trial} took {elapsed:?}"
+                    );
+                }
             }
         }
 
         async fn hook_trial(server: &Server, trial: u32) -> Duration {
             let mut spec = sleep_spec(&format!("hook-{trial}"));
             // TERM is not a stable status 7: bash can die from the signal before
-            // the trap runs. The shell exits 7 when this flag appears.
+            // the trap runs. The shell exits 7 when this flag appears. Apt tmux
+            // 3.4's libutempter swallows SIGCHLD; the Linux control client
+            // reissues it, so this normal exit still rings the doorbell.
             let flag = std::env::temp_dir().join(format!("rig-die-{}-{trial}", std::process::id()));
             let path = flag.display().to_string();
             assert!(

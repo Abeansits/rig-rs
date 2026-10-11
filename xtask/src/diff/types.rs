@@ -148,6 +148,13 @@ pub enum Step {
     },
     /// Read a file relative to the hermetic `HOME`.
     ReadFile(PathBuf),
+    /// Write `body` to a path relative to the hermetic `HOME`.
+    WriteFile {
+        /// Relative path.
+        path: PathBuf,
+        /// File contents.
+        body: String,
+    },
     /// Copy the tmux shim's argv log into the observation.
     TmuxCalls,
 }
@@ -236,6 +243,9 @@ pub enum NormRule {
     Port,
     /// Paths that end in `.sock`.
     SocketPath,
+    /// dash's `getcwd() failed` line, including the JSON-escaped `\\n` form.
+    /// Stub cases opt in; other cases keep the line so a real error is visible.
+    Getcwd,
     /// Caller-supplied replacement. Every match becomes the static string.
     Custom(Regex, &'static str),
 }

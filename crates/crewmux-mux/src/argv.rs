@@ -331,6 +331,7 @@ pub(crate) fn capture_args(target: &str, range: CaptureRange) -> Vec<String> {
     let mut args = vec![
         "capture-pane".to_owned(),
         "-p".to_owned(),
+        "-N".to_owned(),
         "-t".to_owned(),
         target.to_owned(),
     ];

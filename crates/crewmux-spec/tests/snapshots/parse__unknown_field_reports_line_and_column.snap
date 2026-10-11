@@ -1,0 +1,5 @@
+---
+source: crates/crewmux-spec/tests/parse.rs
+expression: golden(&err)
+---
+unknown field `extra`, expected one of name, seats at line 2 column 1 (extra)

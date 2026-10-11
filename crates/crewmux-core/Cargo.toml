@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 crewmux-types.workspace = true
 crewmux-spec.workspace = true
+thiserror.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

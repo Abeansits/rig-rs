@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/daemon-health.json
+expression: "ts:daemon-health"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "status=ok\nkeys=bind,eventLoop,pid,routeTimings,selfHostId,selfHostIdSource,slowOperations,status,stuckSweep,wakeLadder",
+  "tmux_argv": []
+}

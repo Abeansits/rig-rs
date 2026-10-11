@@ -1,0 +1,15 @@
+{
+  "id": "capture-stub",
+  "project": "full",
+  "expected_diff": "PE-007",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port", "getcwd"],
+  "steps": [
+    {
+      "op": "write_file",
+      "path": "one-stub.yaml",
+      "body": "name: pair\nseats:\n  - name: one\n    runtime: stub\n"
+    },
+    { "op": "cli", "argv": ["up", "one-stub.yaml", "--json"] },
+    { "op": "cli", "argv": ["capture", "one", "--lines", "1", "--json"] }
+  ]
+}

@@ -7,6 +7,7 @@ mod golden;
 mod hermetic;
 mod normalize;
 mod openrig;
+mod reap;
 mod report;
 mod run;
 mod suite;

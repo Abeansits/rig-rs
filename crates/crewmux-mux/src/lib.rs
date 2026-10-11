@@ -13,6 +13,7 @@ mod decode;
 mod error;
 mod exec;
 mod fake;
+mod fake_script;
 mod hashutil;
 mod hub;
 mod parse;
@@ -81,6 +82,9 @@ pub trait Multiplexer: Send + Sync + 'static {
 
     /// Pane-death and window-close events from here on.
     fn death_events(&self) -> DeathStream;
+
+    /// Resolved tmux binary and the server socket path (`-S`), for `rig attach`.
+    fn attach_program(&self) -> (String, String);
 
     /// Every multiplexer event from here on, including output.
     fn events(&self) -> broadcast::Receiver<MuxEvent>;

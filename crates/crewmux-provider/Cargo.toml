@@ -18,4 +18,5 @@ toml_edit.workspace = true
 workspace = true
 
 [dev-dependencies]
+rustix = { workspace = true, features = ["process"] }
 tempfile.workspace = true

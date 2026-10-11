@@ -158,6 +158,12 @@ fn norm_json(
     }
 }
 
+fn strip_dash_getcwd(text: &str) -> String {
+    const RAW: &str = "sh: 0: getcwd() failed: No such file or directory\n";
+    const ESCAPED: &str = "sh: 0: getcwd() failed: No such file or directory\\n";
+    text.replace(RAW, "").replace(ESCAPED, "")
+}
+
 fn apply_all(
     text: &str,
     rules: &[NormRule],
@@ -184,6 +190,7 @@ fn apply_one(
         NormRule::Timestamp => replace_whole(&patterns.timestamp, text, &mut masks.timestamp, "TS"),
         NormRule::SocketPath => replace_whole(&patterns.socket, text, &mut masks.socket, "SOCK"),
         NormRule::Port => replace_ports(&patterns.port, text, masks),
+        NormRule::Getcwd => strip_dash_getcwd(text),
         NormRule::AbsPath => {
             let with_roots = replace_roots(text, roots, masks);
             replace_whole(&patterns.temp, &with_roots, &mut masks.path, "PATH")

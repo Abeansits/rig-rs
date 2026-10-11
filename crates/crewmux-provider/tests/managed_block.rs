@@ -64,10 +64,15 @@ fn tmux_loads_the_managed_block() {
     let Some(tmux) = which("tmux") else {
         panic!("tmux is not on PATH");
     };
+    sweep_ac10(&tmux);
     let dir = tempfile::tempdir().unwrap();
     let conf = dir.path().join("tmux.conf");
     fs::write(&conf, render_tmux_block()).unwrap();
     let socket = format!("rigrs-ac10-{}", std::process::id());
+    let _guard = Ac10Server {
+        bin: tmux.clone(),
+        socket: socket.clone(),
+    };
     let shown = run(
         &tmux,
         &[
@@ -82,7 +87,6 @@ fn tmux_loads_the_managed_block() {
             "mouse",
         ],
     );
-    drop(run(&tmux, &["-L", &socket, "kill-server"]));
     assert_eq!(shown.0, 0, "stderr={}", shown.2);
     assert!(
         shown.1.contains("mouse on"),
@@ -113,10 +117,69 @@ fn which(name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+struct Ac10Server {
+    bin: std::path::PathBuf,
+    socket: String,
+}
+
+impl Drop for Ac10Server {
+    fn drop(&mut self) {
+        kill_ac10(&self.bin, &self.socket);
+    }
+}
+
+fn sweep_ac10(bin: &std::path::Path) {
+    let dir = std::path::PathBuf::from(format!("/tmp/tmux-{}", rustix::process::getuid().as_raw()));
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return;
+    };
+    let me = std::process::id();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(rest) = name.strip_prefix("rigrs-ac10-") else {
+            continue;
+        };
+        let Ok(pid) = rest.parse::<u32>() else {
+            continue;
+        };
+        if pid != me && !process_dead(pid) {
+            continue;
+        }
+        kill_ac10(bin, name);
+    }
+}
+
+fn process_dead(pid: u32) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    let Some(pid) = rustix::process::Pid::from_raw(raw) else {
+        return false;
+    };
+    matches!(
+        rustix::process::test_kill_process(pid),
+        Err(err) if err == rustix::io::Errno::SRCH
+    )
+}
+
+fn kill_ac10(bin: &std::path::Path, name: &str) {
+    drop(run(bin, &["-L", name, "-f", "/dev/null", "kill-server"]));
+    let path = std::path::PathBuf::from(format!(
+        "/tmp/tmux-{}/{name}",
+        rustix::process::getuid().as_raw()
+    ));
+    drop(fs::remove_file(path));
+}
+
 fn run(bin: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let mut command = Command::new(bin);
     command
         .args(args)
+        .env_remove("TMUX")
+        .env_remove("TMUX_TMPDIR")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
