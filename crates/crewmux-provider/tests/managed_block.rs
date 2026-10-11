@@ -36,7 +36,12 @@ fn upsert_is_idempotent_and_remove_is_exact() {
 
 #[test]
 fn tmux_loads_the_managed_block() {
-    let tmux = which("tmux").expect("tmux is required");
+    // The macOS `cargo test` job does not install tmux. Nextest and the tmux
+    // matrix do, and this environment does. Skip the load when the binary is
+    // absent so that job still runs the byte-level managed-block test.
+    let Some(tmux) = which("tmux") else {
+        return;
+    };
     let dir = tempfile::tempdir().unwrap();
     let conf = dir.path().join("tmux.conf");
     fs::write(&conf, render_tmux_block()).unwrap();
