@@ -19,7 +19,7 @@ use crate::composer::{classify_stub, stub_drafting};
 use crate::error::Error;
 use crate::launch::now_ts;
 use crate::notify::emit;
-use crate::paste_check::{PasteHit, classify_paste, pasted_screen};
+use crate::paste_check::{PasteHit, classify_paste, clear_composer, pasted_screen};
 use crate::query::{address_of, live_seats, pane_of};
 use crate::state::App;
 
@@ -50,7 +50,7 @@ pub(crate) async fn deliver(app: &App, outbound: Outbound) -> Result<Value, Erro
     for seat in seats {
         match one(app, &outbound, &seat).await {
             Ok(row) => {
-                if row.get("outcome").and_then(Value::as_str) == Some("contaminated") {
+                if row_failed(&row) {
                     failed = failed.saturating_add(1);
                 } else {
                     accepted = accepted.saturating_add(1);
@@ -194,7 +194,7 @@ async fn paste_and_check(
     bracketed: bool,
     interact_reason: &str,
 ) -> Result<Value, Error> {
-    let before = app.mux.capture(pane, CaptureRange::Visible).await?;
+    let before = app.mux.capture(pane, CaptureRange::Joined).await?;
     let payload = wrap_pane(&outbound.from, address, &outbound.body);
     let opts = PasteOpts {
         bracketed,
@@ -209,19 +209,14 @@ async fn paste_and_check(
             DeliveryOutcome::Delivered
         }
         PasteHit::Contaminated => {
-            emit(
-                app,
-                DomainEvent::AttentionRaised {
-                    seat: address.to_owned(),
-                    reason: "contaminated".to_owned(),
-                    at: now_ts(),
-                },
-            )
-            .await;
+            clear_composer(app, pane).await?;
+            raise(app, address, "contaminated").await;
             DeliveryOutcome::Contaminated
         }
         PasteHit::Missing => {
-            return Err(Error::Message(format!("send to {address} did not render")));
+            clear_composer(app, pane).await?;
+            raise(app, address, "did not render").await;
+            DeliveryOutcome::Failed
         }
     };
     let degraded = matches!(classify_stub(&before.text, None), ComposerState::Unknown);
@@ -309,12 +304,32 @@ async fn stored(
     }))
 }
 
+fn row_failed(row: &Value) -> bool {
+    matches!(
+        row.get("outcome").and_then(Value::as_str),
+        Some("contaminated" | "failed")
+    )
+}
+
+async fn raise(app: &App, address: &str, reason: &str) {
+    emit(
+        app,
+        DomainEvent::AttentionRaised {
+            seat: address.to_owned(),
+            reason: reason.to_owned(),
+            at: now_ts(),
+        },
+    )
+    .await;
+}
+
 fn outcome_name(outcome: DeliveryOutcome) -> &'static str {
     match outcome {
         DeliveryOutcome::Delivered => "delivered",
         DeliveryOutcome::Deferred => "deferred",
         DeliveryOutcome::Escalated => "escalated",
         DeliveryOutcome::Contaminated => "contaminated",
+        DeliveryOutcome::Failed => "failed",
     }
 }
 

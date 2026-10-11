@@ -362,6 +362,9 @@ impl Multiplexer for FakeMux {
         for batch in &batches {
             record(&mut guard, batch);
         }
+        if keys.iter().any(|key| matches!(key, Key::CtrlU)) {
+            clear_stub_draft(&mut guard, pane);
+        }
         drop(guard);
         self.own_write.send_replace(Some(Instant::now()));
         Ok(())
@@ -487,6 +490,27 @@ impl Multiplexer for FakeMux {
     }
 }
 
+/// `C-u` drops whatever the paste left after the stub prompt.
+fn clear_stub_draft(guard: &mut FakeInner, pane: &PaneRef) {
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get_mut(&session) else {
+        return;
+    };
+    let Some(idx) = screen.text.rfind("stub> ") else {
+        return;
+    };
+    let end = idx.saturating_add("stub> ".len());
+    let Some(kept) = screen.text.get(..end) else {
+        return;
+    };
+    let mut text = kept.to_owned();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    let cursor = screen.cursor;
+    *screen = Capture::new(text, cursor);
+}
+
 fn scripted_plan(guard: &FakeInner, spec: &SessionSpec) -> Option<crate::fake_script::StubPlan> {
     if !guard.script_stubs {
         return None;
@@ -497,7 +521,7 @@ fn scripted_plan(guard: &FakeInner, spec: &SessionSpec) -> Option<crate::fake_sc
 
 fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     let lines = match range {
-        CaptureRange::Visible => return capture,
+        CaptureRange::Visible | CaptureRange::Joined => return capture,
         CaptureRange::LastLines(n) => usize::from(n),
         CaptureRange::History(n) => usize::try_from(n).unwrap_or(usize::MAX),
     };

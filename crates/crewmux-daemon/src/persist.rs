@@ -40,15 +40,16 @@ async fn flush_pending(app: &App, rx: &mut mpsc::UnboundedReceiver<QueueWrite>) 
 fn absorb(into: &mut QueueWrite, newer: QueueWrite) {
     if newer.book.epoch() >= into.book.epoch() {
         into.book = newer.book;
+        into.crash = newer.crash;
     }
     into.acks.extend(newer.acks);
 }
 
 async fn persist(app: &App, write: QueueWrite) {
-    let QueueWrite { book, acks } = write;
+    let QueueWrite { book, acks, crash } = write;
     let store = std::sync::Arc::clone(&app.store);
     let saved = tokio::task::spawn_blocking(move || {
-        store.write(move |conn| crewmux_store::replace_book(conn, &book, None))
+        store.write(move |conn| crewmux_store::replace_book(conn, &book, crash))
     })
     .await;
     let result = match saved {

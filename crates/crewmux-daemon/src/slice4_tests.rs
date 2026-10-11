@@ -35,10 +35,14 @@ fn paste_count(calls: &[Vec<String>]) -> usize {
         .count()
 }
 
-fn entered(calls: &[Vec<String>]) -> bool {
+fn submitted(calls: &[Vec<String>]) -> bool {
     calls
         .iter()
-        .any(|argv| argv.iter().any(|arg| arg == "Enter"))
+        .any(|argv| argv.iter().any(|arg| arg == "Enter") && argv.iter().all(|arg| arg != "C-u"))
+}
+
+fn cleared(calls: &[Vec<String>]) -> bool {
+    calls.iter().any(|argv| argv.iter().any(|arg| arg == "C-u"))
 }
 
 fn outcome_of(body: &Value) -> String {
@@ -88,7 +92,14 @@ async fn contaminated_paste_does_not_send_enter() {
         .expect("receipt");
     assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
     assert_eq!(outcome_of(&body), "contaminated");
-    assert!(!entered(&mux.recorded().await));
+    let recorded = mux.recorded().await;
+    assert!(!submitted(&recorded), "{recorded:?}");
+    assert!(cleared(&recorded), "{recorded:?}");
+    mux.contaminate_on_paste(false).await;
+    let next = deliver(&app, outbound(&["one@pair"], "after-clear"))
+        .await
+        .expect("next");
+    assert_eq!(outcome_of(&next), "delivered");
     let Missed::Replay(events) = app.hub.missed(None).await else {
         panic!("backlog");
     };
@@ -104,11 +115,19 @@ async fn missing_payload_is_not_delivered() {
     let (app, mux) = harness(None).await;
     ready(&app, &two_stub("/tmp")).await;
     mux.swallow_paste(true).await;
-    let err = deliver(&app, outbound(&["one@pair"], "hello"))
+    let body = deliver(&app, outbound(&["one@pair"], "hello"))
         .await
-        .expect_err("missing");
-    assert!(err.to_string().contains("did not render"), "{err}");
-    assert!(!entered(&mux.recorded().await));
+        .expect("receipt");
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(outcome_of(&body), "failed");
+    let recorded = mux.recorded().await;
+    assert!(!submitted(&recorded), "{recorded:?}");
+    assert!(cleared(&recorded), "{recorded:?}");
+    mux.swallow_paste(false).await;
+    let next = deliver(&app, outbound(&["one@pair"], "after-missing"))
+        .await
+        .expect("next");
+    assert_eq!(outcome_of(&next), "delivered");
 }
 
 #[tokio::test]

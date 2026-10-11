@@ -15,6 +15,8 @@ pub enum DeliveryOutcome {
     Escalated,
     /// The composer contained text beyond the payload, so Enter was not sent.
     Contaminated,
+    /// The payload did not render. The composer was cleared and Enter was not sent.
+    Failed,
 }
 
 /// One seat's receipt. `cursor` is the daemon's monotonic delivery counter.

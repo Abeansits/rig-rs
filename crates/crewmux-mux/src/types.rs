@@ -123,6 +123,8 @@ pub struct PasteReceipt {
 pub enum CaptureRange {
     /// The visible screen.
     Visible,
+    /// The visible screen with soft-wrapped rows joined (`capture-pane -J`).
+    Joined,
     /// The last `n` lines, via `capture-pane -S -n`.
     LastLines(u16),
     /// The last `n` lines of history, via `capture-pane -S -n`.

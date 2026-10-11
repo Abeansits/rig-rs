@@ -1,13 +1,15 @@
 //! Post-paste screen check.
 //!
-//! Real `capture-pane -p -N` pads every row to the pane width and wraps long
-//! lines, and the stub may echo the payload before the check runs. A
-//! byte-for-byte `before + payload` compare only matches [`crewmux_mux::FakeMux`].
+//! The check captures with `capture-pane -J`, so tmux rejoins soft-wrapped rows
+//! before we look for the payload. [`crewmux_mux::FakeMux`] stores logical lines
+//! and ignores `-J`. The stub may still echo the payload before the check runs.
+//! A byte-for-byte `before + payload` compare only matches the fake multiplexer.
 
 use std::time::{Duration, Instant};
 
-use crewmux_mux::{CaptureRange, PaneRef};
+use crewmux_mux::{CaptureRange, Key, PaneRef};
 
+use crate::composer::stub_drafting;
 use crate::error::Error;
 use crate::state::App;
 
@@ -57,7 +59,7 @@ pub(crate) async fn pasted_screen(
     before: &str,
     payload: &str,
 ) -> Result<String, Error> {
-    let mut after = app.mux.capture(pane, CaptureRange::Visible).await?.text;
+    let mut after = app.mux.capture(pane, CaptureRange::Joined).await?.text;
     let hit = classify_paste(before, &after, payload);
     if exact_append(before, &after, payload) || hit == PasteHit::Contaminated {
         return Ok(after);
@@ -78,11 +80,41 @@ pub(crate) async fn pasted_screen(
             return Ok(after);
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
-        let next = app.mux.capture(pane, CaptureRange::Visible).await?.text;
+        let next = app.mux.capture(pane, CaptureRange::Joined).await?.text;
         if waited && next == after && hit == PasteHit::Clean {
             return Ok(after);
         }
         after = next;
+    }
+}
+
+/// Drop a failed paste from the composer.
+///
+/// `C-u` kills the line the paste left in the tty. Enter then arrives after the
+/// paste burst, so the stub reprints `stub>` and the seat is back at a prompt.
+/// An unchanged screen means the multiplexer did not redraw; stop waiting.
+pub(crate) async fn clear_composer(app: &App, pane: &PaneRef) -> Result<(), Error> {
+    let started = Instant::now();
+    let mut last = app.mux.capture(pane, CaptureRange::Visible).await?.text;
+    app.mux.send_keys(pane, &[Key::CtrlU, Key::Enter]).await?;
+    let mut stable = Instant::now();
+    loop {
+        let text = app.mux.capture(pane, CaptureRange::Visible).await?.text;
+        if !stub_drafting(&text) {
+            return Ok(());
+        }
+        if text == last {
+            if stable.elapsed() >= Duration::from_millis(80) {
+                return Ok(());
+            }
+        } else {
+            last = text;
+            stable = Instant::now();
+        }
+        if started.elapsed() >= Duration::from_millis(500) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 

@@ -34,6 +34,16 @@ mod live {
         }
 
         #[test]
+        fn wide_payload_on_80_columns_delivers() {
+            super::wide_payload_on_80_columns_delivers();
+        }
+
+        #[test]
+        fn failed_verify_clears_the_composer() {
+            super::failed_verify_clears_the_composer();
+        }
+
+        #[test]
         fn send_renders_in_addressed_pane() {
             super::send_renders_in_addressed_pane();
         }
@@ -199,8 +209,10 @@ mod live {
         assert_eq!(code, 1, "{err} {body} {}", log(&live));
         assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
         assert_eq!(outcome(&body), "contaminated");
+        assert!(body.get("receipts").is_some(), "{body}");
         let shot = capture(&live, "one");
         assert!(shot.contains("EXTRA"), "{shot}");
+        wait_prompt(&live, "one");
         let (again, next, err) = send(
             &live,
             &["send", "--to", "one@pair", "marker-next", "--json"],
@@ -208,10 +220,53 @@ mod live {
         assert_eq!(again, 0, "{err} {next} {}", log(&live));
         assert_eq!(
             outcome(&next),
-            "deferred",
+            "delivered",
             "{next} {}",
             capture(&live, "one")
         );
+    }
+
+    fn wide_payload_on_80_columns_delivers() {
+        let live = boot(None);
+        let resized = tmux(
+            &live.socket,
+            &["resize-window", "-t", "one__pair", "-x", "80", "-y", "27"],
+        );
+        assert_eq!(resized.0, 0, "{}", resized.2);
+        let size = tmux(
+            &live.socket,
+            &["list-panes", "-t", "one__pair", "-F", "#{pane_width}"],
+        );
+        assert_eq!(size.1.trim(), "80", "{} {}", size.1, size.2);
+        let body = "W".repeat(200);
+        let (code, value, err) = send(&live, &["send", "--to", "one@pair", &body, "--json"]);
+        assert_eq!(code, 0, "{err} {value} {}", log(&live));
+        assert_eq!(outcome(&value), "delivered");
+        wait_prompt(&live, "one");
+        let flat: String = history(&live, "one__pair")
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect();
+        assert!(flat.contains(&body), "wrapped payload was not delivered");
+    }
+
+    fn failed_verify_clears_the_composer() {
+        let live = boot(Some("contaminate=1"));
+        let (code, body, err) = send(
+            &live,
+            &["send", "--to", "one@pair", "marker-forced", "--json"],
+        );
+        assert_eq!(code, 1, "{err} {body} {}", log(&live));
+        assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
+        assert!(body.get("receipts").is_some(), "{body}");
+        wait_prompt(&live, "one");
+        assert!(prompt_clear(&capture(&live, "one")));
+        let (again, next, err) = send(
+            &live,
+            &["send", "--to", "one@pair", "marker-after", "--json"],
+        );
+        assert_eq!(again, 0, "{err} {next} {}", log(&live));
+        assert_eq!(outcome(&next), "delivered", "{next}");
     }
 
     fn send_renders_in_addressed_pane() {

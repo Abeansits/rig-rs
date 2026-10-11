@@ -66,7 +66,7 @@ pub enum DomainEvent {
     DeliveryRecorded {
         /// Destination seat session.
         seat: String,
-        /// `delivered`, `deferred`, `escalated`, or `contaminated`.
+        /// `delivered`, `deferred`, `escalated`, `contaminated`, or `failed`.
         outcome: String,
         /// When.
         at: Timestamp,

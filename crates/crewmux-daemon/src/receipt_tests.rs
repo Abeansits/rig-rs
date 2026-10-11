@@ -3,6 +3,9 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::StatusCode;
 use crewmux_adapters::{AdapterRegistry, StubAdapter};
 use crewmux_messaging::{NewItem, SessionRef};
 use crewmux_mux::{FakeMux, Multiplexer};
@@ -168,4 +171,36 @@ async fn cancel_flushes_a_queued_snapshot() {
     app.tasks.wait().await;
     let loaded = load(&app).await;
     assert!(loaded.get(&id).is_some(), "snapshot dropped on cancel");
+}
+
+#[tokio::test]
+async fn failed_queue_save_rolls_back_memory() {
+    let (app, _mux) = harness(None).await;
+    let kept = post_item(&app, "roll-1").await;
+    assert_eq!(kept, StatusCode::OK);
+    let epoch = app.queue.lock().await.epoch();
+    app.fail_next_queue_save().await;
+    let rejected = post_item(&app, "roll-2").await;
+    assert_ne!(rejected, StatusCode::OK);
+    let book = app.queue.lock().await;
+    assert_eq!(book.epoch(), epoch);
+    assert!(book.get(&QItemId::new("roll-1").expect("id")).is_some());
+    assert!(book.get(&QItemId::new("roll-2").expect("id")).is_none());
+    drop(book);
+    let stored = load(&app).await;
+    assert!(stored.get(&QItemId::new("roll-1").expect("id")).is_some());
+    assert!(stored.get(&QItemId::new("roll-2").expect("id")).is_none());
+}
+
+async fn post_item(app: &App, id: &str) -> StatusCode {
+    let body = serde_json::json!({
+        "id": id,
+        "source": "alice@rig",
+        "destination": "bob@rig",
+        "body": "kept",
+    })
+    .to_string();
+    crate::queue_http::create(State(app.clone()), Bytes::from(body))
+        .await
+        .status()
 }

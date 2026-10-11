@@ -1,4 +1,5 @@
 //! Queue routes. Mutations commit in the book, then the writer persists the snapshot.
+//! A failed snapshot restores the in-memory book when nothing newer has landed.
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -266,11 +267,21 @@ async fn mutate<T>(
     app: &App,
     f: impl FnOnce(&mut crewmux_messaging::QueueBook) -> Result<T, crewmux_messaging::Error>,
 ) -> Result<T, Error> {
-    let mut book = app.queue.lock().await;
-    let value = f(&mut book).map_err(|err| Error::Message(err.to_string()))?;
-    let snap = book.clone();
-    drop(book);
-    app.commit_queue(snap).await?;
+    let (value, previous, snap) = {
+        let mut book = app.queue.lock().await;
+        let previous = book.clone();
+        let value = f(&mut book).map_err(|err| Error::Message(err.to_string()))?;
+        let snap = book.clone();
+        (value, previous, snap)
+    };
+    let epoch = snap.epoch();
+    if let Err(err) = app.commit_queue(snap).await {
+        let mut book = app.queue.lock().await;
+        if book.epoch() == epoch {
+            *book = previous;
+        }
+        return Err(err);
+    }
     Ok(value)
 }
 

@@ -32,6 +32,8 @@ pub enum Key {
     Escape,
     /// Control-C.
     CtrlC,
+    /// Kill the current line. Clears a paste that failed verification.
+    CtrlU,
     /// Up arrow.
     Up,
     /// Down arrow.

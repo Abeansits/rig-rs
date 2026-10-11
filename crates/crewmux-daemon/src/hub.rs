@@ -54,6 +54,11 @@ impl EventHub {
         event
     }
 
+    /// Last id issued. Zero before the first event. The next id is one past this.
+    pub(crate) fn head(&self) -> u64 {
+        self.next.load(Ordering::Relaxed)
+    }
+
     pub(crate) async fn missed(&self, last: Option<u64>) -> Missed {
         let queue = self.backlog.lock().await;
         let Some(last) = last else {

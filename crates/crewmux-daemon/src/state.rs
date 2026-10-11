@@ -56,6 +56,8 @@ pub(crate) struct App {
     pub tasks: TaskTracker,
     persist_tx: mpsc::UnboundedSender<QueueWrite>,
     queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueWrite>>>>,
+    /// Next snapshot write fails at this `replace_book` hook, then the hook clears.
+    persist_crash: Arc<tokio::sync::Mutex<Option<&'static str>>>,
 }
 
 /// One queue snapshot for the writer, plus the callers waiting on that commit.
@@ -64,6 +66,8 @@ pub(crate) struct QueueWrite {
     pub book: QueueBook,
     /// Completed after the snapshot write, including a store error.
     pub acks: Vec<oneshot::Sender<Result<(), String>>>,
+    /// Test hook forwarded to `replace_book`. Production writes pass `None`.
+    pub crash: Option<&'static str>,
 }
 
 impl App {
@@ -98,7 +102,14 @@ impl App {
             tasks: TaskTracker::new(),
             persist_tx,
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
+            persist_crash: Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+
+    /// Fail the next queue snapshot at the store's `before-commit` hook.
+    #[cfg(test)]
+    pub(crate) async fn fail_next_queue_save(&self) {
+        *self.persist_crash.lock().await = Some("before-commit");
     }
 
     /// Start the queue writer and the transcript writer. Idempotent for the queue side.
@@ -129,6 +140,7 @@ impl App {
         drop(self.persist_tx.send(QueueWrite {
             book,
             acks: Vec::new(),
+            crash: None,
         }));
     }
 
@@ -139,10 +151,12 @@ impl App {
     /// Returns [`Error::Message`] when the writer has stopped or the snapshot write failed.
     pub(crate) async fn commit_queue(&self, book: QueueBook) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
+        let crash = self.persist_crash.lock().await.take();
         self.persist_tx
             .send(QueueWrite {
                 book,
                 acks: vec![tx],
+                crash,
             })
             .map_err(|_| Error::Message("queue writer stopped".to_owned()))?;
         match rx.await {

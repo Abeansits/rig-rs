@@ -279,7 +279,7 @@ fn call(method: &str, path: &str, body: Option<&Value>, json: bool) -> Result<i3
         .request(method, path, bytes.as_deref())
         .map_err(|err| Error::Unreachable(err.to_string()))?;
     if response.status != 200 {
-        return http_error(response.status, &response.body);
+        return failed_http(response.status, &response.body, json);
     }
     let value = parse_json(&response.body)?;
     if json {
@@ -293,15 +293,30 @@ fn call(method: &str, path: &str, body: Option<&Value>, json: bool) -> Result<i3
     } else {
         output::stdout_json(&value);
     }
-    let code = value
+    Ok(exit_of(&value))
+}
+
+/// A non-200 body that still carries receipts is the failed send document.
+fn failed_http(status: u16, body: &str, json: bool) -> Result<i32, Error> {
+    if json
+        && let Ok(value) = serde_json::from_str::<Value>(body)
+        && value.get("receipts").is_some()
+    {
+        output::stdout_json(&value);
+        return Ok(exit_of(&value));
+    }
+    http_error(status, body)
+}
+
+fn exit_of(value: &Value) -> i32 {
+    value
         .get("status")
         .and_then(Value::as_str)
         .map_or(0, |status| match status {
             "ok" => 0,
             "partial" => 3,
             _ => 1,
-        });
-    Ok(code)
+        })
 }
 
 fn http_error(_status: u16, body: &str) -> Result<i32, Error> {
@@ -319,4 +334,18 @@ fn http_error(_status: u16, body: &str) -> Result<i32, Error> {
 
 fn parse_json(body: &str) -> Result<Value, Error> {
     serde_json::from_str(body).map_err(|err| Error::Json(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::exit_of;
+
+    #[test]
+    fn a_failed_receipt_exits_1() {
+        let value = json!({"status": "failed", "receipts": [{"outcome": "failed"}]});
+        assert_eq!(exit_of(&value), 1);
+        assert!(value.get("receipts").is_some());
+    }
 }
