@@ -1,7 +1,10 @@
 //! Real tmux behind `tmux-it`. The nextest ci profile runs `::tmux_it::`.
-#![expect(
-    clippy::expect_used,
-    reason = "setup failures should abort the integration test"
+#![cfg_attr(
+    feature = "tmux-it",
+    expect(
+        clippy::expect_used,
+        reason = "setup failures should abort the integration test"
+    )
 )]
 #![cfg(feature = "tmux-it")]
 

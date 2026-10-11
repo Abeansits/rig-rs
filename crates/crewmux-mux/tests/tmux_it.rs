@@ -346,20 +346,34 @@ mod suite {
         }
 
         async fn hook_trial(server: &Server, trial: u32) -> Duration {
+            let marker = scratch().join(format!("armed-{trial}"));
             let mut spec = sleep_spec(&format!("hook-{trial}"));
-            // A foreground `sleep` swallows TERM in dash/bash, so the trap
-            // never runs. Background sleep plus `wait` lets the shell exit 7.
+            // A foreground `sleep` swallows the signal in dash/bash, so the
+            // trap never runs. Background sleep plus `wait` lets the shell
+            // exit 7. Ubuntu's apt tmux 3.4 drops the control-mode doorbell
+            // when the pane dies from SIGTERM, so arm a HUP trap and wait
+            // until the marker exists before signaling HUP.
+            spec.env
+                .insert("RIG_ARMED".into(), marker.display().to_string());
             spec.argv = vec![
                 "bash".into(),
                 "-c".into(),
-                "trap 'exit 7' TERM; sleep 120 & wait".into(),
+                "trap 'exit 7' HUP; touch \"$RIG_ARMED\"; sleep 120 & wait".into(),
             ];
             spec.remain_on_exit = true;
-            let mut deaths = server.mux.death_events();
             let pane = server.mux.create_session(&spec).await.expect("create");
             let pid = pane_pid(server, &pane).await;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if tokio::fs::try_exists(&marker).await.expect("marker") {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "trap was not armed");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let mut deaths = server.mux.death_events();
             let start = Instant::now();
-            signal(pid, "TERM");
+            signal(pid, "HUP");
             let event = wait_death(&mut deaths, Duration::from_millis(500)).await;
             let elapsed = start.elapsed();
             match event {
