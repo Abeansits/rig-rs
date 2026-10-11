@@ -105,8 +105,12 @@ async fn echo_until(exit_at: Option<tokio::time::Instant>, contaminate: bool) ->
         let now = tokio::time::Instant::now();
         let gap = now.saturating_duration_since(last);
         last = now;
+        // A blank line is the clear (`C-u` then Enter). It reprints the prompt
+        // even inside the paste burst. A non-empty line reprints only after the
+        // gap, which is the submit Enter following the post-paste check.
+        let blank = line.trim().is_empty();
         stdout.write_all(line.as_bytes()).await?;
-        if seen && gap >= Duration::from_millis(40) {
+        if seen && (blank || gap >= Duration::from_millis(40)) {
             stdout.write_all(b"stub> \n").await?;
         }
         seen = true;
