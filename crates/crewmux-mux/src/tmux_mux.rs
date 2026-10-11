@@ -125,6 +125,7 @@ impl TmuxMux {
         };
         let control = tracker.spawn(run_control(ctx));
         wait_ready(&cancel, &control, boot_rx).await?;
+        tracker.spawn(crate::reap::nudge(Arc::clone(&exec), cancel.clone()));
         let bell = match open_bell(exec.as_ref()).await {
             Ok(bell) => bell,
             Err(err) => {

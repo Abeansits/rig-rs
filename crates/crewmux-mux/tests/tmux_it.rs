@@ -347,20 +347,29 @@ mod suite {
 
         async fn hook_trial(server: &Server, trial: u32) -> Duration {
             let mut spec = sleep_spec(&format!("hook-{trial}"));
-            // A foreground `sleep` swallows TERM in dash/bash, so the trap
-            // never runs. Background sleep plus `wait` lets the shell exit 7.
+            // TERM is not a stable status 7: bash can die from the signal before
+            // the trap runs. The shell exits 7 when this flag appears.
+            let flag = std::env::temp_dir().join(format!("rig-die-{}-{trial}", std::process::id()));
+            let path = flag.display().to_string();
+            assert!(
+                path.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-')
+                }),
+                "{path}"
+            );
+            drop(std::fs::remove_file(&flag));
             spec.argv = vec![
                 "bash".into(),
                 "-c".into(),
-                "trap 'exit 7' TERM; sleep 120 & wait".into(),
+                format!("while [ ! -e {path} ]; do sleep 0.01; done; exit 7"),
             ];
             spec.remain_on_exit = true;
             let mut deaths = server.mux.death_events();
             let pane = server.mux.create_session(&spec).await.expect("create");
-            let pid = pane_pid(server, &pane).await;
             let start = Instant::now();
-            signal(pid, "TERM");
+            std::fs::write(&flag, b"x").expect("flag");
             let event = wait_death(&mut deaths, Duration::from_millis(500)).await;
+            drop(std::fs::remove_file(&flag));
             let elapsed = start.elapsed();
             match event {
                 MuxEvent::PaneDied { status, pane_id } => {

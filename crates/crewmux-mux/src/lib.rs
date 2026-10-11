@@ -17,6 +17,7 @@ mod hashutil;
 mod hub;
 mod parse;
 mod paste;
+mod reap;
 mod tmux_mux;
 mod types;
 mod version;
