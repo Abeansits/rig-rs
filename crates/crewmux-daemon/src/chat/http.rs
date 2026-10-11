@@ -14,12 +14,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use crewmux_api::{ChatWire, MAX_CHAT_BODY, RigSummaryRow};
 use crewmux_core::chat::{ChatError, ChatMessage, ChatRepo, HistoryQuery, NewChat, NewTopic};
-use crewmux_core::chat::{format_sqlite_utc, parse_since, rejected_since};
+use crewmux_core::chat::{MAX_SINCE_LEN, format_sqlite_utc, parse_since, rejected_since};
 use crewmux_core::{RigRepo, SeatRepo};
 use crewmux_messaging::chat::{SeatProof, resolve_sender};
 use crewmux_store::{Db, seat_token};
 use crewmux_types::{
-    ChatCursor, ChatId, RigId, SEAT_ID_HEADER, SEAT_TOKEN_HEADER, SeatId, SenderRef, TopicId,
+    ChatCursor, ChatId, MAX_SEAT_TOKEN_LEN, RigId, SEAT_ID_HEADER, SEAT_TOKEN_HEADER, SeatId,
+    SenderRef, TopicId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -77,7 +78,21 @@ async fn send(
     if let Some(reject) = reject_large(text) {
         return reject.response();
     }
+    if let Some(reject) = reject_optional(
+        obj.get("topic").and_then(Value::as_str),
+        |text| TopicId::new(text).is_ok(),
+        "invalid topic",
+    ) {
+        return reject.response();
+    }
     let claimed = obj.get("sender").and_then(Value::as_str);
+    if let Some(reject) = reject_optional(
+        claimed,
+        |text| SenderRef::parse(text).is_ok(),
+        "invalid sender",
+    ) {
+        return reject.response();
+    }
     let sender = match authenticate(&app, &rig, &headers, claimed).await {
         Ok(sender) => sender,
         Err(err) => return err.response(),
@@ -188,6 +203,13 @@ async fn topic(
         return reject.response();
     }
     let claimed = obj.get("sender").and_then(Value::as_str);
+    if let Some(reject) = reject_optional(
+        claimed,
+        |text| SenderRef::parse(text).is_ok(),
+        "invalid sender",
+    ) {
+        return reject.response();
+    }
     let sender = match authenticate(&app, &rig, &headers, claimed).await {
         Ok(sender) => sender,
         Err(err) => return err.response(),
@@ -294,6 +316,9 @@ async fn seat_sender(
 }
 
 async fn lookup_seat(app: &App, seat: &str) -> Result<Option<SeatAuth>, Reject> {
+    if seat.len() > MAX_SEAT_TOKEN_LEN {
+        return Err(Reject::new(StatusCode::BAD_REQUEST, "unknown sender"));
+    }
     let seat_id = SeatId::from_str(seat)
         .map_err(|_| Reject::new(StatusCode::BAD_REQUEST, "unknown sender"))?;
     let store = Arc::clone(&app.store);
@@ -370,11 +395,11 @@ struct HistoryQs {
 }
 
 fn since_bound(value: Option<&str>) -> Result<Option<crewmux_core::Timestamp>, String> {
-    let Some(value) = value else {
+    let Some(value) = value.filter(|text| !text.is_empty()) else {
         return Ok(None);
     };
-    if value.is_empty() {
-        return Ok(None);
+    if value.len() > MAX_SINCE_LEN {
+        return Err("invalid since".to_owned());
     }
     parse_since(value, now_ts())
         .map(Some)
@@ -386,7 +411,20 @@ fn topic_filter(value: Option<&str>) -> Result<Option<TopicId>, Reject> {
         None => Ok(None),
         Some(text) => TopicId::new(text)
             .map(Some)
-            .map_err(|_| Reject::new(StatusCode::BAD_REQUEST, format!("unknown topic: {text}"))),
+            .map_err(|_| Reject::new(StatusCode::BAD_REQUEST, "invalid topic")),
+    }
+}
+
+fn reject_optional(
+    value: Option<&str>,
+    accept: impl FnOnce(&str) -> bool,
+    message: &'static str,
+) -> Option<Reject> {
+    let text = value.filter(|text| !text.is_empty())?;
+    if accept(text) {
+        None
+    } else {
+        Some(Reject::new(StatusCode::BAD_REQUEST, message))
     }
 }
 

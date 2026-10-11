@@ -5,7 +5,7 @@
 
 use std::str::FromStr;
 
-use crewmux_types::{SeatId, SenderRef};
+use crewmux_types::{MAX_SEAT_TOKEN_LEN, SeatId, SenderRef};
 
 pub use crewmux_core::chat::{
     ChatError, ChatMessage, ChatRepo, HistoryPage, HistoryQuery, NewChat, NewTopic,
@@ -68,7 +68,10 @@ fn authenticated_seat(
 
 /// Compare tokens without returning at the first differing byte.
 fn tokens_match(stored: &str, presented: &str) -> bool {
-    if presented.is_empty() {
+    if presented.is_empty()
+        || presented.len() > MAX_SEAT_TOKEN_LEN
+        || stored.len() > MAX_SEAT_TOKEN_LEN
+    {
         return false;
     }
     let left = stored.as_bytes();
@@ -172,6 +175,23 @@ mod tests {
                 .expect("id claim")
                 .as_str(),
             "one"
+        );
+    }
+
+    #[test]
+    fn oversized_token_does_not_match() {
+        let seat = SeatId::new();
+        let seat_text = seat.to_string();
+        let token = "t".repeat(crewmux_types::MAX_SEAT_TOKEN_LEN.saturating_add(1));
+        let proof = SeatProof {
+            seat_id: &seat_text,
+            token: &token,
+            stored_token: Some("token-a"),
+            name: Some("one"),
+        };
+        assert_eq!(
+            resolve_sender(Some(proof), None).expect_err("long token"),
+            ChatError::UnknownSender
         );
     }
 }

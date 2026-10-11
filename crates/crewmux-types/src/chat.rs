@@ -12,6 +12,20 @@ pub const SEAT_ID_HEADER: &str = "X-Rig-Seat-Id";
 /// HTTP header carrying [`SEAT_TOKEN_ENV`].
 pub const SEAT_TOKEN_HEADER: &str = "X-Rig-Seat-Token";
 
+/// Longest topic name, in bytes.
+pub const MAX_TOPIC_LEN: usize = 256;
+
+/// Longest sender claim or stored sender, in bytes.
+pub const MAX_SENDER_LEN: usize = 256;
+
+/// Longest history cursor, in bytes. Message ids are 26-character ULIDs.
+pub const MAX_CURSOR_LEN: usize = 256;
+
+/// Longest presented seat token, in bytes. Issued tokens are ULIDs.
+pub const MAX_SEAT_TOKEN_LEN: usize = 256;
+
+const _: () = assert!(MAX_SENDER_LEN == crate::id::MAX_NAME_LEN);
+
 use std::fmt;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -115,17 +129,14 @@ fn bump(prev: u128, fresh: Ulid) -> Ulid {
 pub struct TopicId(String);
 
 impl TopicId {
-    /// Reject an empty name or a name that contains a control character.
+    /// Reject an empty name, a name past [`MAX_TOPIC_LEN`] bytes, or a control character.
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains a control character.
+    /// Returns [`TypeError::Name`] when `text` is empty, longer than [`MAX_TOPIC_LEN`],
+    /// or contains a control character.
     pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
-        let text = text.into();
-        if text.is_empty() || text.chars().any(char::is_control) {
-            return Err(TypeError::Name(text));
-        }
-        Ok(Self(text))
+        bounded_label(text.into(), MAX_TOPIC_LEN).map(Self)
     }
 
     /// Borrow the name.
@@ -147,17 +158,14 @@ impl fmt::Display for TopicId {
 pub struct ChatCursor(String);
 
 impl ChatCursor {
-    /// Reject an empty cursor or one that contains a control character.
+    /// Reject an empty cursor, one past [`MAX_CURSOR_LEN`] bytes, or a control character.
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains a control character.
+    /// Returns [`TypeError::Name`] when `text` is empty, longer than [`MAX_CURSOR_LEN`],
+    /// or contains a control character.
     pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
-        let text = text.into();
-        if text.is_empty() || text.chars().any(char::is_control) {
-            return Err(TypeError::Name(text));
-        }
-        Ok(Self(text))
+        bounded_label(text.into(), MAX_CURSOR_LEN).map(Self)
     }
 
     /// Cursor positioned on `id`.
@@ -200,16 +208,14 @@ impl SenderRef {
         Self(id.to_string())
     }
 
-    /// Reject an empty sender or one that contains a control character.
+    /// Reject an empty sender, one past [`MAX_SENDER_LEN`] bytes, or a control character.
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains a control character.
+    /// Returns [`TypeError::Name`] when `text` is empty, longer than [`MAX_SENDER_LEN`],
+    /// or contains a control character.
     pub fn parse(text: &str) -> Result<Self, TypeError> {
-        if text.is_empty() || text.chars().any(char::is_control) {
-            return Err(TypeError::Name(text.to_owned()));
-        }
-        Ok(Self(text.to_owned()))
+        bounded_label(text.to_owned(), MAX_SENDER_LEN).map(Self)
     }
 
     /// Borrow the sender text.
@@ -222,5 +228,36 @@ impl SenderRef {
 impl fmt::Display for SenderRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
+    }
+}
+
+fn bounded_label(text: String, max: usize) -> Result<String, TypeError> {
+    if text.is_empty() || text.len() > max || text.chars().any(char::is_control) {
+        return Err(TypeError::Name(text));
+    }
+    Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChatCursor, MAX_CURSOR_LEN, MAX_SENDER_LEN, MAX_TOPIC_LEN, SenderRef, TopicId};
+
+    #[test]
+    fn topic_accepts_256_bytes_and_rejects_257() {
+        let ok = "\"".repeat(MAX_TOPIC_LEN);
+        assert_eq!(TopicId::new(&ok).expect("topic").as_str(), ok);
+        assert!(TopicId::new("\"".repeat(MAX_TOPIC_LEN.saturating_add(1))).is_err());
+        assert!(TopicId::new("").is_err());
+        assert!(TopicId::new("a\nb").is_err());
+    }
+
+    #[test]
+    fn sender_and_cursor_reject_overlong_text() {
+        let ok = "a".repeat(MAX_SENDER_LEN);
+        assert_eq!(SenderRef::parse(&ok).expect("sender").as_str(), ok);
+        assert!(SenderRef::parse(&"a".repeat(MAX_SENDER_LEN.saturating_add(1))).is_err());
+        let cursor = "b".repeat(MAX_CURSOR_LEN);
+        assert_eq!(ChatCursor::new(&cursor).expect("cursor").as_str(), cursor);
+        assert!(ChatCursor::new("b".repeat(MAX_CURSOR_LEN.saturating_add(1))).is_err());
     }
 }

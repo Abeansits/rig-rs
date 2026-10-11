@@ -130,13 +130,117 @@ fn assert_json_bodies(seen: &str, cap: usize) {
     assert!(trailer, "json trailer missing, len {}", seen.len());
 }
 
+#[test]
+fn watch_prints_at_cap_quoted_topic_and_nul_body() {
+    assert_topic_watch(false);
+}
+
+#[test]
+fn watch_json_prints_at_cap_quoted_topic_and_nul_body() {
+    assert_topic_watch(true);
+}
+
+fn assert_topic_watch(json: bool) {
+    let env = Env::new();
+    up(&env);
+    let mut args = vec!["chatroom", "watch", "pair"];
+    if json {
+        args.push("--json");
+    }
+    let mut child = env
+        .rig()
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("watch");
+    let rx = spawn_reader(&mut child);
+    let (code, out, err) = stdout(
+        env.rig()
+            .args(["chatroom", "send", "pair", "ready", "--json"]),
+    );
+    assert_eq!(code, 0, "{err} {out}");
+    let sent = serde_json::from_str::<Value>(out.trim()).expect("send json");
+    let rig_id = sent.get("rigId").and_then(Value::as_str).expect("rig id");
+    let ready = wait_for(&rx, "ready");
+    assert!(ready.contains("ready"), "len {}", ready.len());
+    let cap = crewmux_api::MAX_CHAT_BODY;
+    let topic = "\"".repeat(crewmux_api::MAX_TOPIC_LEN);
+    post_topic(&env, rig_id, &topic, &"\0".repeat(cap));
+    let (code, _, err) = stdout(env.rig().args(["chatroom", "send", "pair", "after-cap"]));
+    assert_eq!(code, 0, "{err}");
+    let seen = wait_for(&rx, "after-cap");
+    assert!(
+        child.try_wait().expect("poll").is_none(),
+        "watch exited before the trailer, len {}",
+        seen.len()
+    );
+    if json {
+        assert_json_topic(&seen, &topic, cap);
+    } else {
+        assert_human_topic(&seen, &topic);
+    }
+    let raw = i32::try_from(child.id()).expect("pid");
+    let pid = rustix::process::Pid::from_raw(raw).expect("pid");
+    rustix::process::kill_process(pid, rustix::process::Signal::INT).expect("int");
+    let status = child.wait().expect("wait");
+    let watch_err = read_stderr(&mut child);
+    assert!(status.success(), "{status} {watch_err}");
+    assert!(
+        !watch_err.contains("oversized"),
+        "dropped a legal frame: {watch_err}"
+    );
+}
+
+fn assert_human_topic(seen: &str, topic: &str) {
+    let line = format!("--- topic: {topic} ---");
+    assert!(
+        seen.contains(&line),
+        "topic line missing, len {}",
+        seen.len()
+    );
+    assert!(seen.contains("[operator] after-cap"), "len {}", seen.len());
+}
+
+fn assert_json_topic(seen: &str, topic: &str, cap: usize) {
+    let mut marker = false;
+    let mut trailer = false;
+    for line in seen.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let payload = value.get("payload").unwrap_or(&value);
+        if payload.get("topic").and_then(Value::as_str) == Some(topic) {
+            let body = payload.get("body").and_then(Value::as_str);
+            marker =
+                body.is_some_and(|text| text.len() == cap && text.chars().all(|ch| ch == '\0'));
+        }
+        if payload.get("body").and_then(Value::as_str) == Some("after-cap") {
+            trailer = true;
+        }
+    }
+    assert!(marker, "json topic frame missing, len {}", seen.len());
+    assert!(trailer, "json trailer missing, len {}", seen.len());
+}
+
+fn post_topic(env: &Env, rig_id: &str, topic: &str, body: &str) {
+    let payload =
+        serde_json::to_vec(&serde_json::json!({"topic": topic, "body": body})).expect("payload");
+    let response = post_json(env, rig_id, "topic", &payload);
+    assert_eq!(response.status, 201, "len {}", response.body.len());
+}
+
 fn post_body(env: &Env, rig_id: &str, body: &str) {
     let payload = serde_json::to_vec(&serde_json::json!({"body": body})).expect("payload");
+    let response = post_json(env, rig_id, "send", &payload);
+    assert_eq!(response.status, 201, "len {}", response.body.len());
+}
+
+fn post_json(env: &Env, rig_id: &str, action: &str, payload: &[u8]) -> crewmux_api::Response {
     let socket = crewmux_api::daemon_socket(&env.rig_home);
     let client = crewmux_api::Client::over_uds(socket).with_timeout(Duration::from_secs(10));
-    let path = format!("/api/rigs/{rig_id}/chat/send");
-    let response = client.request("POST", &path, Some(&payload)).expect("post");
-    assert_eq!(response.status, 201, "len {}", response.body.len());
+    let path = format!("/api/rigs/{rig_id}/chat/{action}");
+    client.request("POST", &path, Some(payload)).expect("post")
 }
 
 fn spawn_reader(child: &mut Child) -> Receiver<String> {

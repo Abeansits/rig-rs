@@ -118,6 +118,7 @@ pub const CHAT_MESSAGE_TYPE: &str = "chat.message";
 /// Largest chat `body` the daemon stores.
 ///
 /// JSON can expand one body byte to `\u00XX` (six bytes). The watch client
-/// sizes its line cap from this constant times six, plus the SSE envelope,
-/// and still stays under its 1 MiB HTTP chunk cap.
+/// sizes its line cap from this constant, the topic cap, and the sender cap,
+/// each times six, plus the SSE envelope, and still stays under its 1 MiB
+/// HTTP chunk cap.
 pub const MAX_CHAT_BODY: usize = 64 * 1024;

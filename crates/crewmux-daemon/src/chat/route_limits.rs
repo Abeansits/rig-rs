@@ -2,7 +2,7 @@
 
 use crewmux_api::MAX_CHAT_BODY;
 
-use super::route_support::{exchange, json, rig, seat_headers, seated};
+use super::route_support::{enc, exchange, json, rig, seat_headers, seated};
 use super::route_tests::Reader;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -177,6 +177,109 @@ async fn topic_body_is_capped_at_max_chat_body() {
         .and_then(|row| row.get("body"))
         .and_then(|v| v.as_str());
     assert_eq!(body.map(str::len), Some(MAX_CHAT_BODY));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn topic_longer_than_256_bytes_is_400() {
+    let harness = super::route_support::boot().await;
+    let rig = rig(&harness.app, "pair").await;
+    let name = "\"".repeat(257);
+    let topic = exchange(
+        &harness.sock,
+        "POST",
+        &format!("/api/rigs/{rig}/chat/topic"),
+        Some(topic_json(&name, "hi").into_bytes()),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(topic.status, 400, "{}", topic.body);
+    assert_eq!(json(&topic.body)["error"], "invalid topic");
+    let history = exchange(
+        &harness.sock,
+        "GET",
+        &format!("/api/rigs/{rig}/chat/history?topic={}", enc(&name)),
+        None,
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(history.status, 400, "{}", history.body);
+    assert_eq!(json(&history.body)["error"], "invalid topic");
+    let send = exchange(
+        &harness.sock,
+        "POST",
+        &format!("/api/rigs/{rig}/chat/send"),
+        Some(
+            serde_json::json!({"body": "hi", "topic": name})
+                .to_string()
+                .into_bytes(),
+        ),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(send.status, 400, "{}", send.body);
+    assert_eq!(json(&send.body)["error"], "invalid topic");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn overlong_sender_cursor_and_since_are_400() {
+    let harness = super::route_support::boot().await;
+    let rig = rig(&harness.app, "pair").await;
+    let long = "a".repeat(257);
+    let send = exchange(
+        &harness.sock,
+        "POST",
+        &format!("/api/rigs/{rig}/chat/send"),
+        Some(
+            serde_json::json!({"body": "hi", "sender": long})
+                .to_string()
+                .into_bytes(),
+        ),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(send.status, 400, "{}", send.body);
+    assert_eq!(json(&send.body)["error"], "invalid sender");
+    let history = format!("/api/rigs/{rig}/chat/history");
+    expect_400(
+        &harness.sock,
+        &format!("{history}?sender={}", enc(&long)),
+        "invalid sender",
+    )
+    .await;
+    expect_400(
+        &harness.sock,
+        &format!("{history}?after={}", enc(&long)),
+        "invalid cursor",
+    )
+    .await;
+    let since = "c".repeat(65);
+    expect_400(
+        &harness.sock,
+        &format!("{history}?since={}", enc(&since)),
+        "invalid since",
+    )
+    .await;
+    let topic = exchange(
+        &harness.sock,
+        "POST",
+        &format!("/api/rigs/{rig}/chat/topic"),
+        Some(
+            serde_json::json!({"topic": "plan", "sender": long})
+                .to_string()
+                .into_bytes(),
+        ),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(topic.status, 400, "{}", topic.body);
+    assert_eq!(json(&topic.body)["error"], "invalid sender");
+}
+
+async fn expect_400(sock: &std::path::Path, path: &str, error: &str) {
+    let response = exchange(sock, "GET", path, None, Vec::new()).await;
+    assert_eq!(response.status, 400, "{}", response.body);
+    assert_eq!(json(&response.body)["error"], error);
+    assert!(response.body.len() < 200, "len {}", response.body.len());
 }
 
 fn topic_json(topic: &str, body: &str) -> String {

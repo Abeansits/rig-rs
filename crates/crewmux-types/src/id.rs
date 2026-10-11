@@ -131,6 +131,9 @@ impl FromStr for SessionId {
     }
 }
 
+/// Longest rig or seat name, in bytes. A seat name is also the chat sender.
+pub const MAX_NAME_LEN: usize = 256;
+
 /// Rig name as written in a spec. Not an id.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -201,7 +204,7 @@ impl AsRef<str> for SeatName {
 }
 
 fn validate_name(text: String) -> Result<String, TypeError> {
-    if text.is_empty() || text.chars().any(char::is_control) {
+    if text.is_empty() || text.len() > MAX_NAME_LEN || text.chars().any(char::is_control) {
         return Err(TypeError::Name(text));
     }
     Ok(text)
@@ -209,6 +212,7 @@ fn validate_name(text: String) -> Result<String, TypeError> {
 
 fn validate_seat_name(text: String) -> Result<String, TypeError> {
     let ok = !text.is_empty()
+        && text.len() <= MAX_NAME_LEN
         && text
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
@@ -216,5 +220,20 @@ fn validate_seat_name(text: String) -> Result<String, TypeError> {
         Ok(text)
     } else {
         Err(TypeError::Name(text))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_NAME_LEN, RigName, SeatName};
+
+    #[test]
+    fn names_accept_256_bytes_and_reject_257() {
+        let ok = "a".repeat(MAX_NAME_LEN);
+        assert_eq!(RigName::new(&ok).expect("rig").as_str(), ok);
+        assert_eq!(SeatName::new(&ok).expect("seat").as_str(), ok);
+        let over = "a".repeat(MAX_NAME_LEN.saturating_add(1));
+        assert!(RigName::new(&over).is_err());
+        assert!(SeatName::new(over).is_err());
     }
 }

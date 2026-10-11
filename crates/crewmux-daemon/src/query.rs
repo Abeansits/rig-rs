@@ -2,7 +2,7 @@
 
 use crewmux_core::{LifecycleService, RigRepo, Seat, SeatRepo, SeatState};
 use crewmux_mux::{CaptureRange, MuxError};
-use crewmux_types::RigName;
+use crewmux_types::{MAX_NAME_LEN, RigName, SeatName};
 use serde_json::{Value, json};
 
 use crate::db::{read, write};
@@ -104,7 +104,7 @@ pub(crate) async fn down(app: &App, rig_name: Option<&str>) -> Result<Value, Err
 }
 
 async fn rig_exists(app: &App, name: &str) -> Result<bool, Error> {
-    let name = RigName::new(name).map_err(|err| Error::Message(err.to_string()))?;
+    let name = RigName::new(name).map_err(|_| Error::Message("invalid rig name".to_owned()))?;
     let found = read(&app.store, move |conn| conn.get_by_name(&name)).await?;
     Ok(found.is_some())
 }
@@ -153,6 +153,9 @@ async fn attached(app: &App, seat: &Seat) -> Result<bool, Error> {
 }
 
 async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
+    if name.len() > MAX_NAME_LEN || SeatName::new(name).is_err() {
+        return Err(Error::Message("invalid seat name".to_owned()));
+    }
     let seats = read(&app.store, |conn| conn.list_all()).await?;
     let mut live = Vec::new();
     let mut resting = Vec::new();

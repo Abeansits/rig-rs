@@ -8,6 +8,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crewmux_api::MAX_CHAT_BODY;
+use crewmux_types::{MAX_SENDER_LEN, MAX_TOPIC_LEN};
 
 use crate::autostart::ensure_daemon;
 use crate::error::Error;
@@ -72,10 +73,22 @@ pub(super) fn run(rig: &str, json: bool) -> Result<i32, Error> {
 
 /// JSON encodes a control byte as `\u00XX`. Quotes and backslashes expand less.
 const JSON_ESCAPE_PER_BYTE: usize = 6;
-/// SSE `id` / `event` lines plus the `ChatWatchEvent` object around `body`.
-const WATCH_ENVELOPE: usize = 8 * 1024;
-/// Largest SSE line watch will print. A max body, fully escaped, still fits.
-const MAX_LINE: usize = MAX_CHAT_BODY * JSON_ESCAPE_PER_BYTE + WATCH_ENVELOPE;
+/// SSE `data:` prefix plus JSON keys, ids, kind, and timestamp.
+///
+/// An empty body, topic, and sender make a `data:` line of about 230 bytes.
+const WATCH_SCAFFOLD: usize = 512;
+/// Largest SSE line watch will print.
+///
+/// Body, topic, and sender are each budgeted at [`JSON_ESCAPE_PER_BYTE`] so a
+/// max legal frame still fits under the 1 MiB HTTP chunk cap.
+const MAX_LINE: usize =
+    escaped(MAX_CHAT_BODY) + escaped(MAX_TOPIC_LEN) + escaped(MAX_SENDER_LEN) + WATCH_SCAFFOLD;
+
+const fn escaped(len: usize) -> usize {
+    len.saturating_mul(JSON_ESCAPE_PER_BYTE)
+}
+
+const _: () = assert!(MAX_LINE < 1_048_576);
 /// Repeated oversized-frame errors mean the stream is not making progress.
 const SKIP_LIMIT: u32 = 4;
 
@@ -160,18 +173,28 @@ fn oversized(err: &std::io::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_CHAT_BODY, WATCH_ENVELOPE, line_too_long};
+    use super::{MAX_CHAT_BODY, MAX_LINE, MAX_SENDER_LEN, MAX_TOPIC_LEN, line_too_long};
+    use crewmux_api::{CHAT_MESSAGE_TYPE, ChatWatchEvent, ChatWire};
 
     #[test]
-    fn escaped_quote_and_nul_bodies_fit_on_one_line() {
-        let quotes = MAX_CHAT_BODY
-            .saturating_mul(2)
-            .saturating_add(WATCH_ENVELOPE);
-        let nuls = MAX_CHAT_BODY
-            .saturating_mul(6)
-            .saturating_add(WATCH_ENVELOPE);
-        assert!(!line_too_long(quotes));
-        assert!(!line_too_long(nuls));
-        assert!(line_too_long(nuls.saturating_add(1)));
+    fn worst_case_escaped_frame_fits_under_the_chunk_cap() {
+        let id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let event = ChatWatchEvent {
+            id: id.to_owned(),
+            event_type: CHAT_MESSAGE_TYPE.to_owned(),
+            payload: ChatWire {
+                id: id.to_owned(),
+                rig_id: id.to_owned(),
+                sender: "\0".repeat(MAX_SENDER_LEN),
+                kind: "topic".to_owned(),
+                body: "\0".repeat(MAX_CHAT_BODY),
+                topic: Some("\"".repeat(MAX_TOPIC_LEN)),
+                created_at: "2026-10-11 21:15:00".to_owned(),
+            },
+        };
+        let data = serde_json::to_string(&event).expect("json");
+        let line = format!("data: {data}");
+        assert!(!line_too_long(line.len()), "len {}", line.len());
+        assert!(line_too_long(MAX_LINE.saturating_add(1)));
     }
 }

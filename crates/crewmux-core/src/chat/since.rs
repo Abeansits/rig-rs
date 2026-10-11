@@ -13,12 +13,18 @@ use crate::clock::Timestamp;
 
 use super::error::ChatError;
 
+/// Longest `since` query, in bytes. Accepted stamps are shorter than this.
+pub const MAX_SINCE_LEN: usize = 64;
+
 /// Parse `value` the way chat history compares `since`.
 ///
 /// # Errors
 ///
 /// Returns [`ChatError::UnparseableSince`] when `value` is not one of the accepted shapes.
 pub fn parse_since(value: &str, now: Timestamp) -> Result<Timestamp, ChatError> {
+    if value.len() > MAX_SINCE_LEN {
+        return Err(ChatError::UnparseableSince("too long".to_owned()));
+    }
     if value == "now" {
         return Ok(now);
     }
@@ -352,5 +358,13 @@ mod tests {
         let rejected = rejected_since("a\nb\u{1b}c");
         assert!(rejected.contains("a\\x0ab\\x1bc"));
         assert!(!rejected.contains('\n'));
+    }
+
+    #[test]
+    fn overlong_since_is_rejected_without_the_text() {
+        let blob = "s".repeat(super::MAX_SINCE_LEN.saturating_add(1));
+        let err = parse_since(&blob, Timestamp::from_millis(0)).expect_err("long");
+        assert!(matches!(err, ChatError::UnparseableSince(ref text) if text == "too long"));
+        assert!(!err.to_string().contains(&blob));
     }
 }

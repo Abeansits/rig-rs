@@ -22,7 +22,8 @@ pub use client::{
 };
 pub use crewmux_core::SeatState;
 pub use crewmux_types::{
-    LauncherKind, PodName, ReadinessCode, RigName, RuntimeKind, SeatKey, SeatName, TmuxSession,
+    LauncherKind, MAX_TOPIC_LEN, PodName, ReadinessCode, RigName, RuntimeKind, SeatKey, SeatName,
+    TmuxSession,
 };
 pub use dirs::{create_private, open_private};
 pub use endpoint::{
