@@ -19,6 +19,7 @@ mod hub;
 mod parse;
 mod paste;
 mod reap;
+mod session_kill;
 mod tmux_mux;
 mod types;
 

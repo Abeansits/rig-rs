@@ -70,7 +70,7 @@ fn check_case_rows(rows: &[LedgerRow], errors: &mut Vec<String>) {
     }
 }
 
-fn split_case(ts_path: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_case(ts_path: &str) -> Option<(&str, &str)> {
     let (parent, case_name) = ts_path.split_once(" > ")?;
     if parent.is_empty() || case_name.is_empty() || case_name.contains(" > ") {
         return None;

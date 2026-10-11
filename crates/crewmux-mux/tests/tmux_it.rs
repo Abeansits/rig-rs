@@ -566,6 +566,80 @@ mod suite {
         }
 
         #[tokio::test]
+        async fn kill_session_leaves_no_windows_or_pane_processes() {
+            let server = Server::boot().await;
+            let before = control_window_ids(&server).await;
+            let mut pids = Vec::new();
+            let mut windows = Vec::new();
+            for name in ["seat-a", "seat-b", "seat-c"] {
+                let pane = server
+                    .mux
+                    .create_session(&sleep_spec(name))
+                    .await
+                    .expect(name);
+                pids.push(pane_pid(&server, &pane).await);
+                let listed = server.mux.list_panes().await.expect("panes");
+                let info = listed
+                    .iter()
+                    .find(|info| info.session == pane.session)
+                    .expect("seat pane");
+                windows.push(info.window_id.clone());
+            }
+            let during = control_window_ids(&server).await;
+            assert!(
+                during.len() >= before.len().saturating_add(3),
+                "linked {during:?} baseline {before:?}"
+            );
+            for name in ["seat-a", "seat-b", "seat-c"] {
+                server.mux.kill_session(name).await.expect(name);
+                assert!(!server.mux.has_session(name).await.expect("has"));
+            }
+            let after = control_window_ids(&server).await;
+            assert_eq!(after, before, "control windows left after kill");
+            let panes = server.mux.list_panes().await.expect("panes");
+            assert!(panes.is_empty(), "{panes:?}");
+            let all = tmux_ok(
+                &server.socket,
+                &["list-windows", "-a", "-F", "#{window_id}|#{session_name}"],
+            )
+            .await;
+            for window in &windows {
+                assert!(!all.lines().any(|line| line.starts_with(window)), "{all}");
+            }
+            for name in ["seat-a", "seat-b", "seat-c"] {
+                assert!(!all.lines().any(|line| line.ends_with(name)), "{all}");
+            }
+            for pid in pids {
+                assert!(!process_alive(pid).await, "pane process {pid} still alive");
+            }
+        }
+
+        async fn control_window_ids(server: &Server) -> Vec<String> {
+            let text = tmux_ok(
+                &server.socket,
+                &["list-windows", "-t", CONTROL_SESSION, "-F", "#{window_id}"],
+            )
+            .await;
+            let mut ids: Vec<String> = text
+                .lines()
+                .map(|line| line.trim().to_owned())
+                .filter(|line| !line.is_empty())
+                .collect();
+            ids.sort();
+            ids
+        }
+
+        async fn process_alive(pid: u32) -> bool {
+            Command::new("ps")
+                .args(["-p", &pid.to_string()])
+                .output()
+                .await
+                .expect("ps")
+                .status
+                .success()
+        }
+
+        #[tokio::test]
         async fn copy_mode_detected() {
             let server = Server::boot().await;
             let pane = server

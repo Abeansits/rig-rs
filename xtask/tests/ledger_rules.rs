@@ -5,7 +5,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use xtask::diff::{PeId, pe_ids_in, workspace_root};
-use xtask::ledger::{LedgerRow, LedgerStatus, parse_csv, report, to_csv, validate, waiver_for};
+use xtask::ledger::{
+    LedgerRow, LedgerStatus, check_case_titles, parse_csv, report, to_csv, validate, waiver_for,
+};
 
 fn row(path: &str, status: LedgerStatus) -> LedgerRow {
     LedgerRow {
@@ -230,7 +232,7 @@ fn seeded_ledger_is_check_green() {
     let root = workspace_root();
     let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     let rows = parse_csv(&text).unwrap();
-    assert_eq!(rows.len(), 1326);
+    assert_eq!(rows.len(), 1324);
     for row in &rows {
         match row.status {
             LedgerStatus::Todo => {
@@ -256,4 +258,84 @@ fn seeded_ledger_is_check_green() {
     assert!(printed.contains("| todo |"));
     assert!(printed.contains("| waived |"));
     assert!(printed.contains("(unassigned)"));
+}
+
+#[test]
+fn bogus_case_name_fails_when_the_ts_checkout_is_present() {
+    let dir = tempfile::tempdir().expect("temp");
+    let rel = "packages/daemon/test/sample.test.ts";
+    let file = dir.path().join(rel);
+    fs::create_dir_all(file.parent().expect("parent")).expect("dir");
+    fs::write(
+        &file,
+        "it(`${mode}: preserves exact literal names and session-id reads`, () => {});\n\
+         it.each(stores)(\"%s retains a native config symlink and its target permissions on successful writes\", () => {});\n\
+         it.each<Kind>([\"a\"])(\"direct detail %s still records failure\", () => {});\n\
+         it(\"tmux available -> pass\", () => {});\n\
+         it(\"before regex\", () => { x.toMatch(/^a '[^']+' b$/); });\n\
+         it(\"after a regex literal\", () => {});\n",
+    )
+    .expect("write");
+    let errors = check_case_titles(&[case(rel, "rewrites dot and colon")], dir.path());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("rewrites dot and colon")),
+        "{errors:?}"
+    );
+    assert_eq!(
+        check_case_titles(
+            &[case(
+                rel,
+                "preserves exact literal names and session-id reads"
+            )],
+            dir.path()
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check_case_titles(
+            &[case(
+                rel,
+                "%s retains a native config symlink and its target permissions on successful writes"
+            )],
+            dir.path()
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check_case_titles(
+            &[case(rel, "direct detail %s still records failure")],
+            dir.path()
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check_case_titles(&[case(rel, "after a regex literal")], dir.path()),
+        Vec::<String>::new()
+    );
+    let substring = check_case_titles(&[case(rel, "pass")], dir.path());
+    assert!(
+        substring.iter().any(|error| error.contains("pass")),
+        "{substring:?}"
+    );
+    let missing = check_case_titles(
+        &[case("packages/missing.test.ts", "tmux available -> pass")],
+        dir.path(),
+    );
+    assert!(
+        missing.iter().any(|error| error.contains("cannot read")),
+        "{missing:?}"
+    );
+}
+
+fn case(parent: &str, name: &str) -> LedgerRow {
+    LedgerRow {
+        ts_path: format!("{parent} > {name}"),
+        slice: Some("1b".to_owned()),
+        status: LedgerStatus::Ported,
+        rust_test: Some("sample".to_owned()),
+        pe_id: None,
+        note: String::new(),
+    }
 }
