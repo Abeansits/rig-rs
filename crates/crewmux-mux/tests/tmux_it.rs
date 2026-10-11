@@ -361,7 +361,7 @@ mod suite {
             spec.argv = vec![
                 "bash".into(),
                 "-c".into(),
-                format!("while [ ! -e {path} ]; do sleep 0.01; done; exit 7"),
+                format!("while [ ! -e {path} ]; do :; done; exit 7"),
             ];
             spec.remain_on_exit = true;
             let mut deaths = server.mux.death_events();
