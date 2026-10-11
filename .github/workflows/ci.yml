@@ -156,11 +156,13 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-llvm-cov,cargo-nextest
-      - name: llvm-cov (nextest, ci profile)
+      - name: llvm-cov (nextest, coverage profile)
         env:
           INSTA_UPDATE: "no"
         run: |
-          cargo llvm-cov nextest --workspace --all-features --profile ci --no-tests=warn --locked --lcov --output-path lcov.info
+          # coverage profile excludes ::tmux_it:: (latency budget fails under
+          # instrumentation; tmux-matrix covers them) and ::differential::.
+          cargo llvm-cov nextest --workspace --all-features --profile coverage --no-tests=warn --locked --lcov --output-path lcov.info
           cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -176,7 +178,15 @@ jobs:
       matrix:
         # 3.3a = oldest supported, 3.5a = ADR 0005 reference, 3.8 = latest tmux/tmux release.
         # macOS keeps brew tmux in the nextest job (from-source on macOS is slow/fragile).
-        tmux: ["3.3a", "3.5a", "3.8"]
+        # sha256 pins the GitHub release tarball; verified with sha256sum -c before extract.
+        # Cross-checked: FreeBSD ports + Debian/PureOS (3.3a/3.5a), Homebrew + FreeBSD (3.8).
+        include:
+          - tmux: "3.3a"
+            sha256: "e4fd347843bd0772c4f48d6dde625b0b109b7a380ff15db21e97c11a4dcdf93f"
+          - tmux: "3.5a"
+            sha256: "16216bd0877170dfcc64157085ba9013610b12b082548c7c9542cc0103198951"
+          - tmux: "3.8"
+            sha256: "e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Cache tmux build
@@ -184,17 +194,19 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.local/tmux-${{ matrix.tmux }}
-          key: tmux-${{ matrix.tmux }}-${{ runner.os }}-${{ runner.arch }}-v1
+          key: tmux-${{ matrix.tmux }}-${{ runner.os }}-${{ runner.arch }}-v2
       - name: Build tmux ${{ matrix.tmux }} from source
         if: steps.tmux-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
           V: ${{ matrix.tmux }}
+          EXPECTED_SHA256: ${{ matrix.sha256 }}
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq libevent-dev libncurses-dev bison pkg-config
           curl -fsSL -o tmux.tgz "https://github.com/tmux/tmux/releases/download/${V}/tmux-${V}.tar.gz"
+          echo "${EXPECTED_SHA256}  tmux.tgz" | sha256sum -c -
           tar xzf tmux.tgz
           cd "tmux-${V}"
           ./configure --prefix="$HOME/.local/tmux-${V}" >/dev/null

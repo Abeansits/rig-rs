@@ -20,6 +20,15 @@ default-filter = "not test(/::differential::/)"
 [profile.ci.junit]
 path = "junit.xml"
 
+# Coverage under llvm-cov: skip real-tmux (latency budget fails under instrumentation;
+# tmux-matrix covers those tests) and differential (needs TS OpenRig).
+[profile.coverage]
+retries = 0
+fail-fast = false
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 3 }
+default-filter = "not (test(/::tmux_it::/) | test(/::differential::/))"
+
 [profile.slow]
 fail-fast = false
 slow-timeout = { period = "120s", terminate-after = 5 }
