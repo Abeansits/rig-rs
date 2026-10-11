@@ -346,23 +346,33 @@ mod suite {
         }
 
         async fn hook_trial(server: &Server, trial: u32) -> Duration {
-            let marker = scratch().join(format!("armed-{trial}"));
+            let dir = scratch();
+            let marker = dir.join(format!("armed-{trial}"));
+            let release = dir.join(format!("go-{trial}"));
+            let made = std::process::Command::new("mkfifo")
+                .arg(&release)
+                .status()
+                .expect("mkfifo");
+            assert!(made.success(), "mkfifo {}", release.display());
             let mut spec = sleep_spec(&format!("hook-{trial}"));
-            // A foreground `sleep` swallows the signal in dash/bash, so the
-            // trap never runs. Background sleep plus `wait` lets the shell
-            // exit 7. Ubuntu's apt tmux 3.4 drops the control-mode doorbell
-            // when the pane dies from SIGTERM, so arm a HUP trap and wait
-            // until the marker exists before signaling HUP.
+            // Apt tmux 3.4 (systemd cgroups) does not deliver the pane-died
+            // doorbell within 500ms for an external TERM or HUP: `wait` defers
+            // the trap, and the signal never becomes a `PaneDied`. Arm the HUP
+            // trap, then release the shell with a fifo byte so it exits 7 the
+            // same way `fast_exit_still_arms_the_hook` does. The clock starts
+            // when that byte is in the pipe.
             spec.env
                 .insert("RIG_ARMED".into(), marker.display().to_string());
+            spec.env
+                .insert("RIG_GO".into(), release.display().to_string());
             spec.argv = vec![
                 "bash".into(),
                 "-c".into(),
-                "trap 'exit 7' HUP; touch \"$RIG_ARMED\"; sleep 120 & wait".into(),
+                "trap 'exit 7' HUP; touch \"$RIG_ARMED\"; read < \"$RIG_GO\"; exit 7".into(),
             ];
             spec.remain_on_exit = true;
+            let mut deaths = server.mux.death_events();
             let pane = server.mux.create_session(&spec).await.expect("create");
-            let pid = pane_pid(server, &pane).await;
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 if tokio::fs::try_exists(&marker).await.expect("marker") {
@@ -371,11 +381,14 @@ mod suite {
                 assert!(Instant::now() < deadline, "trap was not armed");
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            let mut deaths = server.mux.death_events();
-            let start = Instant::now();
-            signal(pid, "HUP");
+            let released = tokio::task::spawn_blocking(move || {
+                std::fs::write(&release, b"\n").expect("release");
+                Instant::now()
+            })
+            .await
+            .expect("release thread");
             let event = wait_death(&mut deaths, Duration::from_millis(500)).await;
-            let elapsed = start.elapsed();
+            let elapsed = released.elapsed();
             match event {
                 MuxEvent::PaneDied { status, pane_id } => {
                     assert_eq!(Some(pane_id).as_ref(), pane.pane_id.as_ref());

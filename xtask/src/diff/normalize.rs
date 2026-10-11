@@ -165,7 +165,9 @@ fn apply_all(
     patterns: &Patterns,
     masks: &mut Masks,
 ) -> String {
-    let mut current = text.to_owned();
+    // dash prints this when tmux is spawned from a deleted cwd. It is not part
+    // of the OpenRig error, and it flickers between CI and a warm local daemon.
+    let mut current = text.replace("sh: 0: getcwd() failed: No such file or directory\n", "");
     for rule in rules {
         current = apply_one(&current, rule, roots, patterns, masks);
     }

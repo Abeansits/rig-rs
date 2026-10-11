@@ -7,6 +7,6 @@ expression: "ts:stub-seat"
   "files": [],
   "json": null,
   "stderr": "",
-  "stdout": "{\"error\":\"Source is YAML but not a valid rig spec: seats: unknown key \\\"seats\\\"; refusing the spec because normalization would otherwise discard it and alter the requested topology\"}\n[]\n{\"ok\":false,\"sessionName\":\"one\",\"reason\":\"session_missing\",\"error\":\"Session 'one' not found: tmux reports no session with this name. Nothing was captured. Check available sessions with: rig ps --nodes\"}\n{\"ok\":false,\"error\":{\"code\":\"commander.missingArgument\",\"message\":\"missing required argument 'rig'\"}}\n",
+  "stdout": "{\"error\":\"Source is YAML but not a valid rig spec: seats: unknown key \\\"seats\\\"; refusing the spec because normalization would otherwise discard it and alter the requested topology\"}\n[]\n{\"ok\":false,\"sessionName\":\"one\",\"reason\":\"tmux_unavailable\",\"error\":\"The tmux server could not be reached (Command failed: tmux has-session -t '=one'\\nerror connecting to <PATH:1> (No such file or directory)\\n). Whether session 'one' exists was not determined. Nothing was captured.\"}\n{\"ok\":false,\"error\":{\"code\":\"commander.missingArgument\",\"message\":\"missing required argument 'rig'\"}}\n",
   "tmux_argv": []
 }

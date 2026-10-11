@@ -72,3 +72,11 @@ fn custom_rule_replaces_every_match_with_the_static_string() {
     let out = normalize_text("secret-1 and secret-2", &[rule], &[]).unwrap();
     assert_eq!(out, "<SECRET> and <SECRET>");
 }
+
+#[test]
+fn dash_getcwd_noise_is_stripped() {
+    let text =
+        "tmux has-session\nsh: 0: getcwd() failed: No such file or directory\nerror connecting\n";
+    let out = normalize_text(text, &[], &[]).unwrap();
+    assert_eq!(out, "tmux has-session\nerror connecting\n");
+}
