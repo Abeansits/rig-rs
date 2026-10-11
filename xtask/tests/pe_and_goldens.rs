@@ -155,6 +155,21 @@ fn pe_003_covers_stdout_only() {
 }
 
 #[test]
+fn pe_008_is_the_tmux_attach_exception() {
+    let root = workspace_root();
+    let text = fs::read_to_string(root.join("design/parity-exceptions.md")).unwrap();
+    let ids = pe_ids_in(&text);
+    assert!(ids.iter().any(|id| id.as_str() == "PE-008"));
+    assert!(text.contains("## PE-008: `rig attach` execs tmux"));
+    assert!(!text.contains("## PE-004:"));
+    let ledger = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
+    assert!(ledger.contains(
+        "\"packages/cli/test/attach.test.ts\",\"1\",\"diverged\",\"attach_execs_exact_tmux_target\",\"PE-008\""
+    ));
+    assert!(!ledger.contains("PE-004"));
+}
+
+#[test]
 fn pe_007_covers_stdout_and_exit() {
     let text = fs::read_to_string(workspace_root().join("design/parity-exceptions.md")).unwrap();
     let covers = covers_for(&text, &PeId::parse("PE-007").unwrap()).unwrap();

@@ -30,7 +30,7 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. Delete this heading, and the two `.rs.snap` files, when the CLI prints the same command names and `0.6.9` version text. The harness then reports `stale exception` because the Rust output no longer matches the snapshot (or the two sides are equal).
 - **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`. `excepted_exit_code_is_unexpected`, `excepted_stderr_panic_is_unexpected`, and `excepted_extra_tmux_call_is_unexpected` each return `Unexpected`. `changed_rust_snapshot_is_stale` reports `stale exception`.
 
-## PE-004: `rig attach` execs tmux rather than `rig attach --self`
+## PE-008: `rig attach` execs tmux rather than `rig attach --self`
 
 - **TS behaviour:** `packages/cli` `rig attach --self` attaches the operator's terminal through the TypeScript client.
 - **Rust behaviour:** acceptance criterion 7 execs `tmux -L rig-rs attach -t =<session>` (exact-match target). An unknown seat exits 1.

@@ -12,7 +12,7 @@
 "packages/cli/test/ask-wake.test.ts","","todo","","",""
 "packages/cli/test/ask.test.ts","","todo","","",""
 "packages/cli/test/atomic-text-write.test.ts","","todo","","",""
-"packages/cli/test/attach.test.ts","1","diverged","attach_execs_exact_tmux_target","PE-004","AC7 execs tmux attach; TS uses attach --self"
+"packages/cli/test/attach.test.ts","1","diverged","attach_execs_exact_tmux_target","PE-008","AC7 execs tmux attach; TS uses attach --self"
 "packages/cli/test/b8-probe-honesty.test.ts","","todo","","",""
 "packages/cli/test/bin-wrapper.test.ts","","todo","","",""
 "packages/cli/test/bootstrap-http-errors.test.ts","","todo","","",""

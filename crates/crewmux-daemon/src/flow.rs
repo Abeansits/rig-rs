@@ -149,6 +149,7 @@ async fn capture_contains_the_prompt_and_lines_are_bounded() {
     assert_eq!(bounded.get("lines").and_then(Value::as_u64), Some(1));
 }
 
+/// PE-008: attach argv is `tmux -L rig-rs attach -t =<session>`.
 #[tokio::test]
 async fn attach_argv_uses_an_exact_session_target() {
     let (app, _mux) = harness(None).await;

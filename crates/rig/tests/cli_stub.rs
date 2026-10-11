@@ -73,6 +73,7 @@ fn capture_lines_are_bounded() {
     assert_eq!(shot.get("lines").and_then(Value::as_u64), Some(1));
 }
 
+/// PE-008: `rig attach` execs `tmux -L rig-rs attach -t =<session>`.
 #[test]
 fn attach_execs_exact_tmux_target() {
     let env = Env::new();
@@ -107,6 +108,7 @@ fn attach_execs_exact_tmux_target() {
     );
 }
 
+/// PE-008: an unknown seat exits 1.
 #[test]
 fn attach_unknown_seat_exits_1() {
     let env = Env::new();
