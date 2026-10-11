@@ -2,7 +2,8 @@
 //!
 //! Slice 0b added the blocking HTTP/1.1 client. Slice 13 adds the read models
 //! (`ListSeats`, `AttachInfo`, hydrate snapshot) and the `GET /api/events` path.
-//! Slice 1 must serve the read routes and reconcile `StreamEvent` with its events.
+//! Slice 1 must serve the read routes. `StreamEvent` is the slice 4 envelope
+//! (id, `type`, payload). The TUI follows that shape; it does not define a second one.
 
 mod client;
 mod endpoint;
@@ -22,5 +23,5 @@ pub use endpoint::{
 pub use error::Error;
 pub use model::{
     ActivityItem, AttachInfo, HealthItem, HealthSummary, LauncherConfig, SeatList, SeatView,
-    Snapshot, StreamEvent,
+    Snapshot, StreamEvent, StreamKind, StreamPayload,
 };

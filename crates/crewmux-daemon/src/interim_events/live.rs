@@ -11,24 +11,41 @@ use tokio_util::sync::CancellationToken;
 
 use super::{EventHub, serve};
 
-#[tokio::test]
-async fn publishes_a_seat_death_as_sse() {
-    let dir = tempfile::tempdir().expect("temp");
+async fn started() -> Option<(
+    tempfile::TempDir,
+    std::path::PathBuf,
+    EventHub,
+    CancellationToken,
+    tokio::task::JoinHandle<Result<(), super::Error>>,
+)> {
+    let dir = tempfile::tempdir().ok()?;
     let path = dir.path().join("daemon.sock");
     let hub = EventHub::new();
     let cancel = CancellationToken::new();
     let bound = path.clone();
     let hub_task = hub.clone();
     let serve_cancel = cancel.clone();
-    let server = tokio::spawn(async move {
-        serve(&bound, hub_task, serve_cancel).await.expect("serve");
-    });
+    let server = tokio::spawn(async move { serve(&bound, hub_task, serve_cancel).await });
     for _ in 0..50 {
-        if tokio::fs::try_exists(&path).await.expect("exists") {
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    Some((dir, path, hub, cancel, server))
+}
+
+fn data_json(body: &str) -> serde_json::Value {
+    let data = body
+        .lines()
+        .find_map(|line| line.strip_prefix("data:"))
+        .unwrap_or("");
+    serde_json::from_str(data.trim()).unwrap_or(serde_json::Value::Null)
+}
+
+#[tokio::test]
+async fn publishes_a_seat_death_as_sse() {
+    let (_dir, path, hub, cancel, server) = started().await.expect("start");
     let mode = tokio::fs::metadata(&path)
         .await
         .expect("meta")
@@ -65,12 +82,69 @@ async fn publishes_a_seat_death_as_sse() {
         .await
         .expect("event timeout")
         .expect("event read");
-    let body = String::from_utf8_lossy(tmp.get(..n).unwrap_or(&[]));
-    assert!(body.contains("seat_died"));
-    assert!(body.contains("seat-1"));
+    let body = String::from_utf8_lossy(tmp.get(..n).unwrap_or(&[])).into_owned();
+    let value = data_json(&body);
+    assert_eq!(
+        value.get("type").and_then(|item| item.as_str()),
+        Some("seat_died")
+    );
+    assert!(
+        value
+            .get("id")
+            .and_then(serde_json::Value::as_u64)
+            .is_some()
+    );
+    assert_eq!(
+        value
+            .get("payload")
+            .and_then(|item| item.get("seat"))
+            .and_then(|item| item.as_str()),
+        Some("seat-1")
+    );
+    assert!(value.get("seat").is_none());
+    assert!(body.lines().any(|line| line.starts_with("id:")));
     cancel.cancel();
     match tokio::time::timeout(Duration::from_secs(2), server).await {
-        Ok(Ok(()) | Err(_)) | Err(_) => {}
+        Ok(Ok(_) | Err(_)) | Err(_) => {}
+    }
+}
+
+#[tokio::test]
+async fn resume_without_a_backlog_emits_a_gap() {
+    let (_dir, path, hub, cancel, server) = started().await.expect("start");
+    hub.publish(&DomainEvent::SeatDied {
+        seat: SeatId::parse("seat-1").expect("seat"),
+    });
+    let mut stream = UnixStream::connect(&path).await.expect("connect");
+    stream
+        .write_all(
+            b"GET /api/events?last_event_id=1 HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\nLast-Event-ID: 1\r\n\r\n",
+        )
+        .await
+        .expect("request");
+    let mut buf = Vec::new();
+    let mut tmp = [0_u8; 2048];
+    let body = loop {
+        let n = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut tmp))
+            .await
+            .expect("timeout")
+            .expect("read");
+        buf.extend_from_slice(tmp.get(..n).unwrap_or(&[]));
+        let text = String::from_utf8_lossy(&buf);
+        if text.contains("data:") {
+            break text.into_owned();
+        }
+    };
+    let value = data_json(&body);
+    assert_eq!(
+        value.get("type").and_then(|item| item.as_str()),
+        Some("gap")
+    );
+    assert!(value.get("payload").is_none());
+    assert!(!body.contains("seat_died"));
+    cancel.cancel();
+    match tokio::time::timeout(Duration::from_secs(2), server).await {
+        Ok(Ok(_) | Err(_)) | Err(_) => {}
     }
 }
 

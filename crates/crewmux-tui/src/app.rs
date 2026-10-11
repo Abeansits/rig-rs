@@ -84,9 +84,9 @@ pub async fn run(config: Config) -> Result<(), Error> {
         &tracker,
         stream_cancel,
         std::time::Duration::from_secs(1),
-        move || {
+        move |last_id| {
             let socket = stream_socket.clone();
-            async move { sse::open_unix(&socket).await }
+            async move { sse::open_unix(&socket, last_id).await }
         },
         event_tx,
         status_tx,

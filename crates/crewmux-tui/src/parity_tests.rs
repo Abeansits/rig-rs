@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crewmux_api::RigId;
+use crewmux_api::{RigId, StreamEvent, StreamKind};
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -288,7 +288,7 @@ async fn backs_off_until_notifications_resume() {
         connect_loop(
             task_cancel,
             Duration::from_millis(80),
-            move || {
+            move |_last_id| {
                 let n = count_open.fetch_add(1, Ordering::SeqCst) + 1;
                 arrivals_open.lock().push(start.elapsed());
                 let open_cancel = open_cancel.clone();
@@ -351,6 +351,88 @@ async fn backs_off_until_notifications_resume() {
     task.await.expect("loop");
     drain.abort();
     assert_eq!(arrivals.lock().len(), 5);
+}
+
+#[test]
+fn gap_event_requests_a_full_refresh() {
+    let state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
+    let event = StreamEvent {
+        id: 9,
+        kind: StreamKind::Gap,
+        payload: None,
+    };
+    let (next, cmds) = update(state, Msg::Live(event));
+    assert!(next.load.stale);
+    assert!(next.load.in_flight);
+    assert_eq!(cmds, vec![Cmd::Hydrate]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn reconnect_passes_the_last_event_id() {
+    use std::time::Duration;
+    let seen = Arc::new(Mutex::new(Vec::<Option<u64>>::new()));
+    let count = Arc::new(AtomicUsize::new(0));
+    let cancel = CancellationToken::new();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(8);
+    let (status_tx, mut status_rx) = tokio::sync::mpsc::channel(64);
+    let drain = tokio::spawn(async move { while status_rx.recv().await.is_some() {} });
+    let open_cancel = cancel.clone();
+    let seen_open = Arc::clone(&seen);
+    let count_open = Arc::clone(&count);
+    let task_cancel = cancel.clone();
+    let task = tokio::spawn(async move {
+        connect_loop(
+            task_cancel,
+            Duration::from_millis(80),
+            move |last_id| {
+                seen_open.lock().push(last_id);
+                let n = count_open.fetch_add(1, Ordering::SeqCst) + 1;
+                let open_cancel = open_cancel.clone();
+                async move {
+                    if n == 1 {
+                        chunk(
+                            b"id: 4\ndata: {\"id\":4,\"type\":\"seat_died\",\"payload\":{\"seat\":\"s1\"}}\n\n",
+                        )
+                    } else {
+                        Opened::Chunks(Box::pin(futures_util::stream::unfold(
+                            open_cancel,
+                            |token| async move {
+                                token.cancelled().await;
+                                None
+                            },
+                        )))
+                    }
+                }
+            },
+            event_tx,
+            status_tx,
+        )
+        .await;
+    });
+    for delay in [0_u64, 80] {
+        if delay > 0 {
+            tokio::time::advance(Duration::from_millis(delay)).await;
+        }
+        for _ in 0..30 {
+            tokio::task::yield_now().await;
+        }
+    }
+    let mut notes = Vec::new();
+    while let Ok(value) = event_rx.try_recv() {
+        notes.push(value);
+    }
+    assert_eq!(
+        notes
+            .first()
+            .and_then(|value| value.get("id"))
+            .and_then(serde_json::Value::as_u64),
+        Some(4)
+    );
+    assert_eq!(seen.lock().as_slice(), &[None, Some(4)]);
+    cancel.cancel();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    task.await.expect("loop");
+    drain.abort();
 }
 
 fn chunk(bytes: &'static [u8]) -> Opened {

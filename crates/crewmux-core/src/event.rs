@@ -1,6 +1,6 @@
 //! Pure domain events. Slice 1 owns the lifecycle set (`RigCreated`, `SeatLaunched`, …).
-//! The variants here feed the temporary `GET /api/events` fan-out. Slice 4 owns that
-//! route and should replace the fan-out; reconcile this enum when that lands.
+//! The variants here feed the temporary `GET /api/events` fan-out. Slice 4's
+//! envelope wraps them; this enum is not the wire format.
 
 use crewmux_types::{SeatId, SeatState};
 

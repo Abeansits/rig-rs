@@ -1,7 +1,7 @@
 // Derived from openrig packages/tui/src/state.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! Pure update. This function does not read the clock, the environment, or the terminal.
 
-use crewmux_api::{SeatId, SeatState, StreamEvent};
+use crewmux_api::{SeatId, SeatState, StreamEvent, StreamKind, StreamPayload};
 
 use crate::action::Action;
 use crate::msg::{
@@ -19,7 +19,7 @@ pub fn update(mut state: State, msg: Msg) -> (State, Vec<Cmd>) {
         Msg::Mouse(mouse) => on_mouse(&mut state, mouse, &mut cmds),
         Msg::Resize(cols, rows) => on_resize(&mut state, cols, rows),
         Msg::Hydrated(result) => on_hydrated(&mut state, result),
-        Msg::Live(event) => on_live(&mut state, event),
+        Msg::Live(event) => on_live(&mut state, &event, &mut cmds),
         Msg::Conn(conn) => on_conn(&mut state, conn),
         Msg::Tick => on_tick(&mut state),
         Msg::AttachReturned(outcome) => on_returned(&mut state, outcome, &mut cmds),
@@ -143,28 +143,56 @@ fn apply_snapshot(state: &mut State, snapshot: crewmux_api::Snapshot) {
     }
 }
 
-fn on_live(state: &mut State, event: StreamEvent) {
-    match event {
-        StreamEvent::SeatStateChanged { seat, state: next } => {
-            set_seat_state(state, &seat, next);
-            flash(state, RowKey::Seat(seat));
+fn on_live(state: &mut State, event: &StreamEvent, cmds: &mut Vec<Cmd>) {
+    match event.kind {
+        StreamKind::Gap => {
+            state.load.stale = true;
+            request_hydrate(state, cmds);
         }
-        StreamEvent::SeatDied { seat } => {
-            set_seat_state(state, &seat, SeatState::Dead);
-            flash(state, RowKey::Seat(seat));
-        }
-        StreamEvent::Activity { seat, summary } => {
-            state.snapshot.activity.insert(
-                0,
-                crewmux_api::ActivityItem {
-                    seat: seat.clone(),
-                    summary,
-                },
-            );
-            state.snapshot.activity.truncate(20);
-            flash(state, RowKey::Seat(seat));
-        }
+        StreamKind::SeatStateChanged => apply_state_change(state, event.payload.as_ref()),
+        StreamKind::SeatDied => apply_death(state, event.payload.as_ref()),
+        StreamKind::Activity => apply_activity(state, event.payload.as_ref()),
     }
+}
+
+fn apply_state_change(state: &mut State, payload: Option<&StreamPayload>) {
+    let Some(payload) = payload else {
+        return;
+    };
+    let Some(next) = payload.state.clone() else {
+        return;
+    };
+    let seat = payload.seat.clone();
+    set_seat_state(state, &seat, next);
+    flash(state, RowKey::Seat(seat));
+}
+
+fn apply_death(state: &mut State, payload: Option<&StreamPayload>) {
+    let Some(payload) = payload else {
+        return;
+    };
+    let seat = payload.seat.clone();
+    set_seat_state(state, &seat, SeatState::Dead);
+    flash(state, RowKey::Seat(seat));
+}
+
+fn apply_activity(state: &mut State, payload: Option<&StreamPayload>) {
+    let Some(payload) = payload else {
+        return;
+    };
+    let Some(summary) = payload.summary.clone() else {
+        return;
+    };
+    let seat = payload.seat.clone();
+    state.snapshot.activity.insert(
+        0,
+        crewmux_api::ActivityItem {
+            seat: seat.clone(),
+            summary,
+        },
+    );
+    state.snapshot.activity.truncate(20);
+    flash(state, RowKey::Seat(seat));
 }
 
 fn set_seat_state(state: &mut State, id: &SeatId, next: SeatState) {

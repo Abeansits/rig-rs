@@ -98,35 +98,50 @@ impl Snapshot {
     }
 }
 
-/// Client-side live event on `GET /api/events` (ADR-0006).
+/// Envelope on `GET /api/events`.
 ///
-/// The TUI decodes this enum and does not link the daemon. There is no slice 4
-/// spec in the design yet, so the temporary daemon fan-out emits these three
-/// variants. Slice 4 owns the route and the transcript writer: it should keep
-/// the `type` tag and these names, and may add variants. Unknown tags are
-/// ignored by the client, so a newer server does not break this TUI.
+/// Slice 4 owns the canonical stream: this id, a `type`, and a payload. Domain
+/// tags (`seat_state_changed`, `seat_died`, `activity`) are the `type`. `gap`
+/// has no payload and means the client missed events. The TUI decodes this
+/// struct and does not link the daemon. Unknown `type` values fail to decode
+/// and are skipped.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum StreamEvent {
-    /// Seat lifecycle changed. Applied in place, without a full re-hydrate.
-    SeatStateChanged {
-        /// Seat.
-        seat: SeatId,
-        /// New state.
-        state: SeatState,
-    },
+pub struct StreamEvent {
+    /// Resume cursor. The client sends it back as `Last-Event-ID`.
+    pub id: u64,
+    /// Kind. Wire name is `type`.
+    #[serde(rename = "type")]
+    pub kind: StreamKind,
+    /// Domain fields. Absent for [`StreamKind::Gap`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<StreamPayload>,
+}
+
+/// `type` on a [`StreamEvent`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamKind {
+    /// Seat lifecycle changed. Applied in place.
+    SeatStateChanged,
     /// Seat pane died.
-    SeatDied {
-        /// Seat.
-        seat: SeatId,
-    },
+    SeatDied,
     /// Activity line.
-    Activity {
-        /// Seat.
-        seat: SeatId,
-        /// Summary.
-        summary: String,
-    },
+    Activity,
+    /// The server could not replay missed events. The client re-hydrates.
+    Gap,
+}
+
+/// Domain fields inside a [`StreamEvent`]. Which fields are set depends on [`StreamKind`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamPayload {
+    /// Seat the event is about.
+    pub seat: SeatId,
+    /// New lifecycle state. Set for `seat_state_changed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<SeatState>,
+    /// One-line summary. Set for `activity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 /// Which launcher the operator configured, if any.

@@ -1,7 +1,9 @@
 // Derived from openrig packages/tui/src/live-events.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 
 //! Client for `GET /api/events`. This module decodes [`crewmux_api::StreamEvent`] only.
-//! It does not link the daemon. Unknown `type` tags are skipped so slice 4 can extend the stream.
+//! It does not link the daemon. Unknown `type` values are skipped. A reconnect sends
+//! the last id as `Last-Event-ID` and `last_event_id`. A `gap` event is forwarded
+//! so the app can re-hydrate.
 
 use std::pin::Pin;
 use std::time::Duration;
@@ -40,7 +42,7 @@ pub(crate) fn spawn<F, Fut>(
     events: mpsc::Sender<StreamEvent>,
     status: mpsc::Sender<ConnState>,
 ) where
-    F: Fn() -> Fut + Send + Sync + 'static,
+    F: Fn(Option<u64>) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Opened> + Send + 'static,
 {
     let (notes_tx, mut notes_rx) = mpsc::channel(32);
@@ -72,15 +74,16 @@ pub(crate) async fn connect_loop<F, Fut>(
     events: mpsc::Sender<Value>,
     status: mpsc::Sender<ConnState>,
 ) where
-    F: Fn() -> Fut,
+    F: Fn(Option<u64>) -> Fut,
     Fut: std::future::Future<Output = Opened>,
 {
     let mut delay = base;
+    let mut last_id = None;
     loop {
         if cancel.is_cancelled() {
             return;
         }
-        match open().await {
+        match open(last_id).await {
             Opened::Unavailable => {
                 let _ = status.send(ConnState::Unavailable).await;
                 return;
@@ -88,7 +91,10 @@ pub(crate) async fn connect_loop<F, Fut>(
             Opened::Failed => {}
             Opened::Chunks(stream) => {
                 let _ = status.send(ConnState::Connected).await;
-                let saw_event = read_stream(stream, &cancel, &events).await;
+                let (saw_event, seen) = read_stream(stream, &cancel, &events).await;
+                if let Some(id) = seen {
+                    last_id = Some(id);
+                }
                 if saw_event {
                     delay = base;
                 }
@@ -114,20 +120,20 @@ async fn read_stream(
     mut stream: Pin<Box<dyn Stream<Item = Result<Vec<u8>, ()>> + Send>>,
     cancel: &CancellationToken,
     events: &mpsc::Sender<Value>,
-) -> bool {
+) -> (bool, Option<u64>) {
     use futures_util::StreamExt;
     let mut parser = Parser::default();
     let mut saw = false;
     loop {
         let chunk = tokio::select! {
-            () = cancel.cancelled() => return saw,
+            () = cancel.cancelled() => return (saw, parser.last_id),
             next = stream.next() => next,
         };
         let Some(chunk) = chunk else {
-            return saw;
+            return (saw, parser.last_id);
         };
         let Ok(bytes) = chunk else {
-            return saw;
+            return (saw, parser.last_id);
         };
         if parser.push(&bytes, events).await {
             saw = true;
@@ -139,6 +145,10 @@ async fn read_stream(
 struct Parser {
     buf: String,
     data: Vec<String>,
+    /// SSE `id:` for the frame currently being built.
+    id: Option<u64>,
+    /// Id of the last finished frame that carried one.
+    last_id: Option<u64>,
 }
 
 impl Parser {
@@ -163,13 +173,19 @@ impl Parser {
                 .to_owned();
             self.buf = rest;
             if line.is_empty() {
-                if let Some(event) = finish_frame(&self.data) {
+                let sse_id = self.id.take();
+                if let Some((event, id)) = finish_frame(&self.data, sse_id) {
+                    if let Some(id) = id {
+                        self.last_id = Some(id);
+                    }
                     if events.send(event).await.is_err() {
                         return saw;
                     }
                     saw = true;
                 }
                 self.data.clear();
+            } else if let Some(id) = id_field(&line) {
+                self.id = Some(id);
             } else if let Some(value) = data_field(&line) {
                 self.data.push(value);
             }
@@ -186,15 +202,26 @@ fn data_field(line: &str) -> Option<String> {
     Some(value.strip_prefix(' ').unwrap_or(value).to_owned())
 }
 
+fn event_request(last_id: Option<u64>) -> String {
+    match last_id {
+        None => "GET /api/events HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\n\r\n"
+            .to_owned(),
+        Some(id) => format!(
+            "GET /api/events?last_event_id={id} HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\nLast-Event-ID: {id}\r\n\r\n"
+        ),
+    }
+}
+
 /// Open `GET /api/events` on a Unix socket. The TUI calls this; it does not construct the server.
-pub(crate) async fn open_unix(path: &std::path::Path) -> Opened {
+///
+/// `last_id` is sent on reconnect as both the SSE header and the query name slice 4 uses.
+pub(crate) async fn open_unix(path: &std::path::Path, last_id: Option<u64>) -> Opened {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let Ok(mut stream) = tokio::net::UnixStream::connect(path).await else {
         return Opened::Failed;
     };
-    let request =
-        b"GET /api/events HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\n\r\n";
-    if stream.write_all(request).await.is_err() {
+    let request = event_request(last_id);
+    if stream.write_all(request.as_bytes()).await.is_err() {
         return Opened::Failed;
     }
     let mut buf = Vec::new();
@@ -248,12 +275,35 @@ fn byte_stream(
     ))
 }
 
-fn finish_frame(data: &[String]) -> Option<Value> {
+fn id_field(line: &str) -> Option<u64> {
+    let value = line.strip_prefix("id:")?;
+    value.trim().parse().ok()
+}
+
+fn finish_frame(data: &[String], sse_id: Option<u64>) -> Option<(Value, Option<u64>)> {
     let raw = data.join("\n");
     if raw.trim().is_empty() {
         return None;
     }
     // Any JSON object resets backoff. The app keeps only [`StreamEvent`] and
     // ignores tags slice 4 may add.
-    serde_json::from_str(&raw).ok()
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    let id = sse_id.or_else(|| value.get("id").and_then(Value::as_u64));
+    Some((value, id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::event_request;
+
+    #[test]
+    fn resume_request_names_last_event_id() {
+        let first = event_request(None);
+        assert!(first.starts_with("GET /api/events HTTP/1.1\r\n"));
+        assert!(!first.contains("Last-Event-ID"));
+        assert!(!first.contains("last_event_id"));
+        let again = event_request(Some(4));
+        assert!(again.contains("GET /api/events?last_event_id=4 "));
+        assert!(again.contains("Last-Event-ID: 4\r\n"));
+    }
 }

@@ -1,20 +1,21 @@
 //! TEMPORARY `GET /api/events` handler.
 //!
-//! Slice 4 owns this route and the transcript writer. No slice 4 spec is in the
-//! design yet, so this follows ADR-0006: one SSE response on the daemon's axum
-//! Unix socket, JSON `data:` frames of [`crewmux_api::StreamEvent`]. Delete this
-//! module when slice 4 mounts its own handler on [`crewmux_api::Events::PATH`].
-//! There is no replay and no transcript writer here.
+//! Slice 4 owns this route, the transcript writer, and the backlog. This handler
+//! stays on [`crewmux_api::Events::PATH`] and writes the same envelope. It does
+//! not store events. A resume (`Last-Event-ID` or `last_event_id`) gets one
+//! `gap` frame, then live events. Delete this module when slice 4 mounts its own.
 
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::get;
 use futures_util::stream::Stream;
+use serde::Deserialize;
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -57,36 +58,61 @@ pub async fn serve(path: &Path, hub: EventHub, cancel: CancellationToken) -> Res
     Ok(())
 }
 
-async fn events(
-    State(hub): State<EventHub>,
-) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let rx = hub.subscribe();
-    let stream = futures_util::stream::unfold(rx, next_event);
-    Sse::new(stream).keep_alive(KeepAlive::default())
+#[derive(Debug, Default, Deserialize)]
+struct Resume {
+    #[serde(default)]
+    last_event_id: Option<String>,
 }
 
-async fn next_event(
-    mut rx: broadcast::Receiver<StreamEvent>,
-) -> Option<(
-    Result<Event, std::convert::Infallible>,
-    broadcast::Receiver<StreamEvent>,
-)> {
+struct Live {
+    gap: Option<StreamEvent>,
+    rx: broadcast::Receiver<StreamEvent>,
+}
+
+async fn events(
+    State(hub): State<EventHub>,
+    headers: HeaderMap,
+    Query(resume): Query<Resume>,
+) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let live = Live {
+        rx: hub.subscribe(),
+        gap: resume_gap(&hub, &headers, &resume),
+    };
+    Sse::new(futures_util::stream::unfold(live, next_event)).keep_alive(KeepAlive::default())
+}
+
+fn resume_gap(hub: &EventHub, headers: &HeaderMap, resume: &Resume) -> Option<StreamEvent> {
+    let header = headers
+        .get("last-event-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty());
+    let query = resume
+        .last_event_id
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    if header.is_some() || query.is_some() {
+        Some(hub.gap())
+    } else {
+        None
+    }
+}
+
+async fn next_event(mut live: Live) -> Option<(Result<Event, std::convert::Infallible>, Live)> {
+    if let Some(event) = live.gap.take() {
+        return Some((Ok(frame(&event)), live));
+    }
     loop {
-        match rx.recv().await {
-            Ok(event) => {
-                let data = serde_json::to_string(&event).unwrap_or_else(|_| {
-                    // A value we just serialised should encode. If it does not, skip it.
-                    String::new()
-                });
-                if data.is_empty() {
-                    continue;
-                }
-                return Some((Ok(Event::default().data(data)), rx));
-            }
+        match live.rx.recv().await {
+            Ok(event) => return Some((Ok(frame(&event)), live)),
             Err(broadcast::error::RecvError::Lagged(_)) => {}
             Err(broadcast::error::RecvError::Closed) => return None,
         }
     }
+}
+
+fn frame(event: &StreamEvent) -> Event {
+    let data = serde_json::to_string(event).unwrap_or_default();
+    Event::default().id(event.id.to_string()).data(data)
 }
 
 fn check_sun(path: &Path) -> Result<PathBuf, Error> {
