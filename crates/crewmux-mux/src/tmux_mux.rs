@@ -12,9 +12,9 @@ use tokio_util::task::TaskTracker;
 
 use crate::argv::{
     armed_session_args, bell_window_args, canonical_session_name, capture_args, cursor_args,
-    has_session_args, is_pane_id, kill_session_args, link_into_control_args, list_clients_args,
-    list_panes_args, manual_size_args, pane_mode_args, pane_target, parse_bell_id,
-    reject_global_window_size, resize_args, send_keys_args, set_option_args,
+    has_session_args, is_pane_id, link_into_control_args, list_clients_args, list_panes_args,
+    manual_size_args, pane_mode_args, pane_target, parse_bell_id, reject_global_window_size,
+    resize_args, send_keys_args, set_option_args,
 };
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::control::{ControlCtx, run_control};
@@ -254,7 +254,7 @@ impl Multiplexer for TmuxMux {
     }
 
     async fn kill_session(&self, name: &str) -> Result<(), MuxError> {
-        self.exec.run(&kill_session_args(name)).await.map(|_| ())
+        crate::session_kill::unlink_and_kill(self.exec.as_ref(), name).await
     }
 
     async fn list_panes(&self) -> Result<Vec<PaneInfo>, MuxError> {

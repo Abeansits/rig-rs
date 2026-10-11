@@ -23,6 +23,14 @@ and the hook fires. The pid is reread when the control client reconnects and
 cleared when the server exits, so a reused pid is not signaled. Other sockets,
 including `default`, are not signaled. Other platforms already reap.
 
+## Linked windows
+
+Seat windows are linked into `crewmux-control` so the control client receives
+`%output`. `kill-session` does not destroy a window that is still linked
+elsewhere, so the seat window and its pane process would survive `down`.
+`kill_session` unlinks that window from `crewmux-control` and then kills the
+session. The bell window is only in the control session and stays.
+
 ## list-clients format
 
 Human-client reads use
