@@ -9,12 +9,14 @@ pub(crate) async fn queue_writer(
     mut rx: mpsc::UnboundedReceiver<crewmux_messaging::QueueBook>,
 ) {
     loop {
-        let Some(mut book) = rx.recv().await else {
+        let received = tokio::select! {
+            biased;
+            () = app.cancel.cancelled() => None,
+            book = rx.recv() => book,
+        };
+        let Some(mut book) = received else {
             break;
         };
-        if app.cancel.is_cancelled() {
-            break;
-        }
         while let Ok(newer) = rx.try_recv() {
             if newer.epoch() >= book.epoch() {
                 book = newer;
