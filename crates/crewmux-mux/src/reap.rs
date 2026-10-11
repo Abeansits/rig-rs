@@ -6,18 +6,31 @@
 //! Upstream tmux sends itself `SIGCHLD` after utempter calls. This task does
 //! that from outside, which is enough for `waitpid` to record the status and
 //! fire the hook.
+//!
+//! The nudge runs only on Linux. Other platforms already reap, and spawning
+//! `kill` on every tick pushed a macOS trial past the 100ms death budget.
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::MuxError;
 use crate::exec::TmuxExec;
 
 /// Until `cancel`, periodically signal the tmux server so it reaps children.
 pub(crate) async fn nudge(exec: Arc<dyn TmuxExec>, cancel: CancellationToken) {
+    #[cfg(target_os = "linux")]
+    linux_nudge(exec, cancel).await;
+    #[cfg(not(target_os = "linux"))]
+    {
+        drop(exec);
+        cancel.cancelled().await;
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn linux_nudge(exec: Arc<dyn TmuxExec>, cancel: CancellationToken) {
+    use std::time::Duration;
+
     let Ok(pid) = server_pid(exec.as_ref()).await else {
         tracing::debug!("tmux reap nudge skipped");
         return;
@@ -38,7 +51,10 @@ pub(crate) async fn nudge(exec: Arc<dyn TmuxExec>, cancel: CancellationToken) {
     }
 }
 
-async fn server_pid(exec: &dyn TmuxExec) -> Result<u32, MuxError> {
+#[cfg(target_os = "linux")]
+async fn server_pid(exec: &dyn TmuxExec) -> Result<u32, crate::error::MuxError> {
+    use crate::error::MuxError;
+
     let out = exec
         .run(&[
             "display-message".to_owned(),
@@ -57,8 +73,9 @@ async fn server_pid(exec: &dyn TmuxExec) -> Result<u32, MuxError> {
 }
 
 /// `true` when the signal was delivered.
+#[cfg(target_os = "linux")]
 async fn signal_chld(pid: &str) -> Result<bool, std::io::Error> {
-    let status = Command::new("kill")
+    let status = tokio::process::Command::new("kill")
         .arg("-s")
         .arg("CHLD")
         .arg(pid)
