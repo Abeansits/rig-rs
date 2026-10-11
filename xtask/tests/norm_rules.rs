@@ -79,4 +79,7 @@ fn dash_getcwd_noise_is_stripped() {
         "tmux has-session\nsh: 0: getcwd() failed: No such file or directory\nerror connecting\n";
     let out = normalize_text(text, &[], &[]).unwrap();
     assert_eq!(out, "tmux has-session\nerror connecting\n");
+    let embedded = "tmux has-session -t '=one'\\nsh: 0: getcwd() failed: No such file or directory\\nerror connecting\\n";
+    let out = normalize_text(embedded, &[], &[]).unwrap();
+    assert_eq!(out, "tmux has-session -t '=one'\\nerror connecting\\n");
 }

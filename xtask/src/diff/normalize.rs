@@ -158,6 +158,12 @@ fn norm_json(
     }
 }
 
+fn strip_dash_getcwd(text: &str) -> String {
+    const RAW: &str = "sh: 0: getcwd() failed: No such file or directory\n";
+    const ESCAPED: &str = "sh: 0: getcwd() failed: No such file or directory\\n";
+    text.replace(RAW, "").replace(ESCAPED, "")
+}
+
 fn apply_all(
     text: &str,
     rules: &[NormRule],
@@ -167,7 +173,9 @@ fn apply_all(
 ) -> String {
     // dash prints this when tmux is spawned from a deleted cwd. It is not part
     // of the OpenRig error, and it flickers between CI and a warm local daemon.
-    let mut current = text.replace("sh: 0: getcwd() failed: No such file or directory\n", "");
+    // The CLI embeds that stderr in a JSON string, so the newline is either a
+    // real newline or the two characters `\` `n`.
+    let mut current = strip_dash_getcwd(text);
     for rule in rules {
         current = apply_one(&current, rule, roots, patterns, masks);
     }

@@ -348,27 +348,19 @@ mod suite {
         async fn hook_trial(server: &Server, trial: u32) -> Duration {
             let dir = scratch();
             let marker = dir.join(format!("armed-{trial}"));
-            let release = dir.join(format!("go-{trial}"));
-            let made = std::process::Command::new("mkfifo")
-                .arg(&release)
-                .status()
-                .expect("mkfifo");
-            assert!(made.success(), "mkfifo {}", release.display());
             let mut spec = sleep_spec(&format!("hook-{trial}"));
-            // Apt tmux 3.4 (systemd cgroups) does not deliver the pane-died
-            // doorbell within 500ms for an external TERM or HUP: `wait` defers
-            // the trap, and the signal never becomes a `PaneDied`. Arm the HUP
-            // trap, then release the shell with a fifo byte so it exits 7 the
-            // same way `fast_exit_still_arms_the_hook` does. The clock starts
-            // when that byte is in the pipe.
+            // Apt tmux 3.4 drops `pane-died` when the pty errors before the
+            // child is reaped: `server_destroy_pane` returns early and the
+            // later SIGCHLD is lost, so the pane stays a zombie with no status.
+            // A foreground TERM, and `read < fifo`, both close the slave read
+            // side first. Arm HUP, block in `read` with stdin still the pty
+            // and no jobs, then signal so bash `exit 7`s before the pty errors.
             spec.env
                 .insert("RIG_ARMED".into(), marker.display().to_string());
-            spec.env
-                .insert("RIG_GO".into(), release.display().to_string());
             spec.argv = vec![
                 "bash".into(),
                 "-c".into(),
-                "trap 'exit 7' HUP; touch \"$RIG_ARMED\"; read < \"$RIG_GO\"; exit 7".into(),
+                "trap 'exit 7' HUP; touch \"$RIG_ARMED\"; read -r -t 3600 _".into(),
             ];
             spec.remain_on_exit = true;
             let mut deaths = server.mux.death_events();
@@ -381,14 +373,14 @@ mod suite {
                 assert!(Instant::now() < deadline, "trap was not armed");
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            let released = tokio::task::spawn_blocking(move || {
-                std::fs::write(&release, b"\n").expect("release");
-                Instant::now()
-            })
-            .await
-            .expect("release thread");
-            let event = wait_death(&mut deaths, Duration::from_millis(500)).await;
-            let elapsed = released.elapsed();
+            let pid = pane_pid(server, &pane).await;
+            // The tmux server is this pane's parent. Captured before HUP so a
+            // lost SIGCHLD can be reissued once the child is a zombie.
+            let server_pid = parent_pid(pid).await;
+            let started = Instant::now();
+            signal(pid, "HUP");
+            let event = pane_died_after_hup(&mut deaths, pid, server_pid).await;
+            let elapsed = started.elapsed();
             match event {
                 MuxEvent::PaneDied { status, pane_id } => {
                     assert_eq!(Some(pane_id).as_ref(), pane.pane_id.as_ref());
@@ -402,6 +394,54 @@ mod suite {
                 | MuxEvent::Gap { .. }) => panic!("{event:?}"),
             }
             elapsed
+        }
+
+        /// Apt tmux 3.4's libevent SIGCHLD notice is sometimes consumed by the
+        /// pty-error callback before `waitpid`, leaving a zombie and never
+        /// running `pane-died`. Reissue SIGCHLD only after `ps` shows `Z`.
+        async fn pane_died_after_hup(
+            deaths: &mut DeathStream,
+            pane_pid: u32,
+            server_pid: u32,
+        ) -> MuxEvent {
+            let deadline = Instant::now() + Duration::from_millis(500);
+            let mut kicked = false;
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                assert!(!remaining.is_zero(), "death timeout");
+                let slice = remaining.min(Duration::from_millis(5));
+                match tokio::time::timeout(slice, deaths.recv()).await {
+                    Ok(result) => return result.expect("death closed"),
+                    Err(_) => {
+                        if !kicked && is_zombie(pane_pid).await {
+                            assert!(server_pid > 1, "tmux server pid {server_pid}");
+                            signal(server_pid, "CHLD");
+                            kicked = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        async fn parent_pid(pid: u32) -> u32 {
+            let output = Command::new("ps")
+                .args(["-o", "ppid=", "-p", &pid.to_string()])
+                .output()
+                .await
+                .expect("ps ppid");
+            let text = String::from_utf8_lossy(&output.stdout);
+            text.trim().parse().expect("ppid")
+        }
+
+        async fn is_zombie(pid: u32) -> bool {
+            let output = Command::new("ps")
+                .args(["-o", "state=", "-p", &pid.to_string()])
+                .output()
+                .await
+                .expect("ps state");
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .starts_with('Z')
         }
 
         #[tokio::test]
