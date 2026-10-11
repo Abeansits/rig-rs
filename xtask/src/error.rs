@@ -41,13 +41,16 @@ pub enum Error {
         /// Exceptions file that was searched.
         file: PathBuf,
     },
-    /// The case is marked as an expected diff, but the two sides matched.
-    #[error("stale exception: case {case} is marked {pe} but the outputs are equal")]
+    /// The marked exception no longer describes this case.
+    #[error("stale exception: case {case} is marked {pe} but {detail}")]
     Stale {
         /// Case id.
         case: String,
         /// Exception id that is no longer needed.
         pe: PeId,
+        /// Why the exception does not apply (`the outputs are equal`, or the
+        /// Rust side has left the committed snapshot).
+        detail: String,
     },
     /// Inherited `OPENRIG_*` / `RIGGED_*` daemon target.
     #[error(

@@ -1,4 +1,5 @@
-//! Insta snapshots of the TypeScript side. The rig-rs side is never accepted.
+//! Insta snapshots. `--update` writes the TypeScript side only.
+//! A committed `*.rs.snap` is the Rust observation an expected diff still describes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,17 @@ use crate::error::{Error, io_err};
 /// `tests/diff/snapshots/<id>.ts.snap`.
 #[must_use]
 pub(crate) fn ts_snapshot_path(dir: &Path, case_id: &str) -> PathBuf {
-    dir.join(format!("{case_id}.ts.snap"))
+    snapshot_path(dir, case_id, "ts")
+}
+
+/// `tests/diff/snapshots/<id>.rs.snap`.
+#[must_use]
+pub(crate) fn rs_snapshot_path(dir: &Path, case_id: &str) -> PathBuf {
+    snapshot_path(dir, case_id, "rs")
+}
+
+fn snapshot_path(dir: &Path, case_id: &str, side: &str) -> PathBuf {
+    dir.join(format!("{case_id}.{side}.snap"))
 }
 
 /// Write one TypeScript golden. Refuses any id that could escape the snapshot directory.
@@ -34,9 +45,24 @@ pub fn write_ts_golden(dir: &Path, case_id: &str, canonical: &str) -> Result<(),
 /// Returns [`Error::Io`] when the file is missing and [`Error::Message`] when the
 /// front matter is not an insta header.
 pub fn read_ts_golden(dir: &Path, case_id: &str) -> Result<String, Error> {
+    read_golden(&ts_snapshot_path(dir, case_id), case_id)
+}
+
+/// Body of a committed Rust snapshot, after the insta front matter.
+///
+/// There is no writer. `--update` does not accept a rig-rs snapshot.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the file is missing and [`Error::Message`] when the
+/// front matter is not an insta header or the id is unsafe.
+pub fn read_rs_golden(dir: &Path, case_id: &str) -> Result<String, Error> {
+    read_golden(&rs_snapshot_path(dir, case_id), case_id)
+}
+
+fn read_golden(path: &Path, case_id: &str) -> Result<String, Error> {
     ensure_safe_id(case_id)?;
-    let path = ts_snapshot_path(dir, case_id);
-    let text = fs::read_to_string(&path)
+    let text = fs::read_to_string(path)
         .map_err(|source| io_err(format!("read {}", path.display()), source))?;
     snapshot_body(&text)
 }

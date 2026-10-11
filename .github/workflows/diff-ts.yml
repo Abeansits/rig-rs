@@ -46,6 +46,16 @@ jobs:
           cache: npm
           cache-dependency-path: openrig/package-lock.json
 
+      - name: Cache OpenRig v0.6.9 build
+        id: openrig-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            openrig/node_modules
+            openrig/packages/daemon/dist
+            openrig/packages/cli/dist
+          key: openrig-4b48ca21-${{ hashFiles('openrig/package-lock.json') }}
+
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
 
@@ -55,6 +65,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux && tmux -V
 
       - name: Install and build OpenRig v0.6.9
+        if: steps.openrig-cache.outputs.cache-hit != 'true'
         working-directory: openrig
         run: npm ci && npm run build -w @openrig/daemon && npm run build -w @openrig/cli
 

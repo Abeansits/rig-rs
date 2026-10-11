@@ -58,6 +58,62 @@ pub struct HermeticHome {
     pub(crate) shim: PathBuf,
 }
 
+/// One field of a canonical [`Observation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObsField {
+    /// Process exit status.
+    Exit,
+    /// Standard output.
+    Stdout,
+    /// Standard error.
+    Stderr,
+    /// Last JSON body.
+    Json,
+    /// Files read by [`Step::ReadFile`].
+    Files,
+    /// tmux argv recorded by the shim.
+    TmuxArgv,
+}
+
+impl ObsField {
+    /// Every field a canonical observation carries.
+    pub const ALL: [Self; 6] = [
+        Self::Exit,
+        Self::Stdout,
+        Self::Stderr,
+        Self::Json,
+        Self::Files,
+        Self::TmuxArgv,
+    ];
+
+    /// JSON key in a canonical observation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exit => "exit",
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+            Self::Json => "json",
+            Self::Files => "files",
+            Self::TmuxArgv => "tmux_argv",
+        }
+    }
+
+    pub(crate) fn parse(text: &str) -> Result<Self, Error> {
+        match text {
+            "exit" => Ok(Self::Exit),
+            "stdout" => Ok(Self::Stdout),
+            "stderr" => Ok(Self::Stderr),
+            "json" => Ok(Self::Json),
+            "files" => Ok(Self::Files),
+            "tmux_argv" => Ok(Self::TmuxArgv),
+            other => Err(Error::Message(format!(
+                "unknown observation field {other}; expected exit, stdout, stderr, json, files, or tmux_argv"
+            ))),
+        }
+    }
+}
+
 /// One differential case.
 #[derive(Debug, Clone)]
 pub struct DiffCase {
@@ -67,8 +123,10 @@ pub struct DiffCase {
     pub steps: Vec<Step>,
     /// Masks applied to both sides before comparison.
     pub normalize: Vec<NormRule>,
-    /// When set, a real difference is [`DiffVerdict::ExpectedDiff`] instead of a failure.
+    /// Exception id, when this case is an expected diff.
     pub expected_diff: Option<PeId>,
+    /// Fields [`Self::expected_diff`] may differ on. Empty when that is unset.
+    pub covers: Vec<ObsField>,
 }
 
 /// A single action inside a [`DiffCase`].
@@ -187,7 +245,8 @@ pub enum NormRule {
 pub enum DiffVerdict {
     /// Canonical observations are byte-identical.
     Equal,
-    /// Observations differ and the case named this exception.
+    /// The Rust side matches the exception snapshot, and the only differences
+    /// are fields that exception covers.
     ExpectedDiff(PeId),
     /// Observations differ and the case did not name an exception.
     /// The string is a unified diff.

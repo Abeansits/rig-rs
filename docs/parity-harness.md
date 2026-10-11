@@ -17,11 +17,15 @@ The TypeScript pin is tag `v0.6.9`, commit `4b48ca21a9bd072aa05a08b3da6d9c0708e0
 
 `scenario-runner-probe` names `packages/test-system/scenarios/clean-lifecycle-no-residue.yaml` and runs `rig --version` plus the tmux shim. Spike S11 is not a YAML interpreter yet, so this probe shows the runner can target either side. It does not execute the scenario file.
 
-`help-top` and `scenario-runner-probe` set `expected_diff` to `PE-003`. Against v0.6.9, TypeScript prints the command list and `0.6.9`; the scaffold `rig` binary prints nothing and still exits 0. `version` compares the exit code only, so it stays Equal. `--self` does not apply `expected_diff`: both sides are rig-rs, and a match is Equal. A stale exception is reported when the TypeScript side and rig-rs match on a case that still names an exception.
+`help-top` and `scenario-runner-probe` set `expected_diff` to `PE-003`, which covers `stdout` only. Against v0.6.9, TypeScript prints the command list and `0.6.9`; the scaffold `rig` binary prints nothing and still exits 0. The committed `*.rs.snap` files record that Rust side (empty stdout, exit 0, the same tmux argv). `version` compares the exit code only and names no exception, so it stays Equal. `--self` does not apply `expected_diff`: both sides are rig-rs, and a match is Equal.
 
 ## Mark an expected diff
 
-Put `expected_diff` on the case. The value must be a `## PE-…` heading in `design/parity-exceptions.md`. Any other id fails at load time. When the two sides differ, the verdict is `ExpectedDiff`. When they match, the run fails and the report contains `stale exception` (process exit 1).
+Put `expected_diff` on the case. The value must be a `## PE-…` heading in `design/parity-exceptions.md`. Under that heading, `- **Covers:**` lists the observation fields the exception excuses (`stdout`, `stderr`, `exit`, `json`, `files`, `tmux_argv`). Any other id fails at load time. A heading without a covers line fails at load time.
+
+Commit `tests/diff/snapshots/<id>.rs.snap` (insta front matter plus the canonical Rust observation). `--update` writes TypeScript goldens only and does not accept a rig-rs snapshot.
+
+`ExpectedDiff` applies when the live Rust observation matches that snapshot and every difference from TypeScript is in a covered field. A difference in any other field — a different exit code, stderr, tmux argv, JSON, or read file — is `Unexpected`, with a unified diff. When the Rust observation no longer matches the snapshot, the run fails and the report contains `stale exception`. The same stale result is reported when the two sides are equal. Process exit is 1.
 
 Tests use a fixture copy of the exceptions file with a synthetic `## PE-TEST` heading. Do not add `PE-TEST` to the real file.
 
@@ -34,7 +38,7 @@ cargo xtask diff --update --case version
 
 `--update` rewrites only `tests/diff/snapshots/<id>.ts.snap` (insta front matter plus the canonical JSON). The rig-rs side is compared and never written. There is no flag that accepts a rig-rs snapshot. `--update` with `--self` is a usage error.
 
-A missing golden, a missing TypeScript tree, or a bad PE id is a harness error (exit 2). The missing-tree message names v0.6.9 and the pinned commit and tells you to clone into `$HOME/.cache/rig-rs/openrig-v0.6.9` (or set `OPENRIG_DIR`) and run `npm ci && npm run build -w @openrig/daemon && npm run build -w @openrig/cli`. The harness does not skip that case.
+A missing TypeScript golden, a missing Rust snapshot on an expected-diff case, a missing TypeScript tree, or a bad PE id is a harness error (exit 2). The missing-tree message names v0.6.9 and the pinned commit and tells you to clone into `$HOME/.cache/rig-rs/openrig-v0.6.9` (or set `OPENRIG_DIR`) and run `npm ci && npm run build -w @openrig/daemon && npm run build -w @openrig/cli`. The harness does not skip that case.
 
 `cargo xtask diff --self` runs every case twice against the `rig` binary (or `--bin`). It does not need Node. Ignored cases stay in the report and do not fail the run.
 

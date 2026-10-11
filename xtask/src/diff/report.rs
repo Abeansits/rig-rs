@@ -15,7 +15,7 @@ pub enum CaseOutcome {
         /// Text after `needs`, such as `slice 0`.
         reason: String,
     },
-    /// The case was marked expected-diff but the sides matched.
+    /// The marked exception no longer describes the Rust side.
     Stale(Error),
 }
 

@@ -1,34 +1,143 @@
 //! Verdicts, projections, and unified diffs.
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
-use super::types::{DiffVerdict, Observation, PeId, Project};
+use super::types::{DiffVerdict, ObsField, Observation, PeId, Project};
 use crate::error::Error;
+
+/// Scope of one expected diff: the fields it excuses, and the Rust snapshot it still describes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedScope {
+    /// Exception id.
+    pub pe: PeId,
+    /// Fields that may differ from the TypeScript observation.
+    pub covers: Vec<ObsField>,
+    /// Canonical Rust observation this exception still describes.
+    pub rust_snapshot: String,
+}
 
 /// Compare two canonical observations.
 ///
+/// With no scope, equal text is [`DiffVerdict::Equal`] and any other text is
+/// [`DiffVerdict::Unexpected`]. With a scope, [`DiffVerdict::ExpectedDiff`]
+/// applies only when the Rust text matches `rust_snapshot` and every difference
+/// from TypeScript is in [`ExpectedScope::covers`]. A difference in any other
+/// field is [`DiffVerdict::Unexpected`].
+///
 /// # Errors
 ///
-/// Returns [`Error::Stale`] when `expected` is set and the texts are equal.
+/// Returns [`Error::Stale`] when the two sides are equal, or when the Rust text
+/// no longer matches the exception snapshot. Returns [`Error::Json`] or
+/// [`Error::Message`] when a scoped observation is not canonical JSON.
 pub fn judge(
     case_id: &str,
-    left: &str,
-    right: &str,
-    expected: Option<&PeId>,
+    ts: &str,
+    rs: &str,
+    expected: Option<&ExpectedScope>,
 ) -> Result<DiffVerdict, Error> {
-    if left == right {
-        return match expected {
-            Some(pe) => Err(Error::Stale {
-                case: case_id.to_owned(),
-                pe: pe.clone(),
-            }),
-            None => Ok(DiffVerdict::Equal),
-        };
+    let Some(expected) = expected else {
+        return Ok(unscoped(ts, rs));
+    };
+    judge_scoped(case_id, ts, rs, expected)
+}
+
+fn unscoped(ts: &str, rs: &str) -> DiffVerdict {
+    if ts == rs {
+        DiffVerdict::Equal
+    } else {
+        DiffVerdict::Unexpected(unified_diff(ts, rs))
     }
-    match expected {
-        Some(pe) => Ok(DiffVerdict::ExpectedDiff(pe.clone())),
-        None => Ok(DiffVerdict::Unexpected(unified_diff(left, right))),
+}
+
+fn judge_scoped(
+    case_id: &str,
+    ts: &str,
+    rs: &str,
+    expected: &ExpectedScope,
+) -> Result<DiffVerdict, Error> {
+    let ts_obj = object_of(ts, "typescript observation")?;
+    let rs_obj = object_of(rs, "rust observation")?;
+    let snap_obj = object_of(&expected.rust_snapshot, "rust snapshot")?;
+    if uncovered_differ(&ts_obj, &rs_obj, &expected.covers)? {
+        return Ok(DiffVerdict::Unexpected(unified_diff(ts, rs)));
     }
+    if !same_fields(&rs_obj, &snap_obj)? {
+        return Err(stale(
+            case_id,
+            expected,
+            "the Rust output no longer matches the exception snapshot",
+        ));
+    }
+    if covered_equal(&ts_obj, &rs_obj, &expected.covers)? {
+        return Err(stale(case_id, expected, "the outputs are equal"));
+    }
+    Ok(DiffVerdict::ExpectedDiff(expected.pe.clone()))
+}
+
+fn stale(case_id: &str, expected: &ExpectedScope, detail: &str) -> Error {
+    Error::Stale {
+        case: case_id.to_owned(),
+        pe: expected.pe.clone(),
+        detail: detail.to_owned(),
+    }
+}
+
+fn object_of(text: &str, context: &str) -> Result<Map<String, Value>, Error> {
+    match serde_json::from_str::<Value>(text) {
+        Ok(Value::Object(map)) => Ok(map),
+        Ok(_) => Err(Error::Message(format!("{context} is not a JSON object"))),
+        Err(source) => Err(Error::Json {
+            context: context.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn uncovered_differ(
+    ts: &Map<String, Value>,
+    rs: &Map<String, Value>,
+    covers: &[ObsField],
+) -> Result<bool, Error> {
+    for field in ObsField::ALL {
+        if covers.contains(&field) {
+            continue;
+        }
+        if field_of(ts, field)? != field_of(rs, field)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn covered_equal(
+    ts: &Map<String, Value>,
+    rs: &Map<String, Value>,
+    covers: &[ObsField],
+) -> Result<bool, Error> {
+    for field in covers {
+        if field_of(ts, *field)? != field_of(rs, *field)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn same_fields(left: &Map<String, Value>, right: &Map<String, Value>) -> Result<bool, Error> {
+    for field in ObsField::ALL {
+        if field_of(left, field)? != field_of(right, field)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn field_of(map: &Map<String, Value>, field: ObsField) -> Result<&Value, Error> {
+    map.get(field.as_str()).ok_or_else(|| {
+        Error::Message(format!(
+            "canonical observation is missing {}",
+            field.as_str()
+        ))
+    })
 }
 
 /// Line-oriented unified diff. Equal lines are shown with a leading space.

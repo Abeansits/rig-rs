@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use super::compare::judge;
-use super::golden::{read_ts_golden, write_ts_golden};
+use super::compare::{ExpectedScope, judge};
+use super::golden::{read_rs_golden, read_ts_golden, write_ts_golden};
 use super::report::{CaseOutcome, CaseReport};
 use super::run::{execute, execute_rs};
 use super::types::{LoadedCase, Side, workspace_root};
@@ -77,15 +77,23 @@ pub fn ts_reports(
             }
         }
         let rs = execute_rs(case, bin)?;
-        let verdict = judge(
-            &case.case.id,
-            &ts.canonical,
-            &rs.canonical,
-            case.case.expected_diff.as_ref(),
-        );
+        let scope = scope_for(case, &snaps)?;
+        let verdict = judge(&case.case.id, &ts.canonical, &rs.canonical, scope.as_ref());
         reports.push(from_judge(&case.case.id, verdict)?);
     }
     Ok(reports)
+}
+
+fn scope_for(case: &LoadedCase, snaps: &Path) -> Result<Option<ExpectedScope>, Error> {
+    let Some(pe) = &case.case.expected_diff else {
+        return Ok(None);
+    };
+    let rust_snapshot = read_rs_golden(snaps, &case.case.id)?;
+    Ok(Some(ExpectedScope {
+        pe: pe.clone(),
+        covers: case.case.covers.clone(),
+        rust_snapshot,
+    }))
 }
 
 fn ignored(id: &str, reason: &str) -> CaseReport {

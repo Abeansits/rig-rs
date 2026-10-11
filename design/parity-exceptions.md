@@ -23,10 +23,12 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 
 ## PE-003: the scaffold `rig` binary has no CLI surface yet
 
+- **Covers:** stdout
 - **TS behaviour:** `rig --help` lists the v0.6.9 command names (`add`, `adopt`, `agent`, … `workspace`). `rig --version` prints `0.6.9` and exits 0.
 - **Rust behaviour today:** `crates/rig` is the slice 0 scaffold (`fn main() {}`). It exits 0 and prints nothing, so the help-name projection is empty and the version text is empty. The exit status matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
-- **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. `help-top` and `scenario-runner-probe` set `expected_diff: PE-003` so the nightly job fails only on a new, unexplained diff. Delete this heading when the CLI prints the same command names and `0.6.9` version text; the harness will then fail those cases with `stale exception`.
-- **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`.
+- **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side: empty stdout, exit 0, empty stderr, and the same `tmux_argv` as v0.6.9. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
+- **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. Delete this heading, and the two `.rs.snap` files, when the CLI prints the same command names and `0.6.9` version text. The harness then reports `stale exception` because the Rust output no longer matches the snapshot (or the two sides are equal).
+- **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`. `excepted_exit_code_is_unexpected`, `excepted_stderr_panic_is_unexpected`, and `excepted_extra_tmux_call_is_unexpected` each return `Unexpected`. `changed_rust_snapshot_is_stale` reports `stale exception`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

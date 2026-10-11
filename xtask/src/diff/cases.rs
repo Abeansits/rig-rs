@@ -110,7 +110,7 @@ pub fn load_case(path: &Path, exceptions: &Path) -> Result<LoadedCase, Error> {
         Some(text) if !text.is_empty() => Some(super::types::PeId::parse(text)?),
         _ => None,
     };
-    require_pe(expected_diff.as_ref(), exceptions)?;
+    let covers = require_pe(expected_diff.as_ref(), exceptions)?;
     let mut steps = Vec::new();
     for step in file.steps {
         steps.push(step_from(step)?);
@@ -125,6 +125,7 @@ pub fn load_case(path: &Path, exceptions: &Path) -> Result<LoadedCase, Error> {
             steps,
             normalize,
             expected_diff,
+            covers,
         },
         project: project_from(file.project.as_deref())?,
         needs: file.needs.filter(|text| !text.is_empty()),
