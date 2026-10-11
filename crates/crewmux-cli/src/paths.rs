@@ -81,6 +81,41 @@ impl Paths {
         })
     }
 
+    /// User files tmux 3.2+ loads by default, after the system config.
+    ///
+    /// Order matches `TMUX_CONF`: `~/.tmux.conf`, then
+    /// `$XDG_CONFIG_HOME/tmux/tmux.conf` when that variable is set, then
+    /// `~/.config/tmux/tmux.conf`. A repeated path is listed once.
+    #[must_use]
+    pub(crate) fn user_tmux_configs(&self) -> Vec<PathBuf> {
+        let mut paths = vec![self.tmux_conf.clone()];
+        if let Some(xdg) = &self.xdg_config_home {
+            push_unique(&mut paths, xdg.join("tmux").join("tmux.conf"));
+        }
+        push_unique(
+            &mut paths,
+            self.home.join(".config").join("tmux").join("tmux.conf"),
+        );
+        paths
+    }
+
+    /// Bytes of every file from [`Self::user_tmux_configs`] that can be read.
+    /// Missing files are skipped. `source-file` directives are not followed.
+    #[must_use]
+    pub(crate) fn read_user_tmux_configs(&self) -> String {
+        let mut out = String::new();
+        for path in self.user_tmux_configs() {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            out.push_str(&text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
     /// `$RIG_HOME/seats/default`.
     #[must_use]
     pub(crate) fn seat_dir(&self) -> PathBuf {
@@ -102,6 +137,12 @@ impl Paths {
     }
 }
 
+fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if paths.iter().all(|existing| existing != &path) {
+        paths.push(path);
+    }
+}
+
 /// Linux `sun_path` is 108 bytes including the trailing NUL.
 pub(crate) const SUN_PATH_LIMIT: usize = 108;
 
@@ -109,4 +150,57 @@ pub(crate) const SUN_PATH_LIMIT: usize = 108;
 #[must_use]
 pub(crate) fn socket_path_fits(path: &Path) -> bool {
     path.as_os_str().len() < SUN_PATH_LIMIT
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+
+    use crewmux_provider::global_window_size_manual;
+
+    use super::Paths;
+
+    fn vars(home: &std::path::Path, xdg: Option<&std::path::Path>) -> BTreeMap<String, String> {
+        let mut vars = BTreeMap::new();
+        vars.insert("HOME".to_owned(), home.display().to_string());
+        if let Some(xdg) = xdg {
+            vars.insert("XDG_CONFIG_HOME".to_owned(), xdg.display().to_string());
+        }
+        vars
+    }
+
+    #[test]
+    fn xdg_tmux_conf_is_scanned_for_manual_window_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let xdg_default = home.join(".config").join("tmux");
+        fs::create_dir_all(&xdg_default).unwrap();
+        fs::write(xdg_default.join("tmux.conf"), "set -g window-size manual\n").unwrap();
+        let paths = Paths::from_vars(&vars(&home, None)).unwrap();
+        let text = paths.read_user_tmux_configs();
+        assert!(global_window_size_manual(&text), "{text}");
+        assert!(!home.join(".tmux.conf").exists());
+
+        let other = dir.path().join("other-home");
+        let xdg = dir.path().join("xdg");
+        fs::create_dir_all(xdg.join("tmux")).unwrap();
+        fs::write(
+            xdg.join("tmux").join("tmux.conf"),
+            "set -g window-size manual\n",
+        )
+        .unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let custom = Paths::from_vars(&vars(&other, Some(&xdg))).unwrap();
+        let custom_text = custom.read_user_tmux_configs();
+        assert!(global_window_size_manual(&custom_text), "{custom_text}");
+        assert!(!other.join(".tmux.conf").exists());
+        assert!(
+            !other
+                .join(".config")
+                .join("tmux")
+                .join("tmux.conf")
+                .exists()
+        );
+    }
 }

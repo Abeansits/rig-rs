@@ -78,10 +78,14 @@ pub(crate) struct DoctorFacts {
     pub os: HostOs,
     /// Raw `tmux -V` line, when tmux exists.
     pub tmux_version_line: Option<String>,
-    /// Bytes of the user tmux config. Empty when the file is absent.
+    /// Bytes of `~/.tmux.conf`. Empty when that file is absent.
     pub tmux_conf: String,
+    /// Bytes of every user config tmux 3.2+ loads by default. Empty in tests
+    /// that only set [`Self::tmux_conf`].
+    pub tmux_scan: String,
     /// Value from `tmux show -g window-size`. `None` means that query failed,
-    /// including when no server is running. The check then scans `tmux_conf`.
+    /// including when no server is running. The check then scans `tmux_scan`,
+    /// or `tmux_conf` when the scan is empty.
     pub window_size: Option<String>,
     /// `GET /healthz` on the daemon socket succeeded.
     pub daemon_up: bool,

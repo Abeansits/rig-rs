@@ -99,16 +99,108 @@ pub fn managed_block_current(file: &str) -> bool {
 }
 
 /// A global `window-size` set to `manual` crashes tmux 3.5a.
+///
+/// A line matches when the command is `set`, `set-option`, `setw`, or
+/// `set-window-option`, a short-flag group contains `g`, and the unquoted
+/// value is `manual`. A `#` outside quotes starts a comment.
 #[must_use]
 pub fn global_window_size_manual(file: &str) -> bool {
     file.lines().any(line_sets_manual_window_size)
 }
 
 fn line_sets_manual_window_size(line: &str) -> bool {
-    let sets_size = line.contains("window-size");
-    let global = line.contains("-g");
-    let manual = line.split_whitespace().any(|word| word == "manual");
-    sets_size && global && manual
+    let tokens = tokenize(line);
+    let mut tokens = tokens.into_iter();
+    let Some(cmd) = tokens.next() else {
+        return false;
+    };
+    if !is_set_command(&cmd) {
+        return false;
+    }
+    let mut global = false;
+    let mut option = None;
+    let mut value = None;
+    let mut expect_target = false;
+    for token in tokens {
+        if expect_target {
+            expect_target = false;
+            continue;
+        }
+        if is_short_flags(&token) {
+            if token.contains('g') {
+                global = true;
+            }
+            if token.contains('t') {
+                expect_target = true;
+            }
+            continue;
+        }
+        if option.is_none() {
+            option = Some(token);
+        } else {
+            value = Some(token);
+            break;
+        }
+    }
+    global && option.as_deref() == Some("window-size") && value.as_deref() == Some("manual")
+}
+
+fn is_set_command(cmd: &str) -> bool {
+    matches!(cmd, "set" | "set-option" | "setw" | "set-window-option")
+}
+
+fn is_short_flags(token: &str) -> bool {
+    let Some(flags) = token.strip_prefix('-') else {
+        return false;
+    };
+    !flags.is_empty() && flags.chars().all(|ch| ch.is_ascii_alphabetic())
+}
+
+/// Split a config line into words. Quotes drop off the token. `#` outside
+/// quotes ends the line. An unclosed quote drops that token.
+fn tokenize(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if let Some(mark) = quote {
+            if mark == '"' && ch == '\\' {
+                if let Some(escaped) = chars.next() {
+                    current.push(escaped);
+                }
+                continue;
+            }
+            if ch == mark {
+                tokens.push(std::mem::take(&mut current));
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+        if ch == '#' {
+            break;
+        }
+        if ch == '"' || ch == '\'' {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            quote = Some(ch);
+            continue;
+        }
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if quote.is_none() && !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 fn newline_of(file: &str) -> &'static str {

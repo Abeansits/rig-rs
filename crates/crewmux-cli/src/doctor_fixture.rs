@@ -52,6 +52,7 @@ pub(crate) fn load_fixture(path: &Path) -> Result<DoctorFacts, Error> {
     Ok(DoctorFacts {
         os: parse_os(&fixture.os)?,
         tmux_version_line: fixture.tmux_version,
+        tmux_scan: fixture.tmux_conf.clone(),
         tmux_conf: fixture.tmux_conf,
         window_size: fixture.window_size,
         daemon_up: fixture.daemon_up,

@@ -101,7 +101,7 @@ fn check_window_size(facts: &DoctorFacts) -> DoctorCheck {
     let manual = match facts.window_size.as_deref() {
         Some("manual") => true,
         Some(_) => false,
-        None => global_window_size_manual(&facts.tmux_conf),
+        None => global_window_size_manual(scanned_tmux(facts)),
     };
     if manual {
         DoctorCheck::fail(
@@ -114,6 +114,14 @@ fn check_window_size(facts: &DoctorFacts) -> DoctorCheck {
             "tmux_global_window_size",
             "global window-size is not manual",
         )
+    }
+}
+
+fn scanned_tmux(facts: &DoctorFacts) -> &str {
+    if facts.tmux_scan.is_empty() {
+        &facts.tmux_conf
+    } else {
+        &facts.tmux_scan
     }
 }
 
@@ -375,6 +383,7 @@ mod tests {
             os: HostOs::Macos,
             tmux_version_line: Some("tmux 3.5a".to_owned()),
             tmux_conf: crewmux_provider::render_tmux_block(),
+            tmux_scan: String::new(),
             window_size: Some("latest".to_owned()),
             daemon_up: true,
             claude: tool("2.1.0"),

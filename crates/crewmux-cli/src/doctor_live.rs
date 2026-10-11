@@ -22,6 +22,7 @@ pub(crate) fn gather(paths: &Paths) -> DoctorFacts {
         os: host_os(),
         tmux_version_line: tool_version(paths, "tmux", &["-V".to_owned()]).map(|fact| fact.version),
         tmux_conf,
+        tmux_scan: paths.read_user_tmux_configs(),
         window_size,
         daemon_up: daemon_healthy(paths),
         claude: claude_fact(paths),
