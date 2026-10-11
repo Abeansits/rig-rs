@@ -397,6 +397,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "signal-hook",
  "tempfile",
  "thiserror",
 ]
@@ -429,10 +430,13 @@ dependencies = [
  "crewmux-spec",
  "crewmux-store",
  "crewmux-types",
+ "rusqlite",
  "rustix",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]
@@ -471,6 +475,7 @@ name = "crewmux-messaging"
 version = "0.0.0"
 dependencies = [
  "crewmux-core",
+ "crewmux-types",
 ]
 
 [[package]]
@@ -528,6 +533,7 @@ version = "0.0.0"
 dependencies = [
  "crewmux-core",
  "crewmux-types",
+ "proptest",
  "rusqlite",
  "rusqlite_migration",
  "serde_json",
@@ -1153,6 +1159,8 @@ dependencies = [
  "crewmux-tui",
  "insta",
  "predicates",
+ "rusqlite",
+ "rustix",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1327,6 +1335,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b29ffa27d3d59a049bb328258de100f8012848d1b08d444e08bbc02ac468435e"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1480,6 +1498,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

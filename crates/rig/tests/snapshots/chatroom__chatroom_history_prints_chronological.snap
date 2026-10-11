@@ -1,0 +1,6 @@
+---
+source: crates/rig/tests/chatroom.rs
+expression: out.trim()
+---
+[operator] first
+[operator] second

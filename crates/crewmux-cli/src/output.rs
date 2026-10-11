@@ -1,5 +1,7 @@
 //! User-facing text. Every print in the CLI goes through here.
 
+use std::io::{self, Write};
+
 use serde_json::Value;
 
 /// Print one stdout line.
@@ -9,6 +11,7 @@ use serde_json::Value;
 )]
 pub fn stdout_line(text: &str) {
     println!("{text}");
+    drop(io::stdout().flush());
 }
 
 /// Print a JSON document as one line.

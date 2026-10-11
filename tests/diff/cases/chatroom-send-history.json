@@ -1,0 +1,23 @@
+{
+  "id": "chatroom-send-history",
+  "project": "full",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [
+    {
+      "op": "http",
+      "method": "GET",
+      "path": "/api/rigs/01ARZ3NDEKTSV4RRFFQ69G5FAV/chat/history"
+    },
+    {
+      "op": "http",
+      "method": "POST",
+      "path": "/api/rigs/01ARZ3NDEKTSV4RRFFQ69G5FAV/chat/send",
+      "body": {}
+    },
+    {
+      "op": "http",
+      "method": "GET",
+      "path": "/api/rigs/01ARZ3NDEKTSV4RRFFQ69G5FAV/chat/history?since=garbage"
+    }
+  ]
+}

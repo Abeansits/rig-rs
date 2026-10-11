@@ -22,12 +22,17 @@ crewmux-integrations.workspace = true
 crewmux-mux.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
+tokio-stream.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
 
 [features]
 # In-memory multiplexer for debug test builds. Release binaries leave this off

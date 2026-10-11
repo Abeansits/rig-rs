@@ -246,7 +246,7 @@ fn update_writes_only_a_ts_snapshot() {
 fn committed_rust_snapshots_match_the_merged_cli() {
     let dir = workspace_root().join("tests/diff/snapshots");
     let help = observation(
-        "attach\ncapture\ndoctor\ndown\nhelp\nps\nsetup\nup",
+        "attach\ncapture\nchatroom\ndoctor\ndown\nhelp\nps\nsetup\nup",
         "",
         0,
         Vec::new(),

@@ -18,6 +18,7 @@ thiserror.workspace = true
 crewmux-types.workspace = true
 serde.workspace = true
 rustix = { workspace = true, features = ["fs"] }
+signal-hook.workspace = true
 
 [lints]
 workspace = true

@@ -13,6 +13,9 @@ pub enum Error {
     /// The request method was not an ASCII token.
     #[error("daemon HTTP method must be an ASCII token")]
     BadMethod,
+    /// A header name or value contained a line break.
+    #[error("daemon HTTP header must be a single line")]
+    BadHeader,
     /// The socket or TCP port could not be connected.
     #[error("failed to connect to {target}: {source}")]
     Connect {

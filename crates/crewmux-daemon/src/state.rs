@@ -9,7 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crewmux_adapters::AdapterRegistry;
 use crewmux_mux::Multiplexer;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
+use crate::chat::ChatHub;
 use crate::error::Error;
 
 /// What one process of the daemon holds.
@@ -29,6 +31,33 @@ pub(crate) struct App {
     pub activity: Arc<AtomicU64>,
     /// Registered runtimes. Slice 1 has the stub.
     pub registry: Arc<AdapterRegistry>,
+    /// Supervisors and chat watch tasks. Closed on shutdown.
+    pub tasks: TaskTracker,
+    /// Wakes chat watchers after a committed message. Not the slice 4 event bus.
+    pub chat: ChatHub,
+}
+
+impl App {
+    /// Assemble the process state. `activity` starts at the current time.
+    pub(crate) fn new(
+        store: Arc<crewmux_store::Store>,
+        mux: Arc<dyn Multiplexer>,
+        stub_script: Option<String>,
+        cancel: CancellationToken,
+        registry: Arc<AdapterRegistry>,
+    ) -> Self {
+        Self {
+            store,
+            mux,
+            up_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            stub_script,
+            cancel,
+            activity: Arc::new(AtomicU64::new(now_ms())),
+            registry,
+            tasks: TaskTracker::new(),
+            chat: ChatHub::new(),
+        }
+    }
 }
 
 impl App {

@@ -27,6 +27,7 @@ pub(crate) fn router(app: App) -> Router {
         .route(AttachInfo::PATH, post(attach))
         .route(RigDown::PATH, post(rig_down))
         .route("/shutdown", post(shutdown))
+        .merge(crate::chat::routes())
         .layer(map_response(connection_close))
         .with_state(app)
 }

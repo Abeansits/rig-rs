@@ -43,6 +43,8 @@ crewmux-api.workspace = true
 crewmux-provider.workspace = true
 insta.workspace = true
 predicates.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+rustix = { workspace = true, features = ["process"] }
 serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

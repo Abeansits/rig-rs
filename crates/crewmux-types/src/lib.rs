@@ -4,6 +4,7 @@
 //! codes are the slice 1 vocabulary. [`tmux_version`] is the canonical parser;
 //! slice 1b re-exports it from `crewmux-mux`.
 
+mod chat;
 mod doctor;
 mod error;
 mod id;
@@ -12,6 +13,10 @@ mod runtime;
 
 pub mod tmux_version;
 
+pub use chat::{
+    ChatCursor, ChatId, SEAT_ID_ENV, SEAT_ID_HEADER, SEAT_TOKEN_ENV, SEAT_TOKEN_HEADER, SenderRef,
+    TopicId,
+};
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
 pub use id::{RigId, RigName, SeatId, SeatName, SessionId};

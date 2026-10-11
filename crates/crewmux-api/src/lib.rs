@@ -4,12 +4,17 @@
 //! the Unix socket at `$RIG_HOME/run/daemon.sock`. TCP exists so a harness can
 //! reject it for this side. No new daemon routes are declared here.
 
+mod chat;
 mod client;
 mod dirs;
 mod endpoint;
 mod error;
 
-pub use client::{Client, Response, daemon_socket, rig_home};
+pub use chat::{
+    CHAT_MESSAGE_TYPE, ChatClear, ChatHistory, ChatSend, ChatTopic, ChatWatch, ChatWire,
+    RigSummary, RigSummaryRow, StreamEvent,
+};
+pub use client::{Client, HttpStream, Response, daemon_socket, rig_home};
 pub use dirs::{create_private, open_private};
 pub use endpoint::{
     AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
