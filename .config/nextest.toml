@@ -1,4 +1,4 @@
-# cargo-nextest config. Profiles: default (local), ci (CI gate), slow (opt-in heavy suites).
+# cargo-nextest config. Profiles: default (local), ci (CI gate), coverage (llvm-cov), slow (opt-in heavy suites).
 [store]
 dir = "target/nextest"
 
