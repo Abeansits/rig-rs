@@ -20,6 +20,7 @@ xtask ledger check
 xtask ledger report
 xtask lint claude-json
 xtask lint window-size
+xtask record-tui [--openrig DIR] [--out DIR]
 
 diff exits 0 when every verdict is Equal or ExpectedDiff, 1 on Unexpected or a
 stale exception, and 2 on a harness error. --update rewrites only TS goldens.
@@ -52,6 +53,7 @@ fn dispatch() -> Result<i32, Error> {
         Some("diff") => cmd_diff(&mut args),
         Some("ledger") => cmd_ledger(&mut args),
         Some("lint") => cmd_lint(&mut args),
+        Some("record-tui") => cmd_record_tui(&mut args),
         Some("--help" | "-h") | None => {
             out(HELP);
             Ok(0)
@@ -144,6 +146,25 @@ fn cmd_lint(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
             "unknown lint command {other:?}\n{HELP}"
         ))),
     }
+}
+
+fn cmd_record_tui(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
+    let mut openrig = None;
+    let mut out_dir = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--openrig" => openrig = Some(PathBuf::from(need_value(args, "--openrig")?)),
+            "--out" => out_dir = Some(PathBuf::from(need_value(args, "--out")?)),
+            other => {
+                return Err(Error::Usage(format!(
+                    "unknown record-tui flag {other}\n{HELP}"
+                )));
+            }
+        }
+    }
+    xtask::record_tui::record(openrig, out_dir)?;
+    out("recorded OpenRig v0.6.9 TUI hit maps");
+    Ok(0)
 }
 
 fn cmd_ledger(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
@@ -239,7 +260,14 @@ fn cargo_test_list() -> Result<BTreeSet<String>, Error> {
     let mut command = Command::new(cargo);
     command
         .current_dir(workspace_root())
-        .args(["test", "--workspace", "--locked", "--", "--list"])
+        .args([
+            "test",
+            "--workspace",
+            "--all-features",
+            "--locked",
+            "--",
+            "--list",
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

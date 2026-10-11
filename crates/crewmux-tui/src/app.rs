@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, MouseEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use futures_util::StreamExt;
 use parking_lot::Mutex;
 use ratatui::Terminal;
@@ -46,6 +46,7 @@ pub struct Config {
 ///
 /// Returns [`Error`] when the runtime or the terminal cannot start.
 pub fn run_blocking(config: Config) -> Result<(), Error> {
+    adopt_pty();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -92,8 +93,8 @@ pub async fn run(config: Config) -> Result<(), Error> {
         status_tx,
     );
     let mut guard = CrosstermGuard;
-    guard.resume().map_err(Error::Terminal)?;
     guard::install_terminal_hook();
+    guard.resume().map_err(Error::Terminal)?;
     let mut terminal =
         Terminal::new(CrosstermBackend::new(io::stdout())).map_err(Error::Terminal)?;
     let mut app = App::new(config, crossterm_size());
@@ -277,15 +278,46 @@ async fn drive(
                 apply(app, Msg::Control(incoming.cmd), terminal, &links).await?;
             }
             Some(body) = io.done_rx.recv() => {
-                app.watching = None;
-                apply(app, Msg::Hydrated(body), terminal, &links).await?;
-                flush_queued(app, links.ticket_tx).await;
+                finish_hydrate(app, body, terminal, &links).await?;
             }
             () = tokio::time::sleep(wait) => {
                 apply(app, Msg::Tick, terminal, &links).await?;
             }
+            result = tokio::signal::ctrl_c() => {
+                if result.is_ok() {
+                    quit(app, terminal, &links).await?;
+                }
+            }
         }
     }
+}
+
+async fn finish_hydrate(
+    app: &mut App,
+    body: Result<Snapshot, crate::msg::HydrateFail>,
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    links: &Links<'_>,
+) -> Result<(), Error> {
+    app.watching = None;
+    apply(app, Msg::Hydrated(body), terminal, links).await?;
+    flush_queued(app, links.ticket_tx).await;
+    Ok(())
+}
+
+async fn quit(
+    app: &mut App,
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    links: &Links<'_>,
+) -> Result<(), Error> {
+    apply(
+        app,
+        Msg::Key(KeyEvent {
+            kind: KeyKind::Char('q'),
+        }),
+        terminal,
+        links,
+    )
+    .await
 }
 
 async fn flush_queued(app: &mut App, ticket_tx: &mpsc::Sender<Ticket>) {
@@ -327,7 +359,16 @@ fn decode_event(event: &Event) -> Option<Msg> {
         reason = "v1 ignores terminal events it does not bind"
     )]
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => key_msg(key.code),
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(key.code, KeyCode::Char('c' | 'C'))
+            {
+                return Some(Msg::Key(KeyEvent {
+                    kind: KeyKind::Char('q'),
+                }));
+            }
+            key_msg(key.code)
+        }
         Event::Mouse(mouse) => mouse_msg(mouse.kind, mouse.column, mouse.row),
         Event::Resize(cols, rows) => Some(Msg::Resize(*cols, *rows)),
         _ => None,
@@ -450,6 +491,17 @@ fn paint(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Re
     let (next, _) = update(state, Msg::Painted(hits));
     app.state = next;
     Ok(())
+}
+
+/// Make this process's controlling terminal the stdout pty when it is not one already.
+///
+/// Crossterm reads window size from `/dev/tty`. A TUI spawned with stdout on a
+/// pty and no controlling terminal would otherwise keep the parent's size, so
+/// `SIGWINCH` would not redraw at the pty's columns.
+fn adopt_pty() {
+    if rustix::process::setsid().is_ok() {
+        let _adopted = rustix::process::ioctl_tiocsctty(io::stdout());
+    }
 }
 
 fn crossterm_size() -> Size {

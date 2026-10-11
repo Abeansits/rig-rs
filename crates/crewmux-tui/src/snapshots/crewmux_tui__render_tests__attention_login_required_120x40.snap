@@ -1,11 +1,11 @@
 ---
 source: crates/crewmux-tui/src/render_tests.rs
-expression: "paint(&sized(120, 40, seats))"
+expression: "paint(&attention(120, 40))"
 ---
-"rig-rs  explorer  unavailable                                                                                           "
-"> demo                        select a row                                                                              "
-"                                                                                                                        "
-"                                                                                                                        "
+"rig-rs  attention  unavailable                                                                                       120"
+"v demo                        alpha  login_required                                                                     "
+"  v pod                                                                                                                 "
+"    alpha  attention                                                                                                    "
 "                                                                                                                        "
 "                                                                                                                        "
 "                                                                                                                        "

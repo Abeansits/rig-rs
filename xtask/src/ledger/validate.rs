@@ -55,17 +55,26 @@ fn check_case_rows(rows: &[LedgerRow], errors: &mut Vec<String>) {
                 "line {line_no}: case row parent {parent} is not a file-level ledger row"
             ));
         }
-        if !matches!(row.status, LedgerStatus::Ported | LedgerStatus::Reused) {
-            errors.push(format!(
-                "line {line_no}: case row {} must be ported or reused",
-                row.ts_path
-            ));
-        }
-        if row.rust_test.as_deref().unwrap_or("").is_empty() {
-            errors.push(format!(
-                "line {line_no}: case row {} requires rust_test",
-                row.ts_path
-            ));
+        match row.status {
+            LedgerStatus::Ported | LedgerStatus::Reused
+                if row.rust_test.as_deref().unwrap_or("").is_empty() =>
+            {
+                errors.push(format!(
+                    "line {line_no}: case row {} requires rust_test",
+                    row.ts_path
+                ));
+            }
+            LedgerStatus::Waived if row.note.trim().is_empty() => {
+                errors.push(format!(
+                    "line {line_no}: waived case row {} requires a note",
+                    row.ts_path
+                ));
+            }
+            LedgerStatus::Todo
+            | LedgerStatus::Waived
+            | LedgerStatus::Ported
+            | LedgerStatus::Reused
+            | LedgerStatus::Diverged => {}
         }
     }
 }

@@ -2,10 +2,10 @@
 source: crates/crewmux-tui/src/render_tests.rs
 expression: "paint(&sized(120, 40, vec![seat(\"s1\", \"alpha\", SeatState::Dead)]))"
 ---
-"rig-rs  explorer  unavailable                                                                                           "
-"> demo                        select a row                                                                              "
-"                                                                                                                        "
-"                                                                                                                        "
+"rig-rs  explorer  unavailable                                                                                        120"
+"v demo                        select a row                                                                              "
+"  v pod                                                                                                                 "
+"    alpha  dead                                                                                                         "
 "                                                                                                                        "
 "                                                                                                                        "
 "                                                                                                                        "

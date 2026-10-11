@@ -212,6 +212,8 @@ pub struct State {
     pub collapsed: BTreeSet<RowKey>,
     /// Attach policy for this process.
     pub env: SessionEnv,
+    /// Highest live-event id applied. Events at or below this id are dropped.
+    pub last_event_id: Option<u64>,
 }
 
 impl State {
@@ -234,6 +236,7 @@ impl State {
             explorer_right: explorer_right(size.cols),
             collapsed: BTreeSet::new(),
             env: SessionEnv::default(),
+            last_event_id: None,
         }
     }
 }

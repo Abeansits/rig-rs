@@ -83,7 +83,11 @@ pub(crate) async fn connect_loop<F, Fut>(
         if cancel.is_cancelled() {
             return;
         }
-        match open(last_id).await {
+        let opened = tokio::select! {
+            () = cancel.cancelled() => return,
+            opened = open(last_id) => opened,
+        };
+        match opened {
             Opened::Unavailable => {
                 let _ = status.send(ConnState::Unavailable).await;
                 return;
@@ -143,22 +147,27 @@ async fn read_stream(
 
 #[derive(Default)]
 struct Parser {
+    /// Bytes that are not yet a complete UTF-8 sequence.
+    pending: Vec<u8>,
     buf: String,
     data: Vec<String>,
     /// SSE `id:` for the frame currently being built.
     id: Option<u64>,
     /// Id of the last finished frame that carried one.
     last_id: Option<u64>,
+    /// The current frame exceeded [`MAX_FRAME_CHARS`] and is discarded until the blank line.
+    skip_frame: bool,
 }
 
 impl Parser {
     async fn push(&mut self, chunk: &[u8], events: &mpsc::Sender<Value>) -> bool {
-        let text = String::from_utf8_lossy(chunk);
-        self.buf.push_str(&text);
-        if self.buf.len() > MAX_FRAME_CHARS {
+        self.pending.extend_from_slice(chunk);
+        self.buf.push_str(&take_utf8(&mut self.pending));
+        if !self.buf.contains('\n') && self.buf.len() > MAX_FRAME_CHARS {
             self.buf.clear();
             self.data.clear();
-            return false;
+            self.id = None;
+            self.skip_frame = true;
         }
         let mut saw = false;
         while let Some(pos) = self.buf.find('\n') {
@@ -172,9 +181,15 @@ impl Parser {
                 .unwrap_or("")
                 .to_owned();
             self.buf = rest;
+            if frame_over_cap(&self.data, &line) {
+                self.data.clear();
+                self.id = None;
+                self.skip_frame = true;
+            }
             if line.is_empty() {
-                let sse_id = self.id.take();
-                if let Some((event, id)) = finish_frame(&self.data, sse_id) {
+                if !self.skip_frame
+                    && let Some((event, id)) = finish_frame(&self.data, self.id.take())
+                {
                     if let Some(id) = id {
                         self.last_id = Some(id);
                     }
@@ -183,15 +198,79 @@ impl Parser {
                     }
                     saw = true;
                 }
+                self.id = None;
                 self.data.clear();
-            } else if let Some(id) = id_field(&line) {
-                self.id = Some(id);
-            } else if let Some(value) = data_field(&line) {
-                self.data.push(value);
+                self.skip_frame = false;
+            } else if !self.skip_frame {
+                if let Some(id) = id_field(&line) {
+                    self.id = Some(id);
+                } else if let Some(value) = data_field(&line) {
+                    self.data.push(value);
+                }
             }
         }
         saw
     }
+}
+
+fn frame_over_cap(data: &[String], line: &str) -> bool {
+    let mut total = line.len();
+    for part in data {
+        total = total.saturating_add(part.len());
+    }
+    total > MAX_FRAME_CHARS
+}
+
+/// Decode complete UTF-8 and keep a trailing incomplete sequence for the next chunk.
+fn take_utf8(pending: &mut Vec<u8>) -> String {
+    match std::str::from_utf8(pending) {
+        Ok(text) => {
+            let owned = text.to_owned();
+            pending.clear();
+            owned
+        }
+        Err(err) => {
+            let valid = err.valid_up_to();
+            let head = pending.get(..valid).unwrap_or(&[]);
+            let mut text = match std::str::from_utf8(head) {
+                Ok(text) => text.to_owned(),
+                Err(_) => String::new(),
+            };
+            match err.error_len() {
+                None => {
+                    pending.drain(..valid);
+                }
+                Some(len) => {
+                    let end = valid.saturating_add(len).min(pending.len());
+                    pending.drain(..end);
+                    text.push('\u{FFFD}');
+                }
+            }
+            text
+        }
+    }
+}
+
+enum HeadClass {
+    Stream,
+    Unavailable,
+    Retry,
+}
+
+fn head_class(head: &str) -> HeadClass {
+    let sse = head.to_ascii_lowercase().contains("text/event-stream");
+    match status_code(head) {
+        Some(code) if (200..300).contains(&code) && sse => HeadClass::Stream,
+        Some(code) if (200..300).contains(&code) => HeadClass::Unavailable,
+        Some(_) | None => HeadClass::Retry,
+    }
+}
+
+fn status_code(head: &str) -> Option<u16> {
+    let line = head.lines().next()?;
+    let mut parts = line.split_whitespace();
+    let _http = parts.next()?;
+    parts.next()?.parse().ok()
 }
 
 fn data_field(line: &str) -> Option<String> {
@@ -239,8 +318,10 @@ pub(crate) async fn open_unix(path: &std::path::Path, last_id: Option<u64>) -> O
         }
     };
     let head = String::from_utf8_lossy(buf.get(..header_at).unwrap_or(&[]));
-    if !head.contains("200") || !head.to_ascii_lowercase().contains("text/event-stream") {
-        return Opened::Unavailable;
+    match head_class(&head) {
+        HeadClass::Stream => {}
+        HeadClass::Unavailable => return Opened::Unavailable,
+        HeadClass::Retry => return Opened::Failed,
     }
     let rest = buf.get(header_at..).unwrap_or(&[]).to_vec();
     Opened::Chunks(byte_stream(stream, rest))
@@ -294,7 +375,7 @@ fn finish_frame(data: &[String], sse_id: Option<u64>) -> Option<(Value, Option<u
 
 #[cfg(test)]
 mod tests {
-    use super::event_request;
+    use super::{HeadClass, Parser, event_request, head_class, take_utf8};
 
     #[test]
     fn resume_request_names_last_event_id() {
@@ -305,5 +386,45 @@ mod tests {
         let again = event_request(Some(4));
         assert!(again.contains("GET /api/events?last_event_id=4 "));
         assert!(again.contains("Last-Event-ID: 4\r\n"));
+    }
+
+    #[test]
+    fn non_200_retries_and_a_json_200_does_not() {
+        assert!(matches!(
+            head_class("HTTP/1.1 503 Service Unavailable\r\n\r\n"),
+            HeadClass::Retry
+        ));
+        assert!(matches!(
+            head_class("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n"),
+            HeadClass::Unavailable
+        ));
+        assert!(matches!(
+            head_class("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n"),
+            HeadClass::Stream
+        ));
+    }
+
+    #[test]
+    fn utf8_sequences_span_chunks() {
+        let mut pending = vec![0xC3];
+        assert_eq!(take_utf8(&mut pending), "");
+        assert_eq!(pending, vec![0xC3]);
+        pending.push(0xA9);
+        assert_eq!(take_utf8(&mut pending), "é");
+        assert_eq!(pending, Vec::<u8>::new());
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_is_dropped_and_the_next_frame_parses() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let mut parser = Parser::default();
+        let mut huge = b"data: ".to_vec();
+        huge.extend(std::iter::repeat_n(b'x', super::MAX_FRAME_CHARS));
+        huge.extend(b"\n\n");
+        assert!(!parser.push(&huge, &tx).await);
+        let frame = b"data: {\"id\":2,\"type\":\"gap\"}\n\n";
+        assert!(parser.push(frame, &tx).await);
+        let value = rx.try_recv().expect("frame");
+        assert_eq!(value.get("id").and_then(serde_json::Value::as_u64), Some(2));
     }
 }

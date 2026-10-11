@@ -93,12 +93,7 @@ fn push_seats(pod: &PodNode, rows: &mut Vec<VisibleRow>) {
             depth: 2,
             disclosure: false,
             open: false,
-            title: format!(
-                "{}  {}  {}",
-                seat.name.as_str(),
-                seat.state.label(),
-                seat.runtime.label()
-            ),
+            title: format!("{}  {}", seat.name.as_str(), seat.state.label()),
         });
     }
 }

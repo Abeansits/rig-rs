@@ -50,6 +50,10 @@ parking_lot = "0.12.5"
 ratatui = { version = "0.30.2", features = ["crossterm"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures-util = "0.3.34"
+# AC10 pty harness. `cargo add` (crates.io), then hoisted. nix wraps openpty/termios/poll;
+# rustix sets the window size without an ioctl macro in this repo.
+nix = { version = "0.31.3", features = ["term", "signal", "poll"] }
+rustix = { version = "1.1.5", features = ["termios", "process"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

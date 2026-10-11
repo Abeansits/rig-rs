@@ -159,7 +159,7 @@ fn seeded_ledger_is_check_green() {
     let root = workspace_root();
     let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     let rows = parse_csv(&text).unwrap();
-    assert_eq!(rows.len(), 1312);
+    assert_eq!(rows.len(), 1354);
     for row in &rows {
         match row.status {
             LedgerStatus::Todo => {}

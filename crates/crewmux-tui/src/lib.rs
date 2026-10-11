@@ -42,6 +42,8 @@ pub use view::view;
 #[cfg(test)]
 mod fake_api;
 #[cfg(test)]
+mod hitmap_tests;
+#[cfg(test)]
 mod parity_tests;
 #[cfg(test)]
 mod render_tests;

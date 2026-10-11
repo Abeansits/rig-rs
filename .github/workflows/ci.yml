@@ -31,6 +31,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: test
         run: cargo test --workspace --locked
+      - name: Release 20-seat render budget
+        run: cargo test -p crewmux-tui --release --locked --lib render_tests::twenty_seat_frame_is_under_five_milliseconds_in_release -- --exact
 
   # ---- QA Bot additions (new jobs only) ----
   nextest:
@@ -237,7 +239,7 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-nextest
-      - name: Real-tmux tests (crewmux-mux, feature tmux-it)
+      - name: Real-tmux tests (crewmux-tui and crewmux-mux, feature tmux-it)
         shell: bash
         env:
           INSTA_UPDATE: "no"
@@ -245,11 +247,13 @@ jobs:
           RIG_REQUIRE_TMUX: "1"
         run: |
           set -euo pipefail
-          if ! grep -qE '^tmux-it *=' crates/crewmux-mux/Cargo.toml 2>/dev/null; then
-            echo "::notice::crewmux-mux has no tmux-it feature yet (pre slice 1b); nothing to run"
-            exit 0
+          cargo build -p rig --locked
+          if grep -qE '^tmux-it *=' crates/crewmux-mux/Cargo.toml 2>/dev/null; then
+            cargo nextest run -p crewmux-mux --features tmux-it --profile ci --locked --no-tests=warn
+          else
+            echo "::notice::crewmux-mux has no tmux-it feature yet (pre slice 1b)"
           fi
-          cargo nextest run -p crewmux-mux --features tmux-it --profile ci --locked --no-tests=warn
+          cargo nextest run -p crewmux-tui --features tmux-it --profile ci --locked --no-tests=warn
 
   # Single required check for branch protection: add only "ci-pass" as required.
   ci-pass:

@@ -131,7 +131,6 @@ fn on_hydrated(state: &mut State, result: Result<crewmux_api::Snapshot, HydrateF
 fn apply_snapshot(state: &mut State, snapshot: crewmux_api::Snapshot) {
     state.snapshot = snapshot;
     state.load.stale = false;
-    state.load.connection = ConnState::Connected;
     state.load.last_success_at = Some(state.now);
     for key in rows::disclosure_keys(&state.snapshot) {
         if !state.collapsed.contains(&key) {
@@ -144,6 +143,10 @@ fn apply_snapshot(state: &mut State, snapshot: crewmux_api::Snapshot) {
 }
 
 fn on_live(state: &mut State, event: &StreamEvent, cmds: &mut Vec<Cmd>) {
+    if state.last_event_id.is_some_and(|seen| event.id <= seen) {
+        return;
+    }
+    state.last_event_id = Some(event.id);
     match event.kind {
         StreamKind::Gap => {
             state.load.stale = true;

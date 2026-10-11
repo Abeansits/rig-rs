@@ -3,8 +3,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crewmux_api::{RigId, StreamEvent, StreamKind};
+use crewmux_api::{RigId, SeatId, SeatState, Snapshot, StreamEvent, StreamKind, StreamPayload};
 use parking_lot::Mutex;
+use proptest::prelude::*;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -13,7 +14,7 @@ use crate::input::{
     Dispatch, HitAction, MouseAction, Perform, decode_mice, dispatch_sgr, resolve_mouse_action,
     sgr_click,
 };
-use crate::msg::{Cmd, KeyEvent, KeyKind, Msg};
+use crate::msg::{Cmd, HydrateFail, KeyEvent, KeyKind, Msg};
 use crate::refresh::SingleFlight;
 use crate::sse::{Opened, connect_loop};
 use crate::state::{ConnState, LoadState, RowKey, State};
@@ -129,20 +130,57 @@ fn primary_click_dispatch_ignores_other_buttons() {
     let open = HitAction::Open {
         view: "rig:example".to_owned(),
     };
-    let seq = |button| format!("\u{1b}[<{button};5;3M");
+    let start = HitAction::Startup;
+    let copy = HitAction::Copy {
+        label: "Socket".to_owned(),
+        value: "owned.sock".to_owned(),
+    };
+    let seq = |button: u16| format!("\u{1b}[<{button};5;3M");
     for button in [1_u16, 2] {
         assert!(matches!(
             dispatch_sgr(&seq(button), &open, false, 20, 0),
             Dispatch::None
         ));
+        assert!(matches!(
+            dispatch_sgr(&seq(button), &copy, false, 20, 0),
+            Dispatch::None
+        ));
+    }
+    for button in [1_u16, 2, 64, 65] {
+        assert!(
+            !matches!(
+                dispatch_sgr(&seq(button), &start, true, 20, 0),
+                Dispatch::StartupKey
+            ),
+            "button {button} launched startup"
+        );
+    }
+    for button in [0_u16, 4, 8, 16] {
+        assert!(
+            matches!(
+                dispatch_sgr(&seq(button), &open, false, 20, 0),
+                Dispatch::Perform(Perform::Open { .. })
+            ),
+            "button {button}"
+        );
+    }
+    for button in [64_u16, 65, 68, 80] {
+        let delta: i16 = if button & 1 == 0 { -3 } else { 3 };
+        assert_eq!(
+            dispatch_sgr(&seq(button), &open, false, 20, 0),
+            Dispatch::Perform(Perform::Select {
+                delta,
+                row_count: 0
+            })
+        );
     }
     assert!(matches!(
-        dispatch_sgr(&seq(0), &open, false, 20, 0),
-        Dispatch::Perform(Perform::Open { .. })
+        dispatch_sgr(&seq(0), &start, true, 20, 0),
+        Dispatch::StartupKey
     ));
     assert!(matches!(
-        dispatch_sgr(&seq(64), &open, false, 20, 0),
-        Dispatch::Perform(Perform::Select { delta: -3, .. })
+        dispatch_sgr(&seq(0), &copy, false, 20, 0),
+        Dispatch::Perform(Perform::Copy { .. })
     ));
 }
 
@@ -247,24 +285,58 @@ fn disclosure_hit_beats_the_row() {
     assert!(matches!(hits.hit(2, 2), Some(Action::Select(_))));
 }
 
+fn arb_msg() -> impl Strategy<Value = Msg> {
+    let keys = prop_oneof![
+        Just(KeyKind::Up),
+        Just(KeyKind::Down),
+        Just(KeyKind::Enter),
+        Just(KeyKind::Char('j')),
+        Just(KeyKind::Char('k')),
+        Just(KeyKind::Char('q')),
+        Just(KeyKind::Char('r')),
+        Just(KeyKind::Char('a')),
+        Just(KeyKind::Char(' ')),
+        Just(KeyKind::Char('3')),
+    ];
+    let live = (0u64..6, 0u8..3).prop_map(|(id, kind)| {
+        let kind = match kind {
+            0 => StreamKind::Gap,
+            1 => StreamKind::SeatDied,
+            _ => StreamKind::Activity,
+        };
+        Msg::Live(StreamEvent {
+            id,
+            kind,
+            payload: None,
+        })
+    });
+    prop_oneof![
+        Just(Msg::Tick),
+        keys.prop_map(|kind| Msg::Key(KeyEvent { kind })),
+        Just(Msg::Resize(100, 30)),
+        Just(Msg::Resize(80, 24)),
+        Just(Msg::Conn(ConnState::Connected)),
+        Just(Msg::Conn(ConnState::Dropped)),
+        Just(Msg::Conn(ConnState::Reconnecting)),
+        Just(Msg::Hydrated(Err(HydrateFail::Unreachable))),
+        Just(Msg::Hydrated(Ok(Snapshot::empty()))),
+        live,
+    ]
+}
+
 proptest::proptest! {
     #[test]
-    fn update_is_pure(step in 0u8..8) {
-        let state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
-        let msg = match step % 4 {
-            0 => Msg::Tick,
-            1 => Msg::Key(KeyEvent { kind: KeyKind::Char('j') }),
-            2 => Msg::Resize(100, 30),
-            _ => Msg::Conn(ConnState::Connected),
-        };
-        let (left, left_cmds) = update(state.clone(), msg.clone());
-        let (right, right_cmds) = update(state, msg);
-        assert_eq!(left.section, right.section);
-        assert_eq!(left.scroll, right.scroll);
-        assert_eq!(left.load, right.load);
-        assert_eq!(left_cmds.len(), right_cmds.len());
-        for (lhs, rhs) in left_cmds.iter().zip(right_cmds.iter()) {
-            assert!(cmd_eq(lhs, rhs));
+    fn update_is_pure(msgs in proptest::collection::vec(arb_msg(), 1..12)) {
+        let start = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
+        let mut left = start.clone();
+        let mut right = start;
+        for msg in msgs {
+            let (next, left_cmds) = update(left, msg.clone());
+            left = next;
+            let (next, right_cmds) = update(right, msg);
+            right = next;
+            prop_assert_eq!(&left, &right);
+            prop_assert_eq!(&left_cmds, &right_cmds);
         }
     }
 }
@@ -435,20 +507,132 @@ async fn reconnect_passes_the_last_event_id() {
     drain.abort();
 }
 
-fn chunk(bytes: &'static [u8]) -> Opened {
-    Opened::Chunks(Box::pin(futures_util::stream::iter([Ok(bytes.to_vec())])))
+#[test]
+fn live_events_drop_replayed_ids() {
+    let state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
+    let event = |id: u64| StreamEvent {
+        id,
+        kind: StreamKind::Gap,
+        payload: None,
+    };
+    let (state, cmds) = update(state, Msg::Live(event(2)));
+    assert_eq!(state.last_event_id, Some(2));
+    assert_eq!(cmds, vec![Cmd::Hydrate]);
+    let (replayed, cmds) = update(state.clone(), Msg::Live(event(2)));
+    assert_eq!(replayed, state);
+    assert_eq!(cmds, Vec::new());
+    let (older, cmds) = update(state.clone(), Msg::Live(event(1)));
+    assert_eq!(older, state);
+    assert_eq!(cmds, Vec::new());
+    let (newer, cmds) = update(state, Msg::Live(event(4)));
+    assert_eq!(newer.last_event_id, Some(4));
+    assert!(newer.last_event_id > older.last_event_id);
+    assert_eq!(cmds, vec![Cmd::Hydrate]);
 }
 
-#[expect(
-    clippy::match_same_arms,
-    reason = "each command pair is its own equality case"
-)]
-fn cmd_eq(left: &Cmd, right: &Cmd) -> bool {
-    match (left, right) {
-        (Cmd::Hydrate, Cmd::Hydrate) => true,
-        (Cmd::Quit, Cmd::Quit) => true,
-        (Cmd::Reply(a, av), Cmd::Reply(b, bv)) => a == b && av == bv,
-        (Cmd::Attach(_), Cmd::Attach(_)) => true,
-        _ => false,
-    }
+#[test]
+fn hydrate_does_not_mark_connected_while_the_stream_is_down() {
+    let mut state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
+    state.load.connection = ConnState::Dropped;
+    state.load.stale = true;
+    let (next, _) = update(state, Msg::Hydrated(Ok(Snapshot::empty())));
+    assert_eq!(next.load.connection, ConnState::Dropped);
+    assert!(!next.load.stale);
+    assert!(next.load.last_success_at.is_some());
+    assert!(next.load.settled);
+}
+
+#[test]
+fn hydrate_groups_pods_under_the_rig() {
+    let state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
+    let snapshot = Snapshot {
+        seats: vec![crewmux_api::SeatView {
+            id: SeatId::parse("s1").expect("seat"),
+            name: crewmux_api::SeatName::parse("alpha").expect("name"),
+            rig_id: RigId::parse("rig-1").expect("rig"),
+            rig_name: crewmux_api::RigName::parse("demo").expect("rig name"),
+            pod: crewmux_api::PodName::parse("pod").expect("pod"),
+            state: SeatState::Ready,
+            runtime: crewmux_api::RuntimeKind::Stub,
+            session: None,
+            spec: None,
+        }],
+        health: None,
+        activity: vec![],
+    };
+    let (next, _) = update(state, Msg::Hydrated(Ok(snapshot)));
+    let rows = crate::rows::visible_rows(&next);
+    assert!(rows.iter().any(|row| matches!(row.key, RowKey::Rig(_))));
+    assert!(rows.iter().any(|row| matches!(row.key, RowKey::Pod { .. })));
+    assert!(rows.iter().any(|row| matches!(row.key, RowKey::Seat(_))));
+}
+
+#[test]
+fn seat_state_change_flashes_that_row() {
+    let mut state = State::new(crate::state::Size::new(80, 24), std::time::Instant::now());
+    state.snapshot.seats.push(crewmux_api::SeatView {
+        id: SeatId::parse("s1").expect("seat"),
+        name: crewmux_api::SeatName::parse("alpha").expect("name"),
+        rig_id: RigId::parse("rig-1").expect("rig"),
+        rig_name: crewmux_api::RigName::parse("demo").expect("rig name"),
+        pod: crewmux_api::PodName::parse("pod").expect("pod"),
+        state: SeatState::Ready,
+        runtime: crewmux_api::RuntimeKind::Stub,
+        session: None,
+        spec: None,
+    });
+    let event = StreamEvent {
+        id: 1,
+        kind: StreamKind::SeatStateChanged,
+        payload: Some(StreamPayload {
+            seat: SeatId::parse("s1").expect("seat"),
+            state: Some(SeatState::Dead),
+            summary: None,
+        }),
+    };
+    let (next, _) = update(state, Msg::Live(event));
+    assert_eq!(
+        next.snapshot.seats.first().map(|seat| &seat.state),
+        Some(&SeatState::Dead)
+    );
+    assert!(
+        next.flashes
+            .iter()
+            .any(|flash| matches!(&flash.key, RowKey::Seat(id) if id.as_str() == "s1"))
+    );
+}
+
+#[tokio::test]
+async fn cancel_during_open_delivers_nothing() {
+    let cancel = CancellationToken::new();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(4);
+    let (status_tx, mut status_rx) = tokio::sync::mpsc::channel(4);
+    let started = Arc::new(tokio::sync::Notify::new());
+    let started_open = Arc::clone(&started);
+    let task_cancel = cancel.clone();
+    let task = tokio::spawn(async move {
+        connect_loop(
+            task_cancel,
+            std::time::Duration::from_millis(80),
+            move |_last_id| {
+                let started_open = Arc::clone(&started_open);
+                async move {
+                    started_open.notify_one();
+                    std::future::pending::<Opened>().await
+                }
+            },
+            event_tx,
+            status_tx,
+        )
+        .await;
+    });
+    started.notified().await;
+    cancel.cancel();
+    task.await.expect("loop");
+    assert!(event_rx.try_recv().is_err());
+    assert!(status_rx.try_recv().is_err());
+}
+
+fn chunk(bytes: &'static [u8]) -> Opened {
+    Opened::Chunks(Box::pin(futures_util::stream::iter([Ok(bytes.to_vec())])))
 }

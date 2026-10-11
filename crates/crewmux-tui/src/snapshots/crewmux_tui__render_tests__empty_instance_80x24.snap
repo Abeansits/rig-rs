@@ -2,7 +2,7 @@
 source: crates/crewmux-tui/src/render_tests.rs
 expression: "paint(&sized(80, 24, vec![]))"
 ---
-"rig-rs  explorer  unavailable                                                   "
+"rig-rs  explorer  unavailable                                                 80"
 "no seats                no seats                                                "
 "                                                                                "
 "                                                                                "

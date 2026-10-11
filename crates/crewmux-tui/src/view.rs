@@ -30,7 +30,7 @@ pub fn view(state: &State, frame: &mut Frame) -> HitMap {
     let Some(footer) = chunks.get(2).copied() else {
         return hits;
     };
-    paint_line(frame, header, &header_text(state), Style::default());
+    paint_header(frame, header, state);
     paint_body(frame, body, state, &mut hits);
     paint_line(frame, footer, &footer_text(state), Style::default());
     hits
@@ -140,7 +140,29 @@ fn paint_line(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     frame.render_widget(Paragraph::new(fit(text, area.width)).style(style), area);
 }
 
-fn header_text(state: &State) -> String {
+fn paint_header(frame: &mut Frame, area: Rect, state: &State) {
+    let body = header_body(state);
+    let tail = state.size.cols.to_string();
+    let tail_w = u16::try_from(tail.chars().count()).unwrap_or(0);
+    if tail_w == 0 || area.width <= tail_w {
+        paint_line(frame, area, &body, Style::default());
+        return;
+    }
+    let left = Rect {
+        width: area.width.saturating_sub(tail_w),
+        ..area
+    };
+    let right = Rect {
+        x: area.x.saturating_add(area.width.saturating_sub(tail_w)),
+        width: tail_w,
+        ..area
+    };
+    paint_line(frame, left, &body, Style::default());
+    // Its own widget so a wide frame addresses this column instead of writing one run from column 1.
+    paint_line(frame, right, &tail, Style::default());
+}
+
+fn header_body(state: &State) -> String {
     let mark = if state.load.shows_live() {
         " live"
     } else if state.load.stale {

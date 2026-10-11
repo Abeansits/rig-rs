@@ -1,11 +1,11 @@
 ---
 source: crates/crewmux-tui/src/render_tests.rs
-expression: paint(&state)
+expression: "paint(&flashed(80, 24))"
 ---
-"rig-rs  explorer  unavailable                                                   "
-"> demo                  select a row                                            "
-"                                                                                "
-"                                                                                "
+"rig-rs  explorer  unavailable                                                 80"
+"v demo                  select a row                                            "
+"  v pod                                                                         "
+"    alpha  ready                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "
