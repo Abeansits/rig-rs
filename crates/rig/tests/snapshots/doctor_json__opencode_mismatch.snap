@@ -1,0 +1,70 @@
+---
+source: crates/rig/tests/doctor_json.rs
+expression: stdout
+---
+{
+  "healthy": true,
+  "checks": [
+    {
+      "name": "tmux",
+      "status": "pass",
+      "message": "tmux 3.5a"
+    },
+    {
+      "name": "tmux_conf",
+      "status": "pass",
+      "message": "managed block is current"
+    },
+    {
+      "name": "tmux_global_window_size",
+      "status": "pass",
+      "message": "global window-size is not manual"
+    },
+    {
+      "name": "daemon",
+      "status": "pass",
+      "message": "daemon /healthz ok"
+    },
+    {
+      "name": "claude",
+      "status": "pass",
+      "message": "claude 2.1.0"
+    },
+    {
+      "name": "claude_global_config",
+      "status": "pass",
+      "message": "no runtime writes pending"
+    },
+    {
+      "name": "codex",
+      "status": "pass",
+      "message": "codex 0.40.0"
+    },
+    {
+      "name": "codex_config",
+      "status": "pass",
+      "message": "codex config entries are current"
+    },
+    {
+      "name": "opencode",
+      "status": "warn",
+      "message": "opencode 1.18.0 is outside the tested 1.19 line",
+      "fix": "Install opencode 1.19.0"
+    },
+    {
+      "name": "herdr",
+      "status": "pass",
+      "message": "herdr protocol 22"
+    },
+    {
+      "name": "ghostty",
+      "status": "pass",
+      "message": "ghostty 1.3.0"
+    },
+    {
+      "name": "rig_home",
+      "status": "pass",
+      "message": "rig home is writable and the socket path fits"
+    }
+  ]
+}
