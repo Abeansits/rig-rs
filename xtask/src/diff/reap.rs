@@ -83,6 +83,9 @@ fn ensure_rs(bin: &Path, home: &HermeticHome) -> Result<(), Error> {
     if health_ok(&socket) {
         return Ok(());
     }
+    let err_path = rig_home.join("run/daemon.err");
+    let err_file = std::fs::File::create(&err_path)
+        .map_err(|source| io_err("create daemon stderr", source))?;
     let mut command = Command::new(bin);
     command
         .args(["daemon", "run"])
@@ -91,12 +94,12 @@ fn ensure_rs(bin: &Path, home: &HermeticHome) -> Result<(), Error> {
         .current_dir(&home.home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::from(err_file));
     command.process_group(0);
-    command
+    let mut child = command
         .spawn()
         .map_err(|source| io_err("spawn rig daemon run", source))?;
-    wait_health(&socket)
+    wait_health(&socket, &mut child, &err_path)
 }
 
 fn ensure_ts(node: &Path, pkg: &Path, port: u16, home: &HermeticHome) -> Result<(), Error> {
@@ -160,15 +163,41 @@ fn health_ok(socket: &Path) -> bool {
         .is_ok_and(|response| response.status == 200)
 }
 
-fn wait_health(socket: &Path) -> Result<(), Error> {
+fn wait_health(
+    socket: &Path,
+    child: &mut std::process::Child,
+    err_path: &Path,
+) -> Result<(), Error> {
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
         if health_ok(socket) {
             return Ok(());
         }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|source| io_err("wait for rig daemon run", source))?
+        {
+            return Err(Error::Message(format!(
+                "rig daemon run exited {} before /healthz: {}",
+                status.code().unwrap_or(1),
+                stderr_tail(err_path)
+            )));
+        }
         thread::park_timeout(Duration::from_millis(50));
     }
-    Err(Error::Message("daemon did not answer /healthz".to_owned()))
+    Err(Error::Message(format!(
+        "daemon did not answer /healthz: {}",
+        stderr_tail(err_path)
+    )))
+}
+
+fn stderr_tail(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let text = text.trim();
+    if text.len() <= 500 {
+        return text.to_owned();
+    }
+    text.get(text.len() - 500..).unwrap_or(text).to_owned()
 }
 
 fn signal(pid: u32, name: &str) {
