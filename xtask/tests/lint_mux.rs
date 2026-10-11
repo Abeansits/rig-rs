@@ -153,3 +153,25 @@ fn argv_tokens_in_an_array_cannot_hide_a_global_window_size() {
     lint_mux_at(&root).expect("session scope is allowed");
     drop(fs::remove_dir_all(&root));
 }
+
+#[test]
+fn short_flag_groups_wg_and_gw_are_global() {
+    let root = scratch("flags");
+    let rust = root.join("crates/crewmux-mux/src/argv.rs");
+    let key = ["window", "size"].join("-");
+    for letters in ["wg", "gw"] {
+        let flag = format!("-{letters}");
+        let array = format!(
+            "fn probe() {{ let _ = &[\"set-option\", \"{flag}\", \"{key}\", \"latest\"]; }}\n"
+        );
+        write(&rust, &array).expect("write");
+        let err = lint_mux_at(&root).expect_err(letters);
+        assert!(err.contains("argv.rs"), "{err}");
+    }
+    let long = format!("--{}", "global");
+    let allowed =
+        format!("fn probe() {{ let _ = &[\"set-option\", \"{long}\", \"{key}\", \"latest\"]; }}\n");
+    write(&rust, &allowed).expect("write");
+    lint_mux_at(&root).expect("a long flag is not a short flag group");
+    drop(fs::remove_dir_all(&root));
+}

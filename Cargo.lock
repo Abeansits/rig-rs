@@ -370,6 +370,7 @@ dependencies = [
  "bytes",
  "crewmux-types",
  "proptest",
+ "rustix",
  "thiserror",
  "tokio",
  "tokio-util",

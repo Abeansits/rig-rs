@@ -1,5 +1,3 @@
-//! `cargo xtask lint-mux` rejects an attachment format, a global `window-size`, and a shell.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -12,10 +10,7 @@ pub fn workspace_root() -> PathBuf {
 }
 
 /// Fail when sources build a banned attachment format, set `window-size` with
-/// `-g`, or spawn a shell from `crewmux-mux`.
-///
-/// # Errors
-/// Returns the first offending path.
+/// a short flag containing `g`, or spawn a shell from `crewmux-mux`.
 pub fn lint_mux_at(root: &Path) -> Result<(), String> {
     let mut files = Vec::new();
     walk(root, &mut files)?;
@@ -94,7 +89,14 @@ fn window_size_violation(path: &Path, text: &str) -> bool {
 }
 
 fn global_window_size(text: &str) -> bool {
-    text.contains("window-size") && text.split_whitespace().any(|token| token == "-g")
+    text.contains("window-size") && text.split_whitespace().any(short_flag_has_g)
+}
+
+fn short_flag_has_g(token: &str) -> bool {
+    let Some(flags) = token.strip_prefix('-') else {
+        return false;
+    };
+    !flags.is_empty() && flags.chars().all(|ch| ch.is_ascii_alphabetic()) && flags.contains('g')
 }
 
 fn array_groups(text: &str) -> Vec<String> {
@@ -144,18 +146,18 @@ fn array_groups(text: &str) -> Vec<String> {
 
 fn skip_line(bytes: &[u8], index: usize) -> usize {
     let rest = bytes.get(index.saturating_add(2)..).unwrap_or_default();
-    let newline = rest.iter().position(|byte| *byte == b'\n');
-    index
-        .saturating_add(3)
-        .saturating_add(newline.unwrap_or(rest.len()))
+    let at = rest
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .unwrap_or(rest.len());
+    index.saturating_add(3).saturating_add(at)
 }
 
 fn skip_block(bytes: &[u8], index: usize) -> usize {
     let mut index = index.saturating_add(2);
-    while bytes.get(index) != Some(&b'*') || bytes.get(index.saturating_add(1)) != Some(&b'/') {
-        if index >= bytes.len() {
-            return index;
-        }
+    while index < bytes.len()
+        && (bytes.get(index) != Some(&b'*') || bytes.get(index.saturating_add(1)) != Some(&b'/'))
+    {
         index = index.saturating_add(1);
     }
     index.saturating_add(2)
@@ -358,17 +360,14 @@ fn check_shells(path: &Path, text: &str, command: &Regex, binding: &Regex) -> Re
 }
 
 fn is_shell_token(raw: &str) -> bool {
-    let trimmed = raw.trim().trim_matches('"');
     let mut decoded = String::new();
-    let mut chars = trimmed.chars();
+    let mut chars = raw.trim().trim_matches('"').chars();
     while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            if let Some(next) = chars.next() {
-                decoded.push(next);
-            }
+        decoded.push(if ch == '\\' {
+            chars.next().unwrap_or('\\')
         } else {
-            decoded.push(ch);
-        }
+            ch
+        });
     }
     let base = decoded
         .rsplit(['/', '\\'])

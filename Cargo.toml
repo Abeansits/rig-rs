@@ -21,6 +21,9 @@ tokio = { version = "1.53.2", features = ["fs", "io-util", "macros", "process", 
 tokio-util = { version = "0.7.20", features = ["rt"] }
 tracing = "0.1.44"
 ulid = "3.0.0"
+# Direct SIGCHLD for the Linux tmux reap nudge. `cargo add -p crewmux-mux rustix@1.1.5`
+# (the version already in Cargo.lock). Linux-only; feature `process` is on the crate.
+rustix = "1.1.5"
 crewmux-types = { path = "crates/crewmux-types" }
 crewmux-spec = { path = "crates/crewmux-spec" }
 crewmux-core = { path = "crates/crewmux-core" }

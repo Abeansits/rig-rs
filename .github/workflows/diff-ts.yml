@@ -73,6 +73,8 @@ jobs:
         run: cargo build -p rig
 
       - name: Ledger check
+        env:
+          OPENRIG_DIR: ${{ github.workspace }}/openrig
         run: cargo xtask ledger check
 
       - name: Diff against OpenRig v0.6.9

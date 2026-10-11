@@ -93,7 +93,8 @@ async fn send_text_stages_through_a_buffer_file() {
     );
 }
 
-/// ts: packages/daemon/test/tmux-exact-target.test.ts > "a capture of a session that has ended is missing, not its prefix sibling's screen"
+/// Exact session names do not select a prefix sibling. Capture of an ended
+/// session stays on the file-level todo for tmux-exact-target.test.ts.
 #[tokio::test]
 async fn exact_target_does_not_select_a_prefix_sibling() {
     let mux = FakeMux::new();
@@ -107,7 +108,8 @@ async fn exact_target_does_not_select_a_prefix_sibling() {
     assert!(created.windows(2).any(|pair| pair == ["-s", "worker-long"]));
 }
 
-/// ts: packages/daemon/test/tmux-session-names-native.test.ts > "rewrites dot and colon in the stored name and ignores a prefix"
+/// Stored names rewrite `.` and `:` to `_`. Discovery of names that contain
+/// the metadata separator stays on the file-level todo for tmux-session-names-native.test.ts.
 #[tokio::test]
 async fn session_names_rewrite_dot_and_colon() {
     let mux = FakeMux::new();

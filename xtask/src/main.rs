@@ -3,20 +3,20 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use xtask::diff::{
     exit_code, find_node, format_report, load_suite, locate_openrig, self_reports, ts_reports,
     workspace_root,
 };
-use xtask::ledger::{parse_csv, parse_test_list, report, seed_csv, validate};
+use xtask::ledger::{check_case_titles, parse_csv, parse_test_list, report, seed_csv, validate};
 use xtask::{Error, err, io_err, lint_mux_at, lint_workspace_root, out};
 
 const HELP: &str = "\
 xtask diff [--self] [--update] [--case ID] [--bin PATH]
 xtask ledger seed [--openrig DIR]
-xtask ledger check
+xtask ledger check   # with OPENRIG_DIR, case names must exist in that checkout
 xtask ledger report
 xtask lint-mux
 xtask lint claude-json
@@ -212,7 +212,10 @@ fn cmd_check() -> Result<i32, Error> {
     } else {
         None
     };
-    let errors = validate(&rows, &pe_ids, listed.as_ref());
+    let mut errors = validate(&rows, &pe_ids, listed.as_ref());
+    if let Some(dir) = env::var_os("OPENRIG_DIR").filter(|dir| !dir.is_empty()) {
+        errors.extend(check_case_titles(&rows, Path::new(&dir)));
+    }
     if errors.is_empty() {
         out(&format!("ledger ok ({} rows)", rows.len()));
         Ok(0)

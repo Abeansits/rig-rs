@@ -16,10 +16,12 @@ when the new name looks like `rig-dead-%N`.
 Ubuntu's tmux is linked with libutempter. Closing the pane pty can swallow
 `SIGCHLD`, so `pane_dead` is set while `pane_dead_status` stays empty and the
 hook never runs. Upstream tmux sends itself `SIGCHLD` after those utempter
-calls. While a Linux server is connected, this crate does the same from outside
-(`kill -s CHLD` on the server pid) so `waitpid` records the status and the
-hook fires. Other platforms already reap, and the extra signals are not sent
-there.
+calls. On Linux, while the `-L` name is `rig-rs` or `rig-rs-*` and some pane is
+dead with an empty `pane_dead_status`, this crate sends `SIGCHLD` to the server
+pid directly (`rustix`, not a `kill` process) so `waitpid` records the status
+and the hook fires. The pid is reread when the control client reconnects and
+cleared when the server exits, so a reused pid is not signaled. Other sockets,
+including `default`, are not signaled. Other platforms already reap.
 
 ## list-clients format
 
