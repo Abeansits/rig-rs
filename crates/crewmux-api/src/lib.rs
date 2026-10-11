@@ -8,11 +8,14 @@ mod client;
 mod dirs;
 mod endpoint;
 mod error;
+mod stream;
 
 pub use client::{Client, Response, daemon_socket, rig_home};
 pub use dirs::{create_private, open_private};
 pub use endpoint::{
-    AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
-    Healthz, ListSeats, RigDown,
+    AskSeat, AttachInfo, AttachRequest, BroadcastSend, CaptureRequest, CaptureSeat, CreateRigUp,
+    DownRequest, Endpoint, Healthz, ListSeats, QueueClaim, QueueCollection, QueueFallback,
+    QueueHandoff, QueueShow, RigDown, SendMessage, UnclaimItem, Whoami,
 };
 pub use error::Error;
+pub use stream::{EventStream, StreamEvent, StreamKind, StreamPayload};

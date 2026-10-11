@@ -2,7 +2,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, StubAdapter};
@@ -16,9 +15,7 @@ use crate::error::Error;
 use crate::http::router;
 use crate::reconcile::reconcile;
 use crate::runtime::{self, DaemonLock};
-use crate::state::{
-    App, idle_exceeded, now_ms, socket_name_from_env, stub_binary, stub_script_from_env,
-};
+use crate::state::{App, idle_exceeded, socket_name_from_env, stub_binary, stub_script_from_env};
 
 /// Bind the daemon and serve until shutdown or idle.
 ///
@@ -48,15 +45,22 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
         stub_bin.clone(),
     )));
     let cancel = CancellationToken::new();
-    let app = App {
+    let loaded = {
+        let store = Arc::clone(&store);
+        tokio::task::spawn_blocking(move || store.read(crewmux_store::load_book))
+            .await
+            .map_err(crate::state::join_err)??
+    };
+    let app = App::assemble(
         store,
         mux,
-        up_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        stub_script: stub_script_from_env(),
-        cancel: cancel.clone(),
-        activity: Arc::new(AtomicU64::new(now_ms())),
-        registry: Arc::new(registry),
-    };
+        Arc::new(registry),
+        stub_script_from_env(),
+        cancel.clone(),
+        home.clone(),
+    );
+    *app.queue.lock().await = loaded;
+    app.launch_workers().await;
     reconcile(&app).await?;
     let sock = crewmux_api::daemon_socket(&home);
     let pid = home.join("run/daemon.pid");
@@ -81,11 +85,14 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     tracker.spawn(supervise(app.clone()));
     tracker.spawn(reap(app.clone()));
     tracker.spawn(on_terminate(cancel.clone()));
+    let tasks = app.tasks.clone();
     axum::serve(listener, router(app))
         .with_graceful_shutdown(async move { cancel.cancelled().await })
         .await?;
     tracker.close();
     tracker.wait().await;
+    tasks.close();
+    tasks.wait().await;
     let sock_cleanup = sock.clone();
     let pid_cleanup = pid.clone();
     tokio::task::spawn_blocking(move || remove_runtime_files(&sock_cleanup, &pid_cleanup))

@@ -1,0 +1,6 @@
+---
+source: crates/rig/tests/slice4_cli.rs
+assertion_line: 86
+expression: out.trim()
+---
+Transcripts are disabled. Enable with: rig config set transcripts.enabled true

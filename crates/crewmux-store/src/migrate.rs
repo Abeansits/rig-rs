@@ -1,4 +1,4 @@
-//! Schema v1. `user_version` equals [`MIGRATIONS`]`.len()` after a successful open.
+//! Schema v2. `user_version` equals [`MIGRATIONS`]`.len()` after a successful open.
 
 use std::sync::LazyLock;
 
@@ -42,6 +42,41 @@ CREATE TABLE events (
 );
 ";
 
+const QUEUE_SCHEMA: &str = "
+CREATE TABLE queue_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    state TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE queue_transitions (
+    id INTEGER PRIMARY KEY NOT NULL,
+    qitem TEXT NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE queue_items_archive (
+    id TEXT PRIMARY KEY NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE queue_transitions_archive (
+    id INTEGER PRIMARY KEY NOT NULL,
+    qitem TEXT NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE inbox (
+    id TEXT PRIMARY KEY NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc TEXT NOT NULL
+);
+CREATE TABLE delivery_receipts (
+    cursor INTEGER PRIMARY KEY NOT NULL,
+    doc TEXT NOT NULL
+);
+";
+
 /// The migrations this build applies.
 pub struct MigrationSet {
     inner: Migrations<'static>,
@@ -55,17 +90,17 @@ impl MigrationSet {
         self.len
     }
 
-    /// True when no migrations are embedded. This build always has one.
+    /// True when no migrations are embedded. This build always has some.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 }
 
-/// Schema v1.
+/// Schema v1 plus the queue, inbox, and receipt tables.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
-    inner: Migrations::new(vec![M::up(SCHEMA)]),
-    len: 1,
+    inner: Migrations::new(vec![M::up(SCHEMA), M::up(QUEUE_SCHEMA)]),
+    len: 2,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

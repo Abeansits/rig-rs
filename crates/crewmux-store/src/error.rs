@@ -33,4 +33,7 @@ pub enum Error {
     /// JSON stored in the event log could not be read.
     #[error("event json: {0}")]
     Event(String),
+    /// A test crash hook rolled the transaction back.
+    #[error("crash hook {0}")]
+    CrashHook(&'static str),
 }

@@ -2,7 +2,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, StubAdapter};
@@ -17,7 +16,15 @@ use crate::launch::bring_up;
 use crate::query::{attach_argv, capture, down, list_seats};
 use crate::state::App;
 
-async fn harness(script: Option<&str>) -> (App, Arc<FakeMux>) {
+pub(crate) async fn harness(script: Option<&str>) -> (App, Arc<FakeMux>) {
+    harness_with(script, Path::new("."), None).await
+}
+
+pub(crate) async fn harness_with(
+    script: Option<&str>,
+    home: &Path,
+    transcript_cap: Option<u64>,
+) -> (App, Arc<FakeMux>) {
     let mux = Arc::new(FakeMux::with_socket("rig-rs"));
     mux.enable_stub_scripts().await;
     let store = Arc::new(Store::open(Path::new(":memory:")).expect("db"));
@@ -28,20 +35,23 @@ async fn harness(script: Option<&str>) -> (App, Arc<FakeMux>) {
         Arc::clone(&shared),
         "rig-stub-agent",
     )));
-    let app = App {
+    let mut app = App::assemble(
         store,
-        mux: shared,
-        up_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        stub_script: script.map(str::to_owned),
-        cancel: CancellationToken::new(),
-        activity: Arc::new(AtomicU64::new(0)),
-        registry: Arc::new(registry),
-    };
+        shared,
+        Arc::new(registry),
+        script.map(str::to_owned),
+        CancellationToken::new(),
+        home.to_path_buf(),
+    );
+    if let Some(cap) = transcript_cap {
+        app.transcript_cap = cap;
+    }
+    app.launch_workers().await;
     tokio::spawn(supervise(app.clone()));
     (app, mux)
 }
 
-fn two_stub(cwd: &str) -> String {
+pub(crate) fn two_stub(cwd: &str) -> String {
     format!(
         "name: pair\nseats:\n  - name: one\n    runtime: stub\n    cwd: {cwd}\n  - name: two\n    runtime: stub\n    cwd: {cwd}\n"
     )

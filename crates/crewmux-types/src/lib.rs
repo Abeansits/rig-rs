@@ -14,7 +14,7 @@ pub mod tmux_version;
 
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
-pub use id::{RigId, RigName, SeatId, SeatName, SessionId};
+pub use id::{QItemId, RigId, RigName, SeatId, SeatName, SessionId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use tmux_version::{Version, parse_version};

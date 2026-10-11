@@ -9,14 +9,19 @@ publish.workspace = true
 
 [dependencies]
 crewmux-core.workspace = true
+crewmux-messaging.workspace = true
 crewmux-types.workspace = true
 rusqlite.workspace = true
+serde.workspace = true
 rusqlite_migration.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+crewmux-core.workspace = true
+crewmux-messaging.workspace = true
+crewmux-types.workspace = true
 tempfile.workspace = true
 
 [lints]

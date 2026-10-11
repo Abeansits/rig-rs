@@ -16,6 +16,7 @@ mod paths;
 mod setup_apply;
 mod setup_cmd;
 mod setup_plan;
+mod slice4;
 mod spawn;
 
 pub use error::Error;
@@ -117,6 +118,18 @@ enum Commands {
     Setup(command::SetupArgs),
     /// Read-only version and environment checks.
     Doctor(command::DoctorArgs),
+    /// Queue items.
+    Queue(slice4::QueueArgs),
+    /// Deliver a message to one or more seats.
+    Send(slice4::SendArgs),
+    /// Deliver a message to every seat.
+    Broadcast(slice4::BroadcastArgs),
+    /// Search seat transcripts or a provider session.
+    Ask(slice4::AskArgs),
+    /// Release a queue claim.
+    Unclaim(slice4::UnclaimArgs),
+    /// Print the operator session.
+    Whoami,
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -152,6 +165,12 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Down { rig, json } => down(rig.as_deref(), json),
         Commands::Setup(args) => setup_cmd::run(&Paths::capture()?, &args),
         Commands::Doctor(args) => doctor_cmd::run(&Paths::capture()?, &args),
+        Commands::Queue(args) => slice4::queue(&args),
+        Commands::Send(args) => slice4::send(&args),
+        Commands::Broadcast(args) => slice4::broadcast(&args),
+        Commands::Ask(args) => slice4::ask(&args),
+        Commands::Unclaim(args) => slice4::unclaim(&args),
+        Commands::Whoami => slice4::whoami(),
     }
 }
 

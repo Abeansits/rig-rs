@@ -21,13 +21,15 @@ crewmux-health.workspace = true
 crewmux-integrations.workspace = true
 crewmux-mux.workspace = true
 async-trait.workspace = true
-axum.workspace = true
+axum = { workspace = true, features = ["ws"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
+futures-core.workspace = true
+serde.workspace = true
 
 [features]
 # In-memory multiplexer for debug test builds. Release binaries leave this off

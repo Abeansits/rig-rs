@@ -56,6 +56,9 @@ serde_json = "1.0.152"
 anyhow = "1.0.104"
 assert_cmd = "2.2.2"
 axum = "0.8.9"
+# Slice 4. `cargo add -p crewmux-daemon futures-core` (crates.io, 2026-10-11).
+# The SSE body is a hand-written Stream; axum's `ws` feature pulls tungstenite.
+futures-core = "0.3.34"
 clap = { version = "4.6.7", features = ["derive"] }
 regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }

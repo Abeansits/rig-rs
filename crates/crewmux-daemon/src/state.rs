@@ -7,10 +7,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crewmux_adapters::AdapterRegistry;
+use crewmux_messaging::{Mailboxes, QueueBook};
 use crewmux_mux::Multiplexer;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::error::Error;
+use crate::hub::EventHub;
+use crate::taps::{DraftAges, KeyTaps};
 
 /// What one process of the daemon holds.
 #[derive(Clone)]
@@ -29,9 +34,79 @@ pub(crate) struct App {
     pub activity: Arc<AtomicU64>,
     /// Registered runtimes. Slice 1 has the stub.
     pub registry: Arc<AdapterRegistry>,
+    /// `$RIG_HOME`, for transcripts and session JSONL.
+    pub home: PathBuf,
+    /// Live queue. SQLite is updated by the persist worker.
+    pub queue: Arc<tokio::sync::Mutex<QueueBook>>,
+    /// Inbox and outbox.
+    pub mail: Arc<tokio::sync::Mutex<Mailboxes>>,
+    /// Canonical `/api/events` hub.
+    pub hub: Arc<EventHub>,
+    /// Terminal keystrokes that tmux may not see.
+    pub taps: Arc<KeyTaps>,
+    /// How long a stub draft has been sitting.
+    pub drafts: Arc<DraftAges>,
+    /// Monotonic delivery cursor for slice 8.
+    pub cursor: Arc<AtomicU64>,
+    /// Rotate a transcript generation after this many bytes.
+    pub transcript_cap: u64,
+    /// `RIG_TRANSCRIPTS=0` turns the writer off.
+    pub transcripts: bool,
+    /// Background work owned by this process.
+    pub tasks: TaskTracker,
+    persist_tx: mpsc::UnboundedSender<QueueBook>,
+    queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueBook>>>>,
 }
 
 impl App {
+    /// Build the in-memory half of the daemon. Call [`launch_workers`](Self::launch_workers) once.
+    #[must_use]
+    pub(crate) fn assemble(
+        store: Arc<crewmux_store::Store>,
+        mux: Arc<dyn Multiplexer>,
+        registry: Arc<AdapterRegistry>,
+        stub_script: Option<String>,
+        cancel: CancellationToken,
+        home: PathBuf,
+    ) -> Self {
+        let (persist_tx, queue_rx) = mpsc::unbounded_channel();
+        Self {
+            store,
+            mux,
+            up_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            stub_script,
+            cancel,
+            activity: Arc::new(AtomicU64::new(now_ms())),
+            registry,
+            home,
+            queue: Arc::new(tokio::sync::Mutex::new(QueueBook::new())),
+            mail: Arc::new(tokio::sync::Mutex::new(Mailboxes::new())),
+            hub: Arc::new(EventHub::new()),
+            taps: Arc::new(KeyTaps::default()),
+            drafts: Arc::new(DraftAges::default()),
+            cursor: Arc::new(AtomicU64::new(0)),
+            transcript_cap: transcript_cap_from_env(),
+            transcripts: transcripts_from_env(),
+            tasks: TaskTracker::new(),
+            persist_tx,
+            queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
+        }
+    }
+
+    /// Start the queue writer and the transcript writer. Idempotent for the queue side.
+    pub(crate) async fn launch_workers(&self) {
+        if let Some(rx) = self.queue_rx.lock().await.take() {
+            self.tasks
+                .spawn(crate::persist::queue_writer(self.clone(), rx));
+        }
+        self.tasks.spawn(crate::transcripts::run(self.clone()));
+    }
+
+    /// Queue the latest book for the writer. The writer keeps the newest epoch.
+    pub(crate) fn submit_queue(&self, book: QueueBook) {
+        drop(self.persist_tx.send(book));
+    }
+
     /// Remember that a request is in progress so the idle reap waits.
     pub(crate) fn touch(&self) {
         self.activity.store(now_ms(), Ordering::Relaxed);
@@ -49,6 +124,17 @@ impl App {
         };
         mutex.lock_owned().await
     }
+}
+
+fn transcript_cap_from_env() -> u64 {
+    std::env::var("RIG_TRANSCRIPT_CAP")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1_048_576)
+}
+
+fn transcripts_from_env() -> bool {
+    std::env::var("RIG_TRANSCRIPTS").ok().as_deref() != Some("0")
 }
 
 pub(crate) fn now_ms() -> u64 {
