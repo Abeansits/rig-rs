@@ -9,3 +9,9 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+proptest.workspace = true

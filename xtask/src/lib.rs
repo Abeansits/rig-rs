@@ -4,10 +4,13 @@
 //! `cargo xtask ledger` seeds and checks `parity/ledger.csv`.
 
 mod error;
+mod lint;
 mod output;
 
 pub mod diff;
 pub mod ledger;
+
+pub use lint::{lint_claude_json, lint_window_size};
 
 pub use error::{Error, io_err};
 pub use output::{err, out};

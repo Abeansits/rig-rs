@@ -28,7 +28,54 @@ pub fn validate(
         }
         check_status(row, line_no, pe_ids, listed_tests, &mut errors);
     }
+    check_case_rows(rows, &mut errors);
     errors
+}
+
+fn check_case_rows(rows: &[LedgerRow], errors: &mut Vec<String>) {
+    let files: BTreeSet<&str> = rows
+        .iter()
+        .filter(|row| !row.ts_path.contains('>'))
+        .map(|row| row.ts_path.as_str())
+        .collect();
+    for (index, row) in rows.iter().enumerate() {
+        if !row.ts_path.contains('>') {
+            continue;
+        }
+        let line_no = index.saturating_add(2);
+        let Some((parent, _)) = split_case(&row.ts_path) else {
+            errors.push(format!(
+                "line {line_no}: case row {} must look like `<ts_path> > <case name>`",
+                row.ts_path
+            ));
+            continue;
+        };
+        if !files.contains(parent) {
+            errors.push(format!(
+                "line {line_no}: case row parent {parent} is not a file-level ledger row"
+            ));
+        }
+        if !matches!(row.status, LedgerStatus::Ported | LedgerStatus::Reused) {
+            errors.push(format!(
+                "line {line_no}: case row {} must be ported or reused",
+                row.ts_path
+            ));
+        }
+        if row.rust_test.as_deref().unwrap_or("").is_empty() {
+            errors.push(format!(
+                "line {line_no}: case row {} requires rust_test",
+                row.ts_path
+            ));
+        }
+    }
+}
+
+fn split_case(ts_path: &str) -> Option<(&str, &str)> {
+    let (parent, case_name) = ts_path.split_once(" > ")?;
+    if parent.is_empty() || case_name.is_empty() || case_name.contains(" > ") {
+        return None;
+    }
+    Some((parent, case_name))
 }
 
 fn check_status(

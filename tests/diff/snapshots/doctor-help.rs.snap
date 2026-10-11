@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/doctor-help.json
+expression: "rs:doctor-help"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "Read-only version and environment checks\n\nUsage: rig doctor [OPTIONS]\n\nOptions:\n      --json                   Print the report as JSON\n      --providers <PROVIDERS>  Comma-separated providers. The default is `claude,codex,opencode`\n      --no-herdr               Skip the Herdr check\n  -h, --help                   Print help\n",
+  "tmux_argv": []
+}

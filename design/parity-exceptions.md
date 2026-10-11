@@ -25,10 +25,25 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 
 - **Covers:** stdout
 - **TS behaviour:** `rig --help` lists the v0.6.9 command names (`add`, `adopt`, `agent`, … `workspace`). `rig --version` prints `0.6.9` and exits 0.
-- **Rust behaviour today:** `crates/rig` is the slice 0 scaffold (`fn main() {}`). It exits 0 and prints nothing, so the help-name projection is empty and the version text is empty. The exit status matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
-- **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side: empty stdout, exit 0, empty stderr, and the same `tmux_argv` as v0.6.9. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
+- **Rust behaviour today:** `rig --help` lists `doctor`, `help`, and `setup`. `rig --version` prints `rig 0.0.0`. That is the slice 7 command surface, not the v0.6.9 command list or the `0.6.9` version string. The exit status matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
+- **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
 - **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. Delete this heading, and the two `.rs.snap` files, when the CLI prints the same command names and `0.6.9` version text. The harness then reports `stale exception` because the Rust output no longer matches the snapshot (or the two sides are equal).
 - **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`. `excepted_exit_code_is_unexpected`, `excepted_stderr_panic_is_unexpected`, and `excepted_extra_tmux_call_is_unexpected` each return `Unexpected`. `changed_rust_snapshot_is_stale` reports `stale exception`.
+
+## PE-004: No runtime writes to the Claude user config while Claude is running
+
+- **TS behaviour:** `provisionClaudeState` (`claude-code-adapter.ts` around the trust rewrite) rewrites the Claude user config for trust and MCP whenever the trust flag is missing, including while Claude is running.
+- **Rust behaviour:** per ADR-0008. Per-seat MCP goes through `--mcp-config` and `--strict-mcp-config`. Settings and hooks go through `--settings`. Trust is pre-accepted only when the process probe reports no Claude pid. Otherwise `pre_accept` returns `SkippedClaudeRunning` and does not open the file.
+- **Evidence:** the config-writes spike. Compare-and-swap with verify still dropped a fraction of a concurrent writer's updates, which is why the guard exists.
+- **Required test:** `crewmux-provider/tests/claude_guard.rs::refuses_while_claude_running`. `cargo xtask lint claude-json` fails when any non-test Rust file outside `crates/crewmux-provider/src/claude/trust.rs` names that user-config basename.
+
+## PE-006: setup and doctor reports differ from v0.6.9
+
+- **Covers:** stdout
+- **TS behaviour:** `rig setup --dry-run --json` prints a step list whose ids include install and auth steps (`brew`, `tmux_install`, `herdr_install`, `claude_auth`, and the rest of `setup.ts`). `rig doctor --help` documents the v0.6.9 doctor, including node, ui, and cmux checks.
+- **Rust behaviour:** `rig setup` prints a `SetupPlan` (`write`, `extract`, `offer_install`, `skip`). Node, ABI, ui_dist, cmux, and daemon_dist checks are not part of `rig doctor`. Install steps stay offers unless `--yes` is passed. Herdr stays attach-only.
+- **Required tests:** `crates/rig/tests/setup_flow.rs` and `crates/rig/tests/doctor_json.rs`.
+- **Snapshot:** `tests/diff/snapshots/setup-dry-run.rs.snap` and `tests/diff/snapshots/doctor-help.rs.snap`. `ExpectedDiff(PE-006)` applies only while those Rust observations still match.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

@@ -1,0 +1,12 @@
+{
+  "id": "setup-dry-run",
+  "project": "full",
+  "expected_diff": "PE-006",
+  "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
+  "steps": [
+    {
+      "op": "cli",
+      "argv": ["setup", "--dry-run", "--json", "--no-herdr", "--no-ghostty"]
+    }
+  ]
+}

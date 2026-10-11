@@ -7,7 +7,7 @@ expression: "rs:scenario-runner-probe"
   "files": [],
   "json": null,
   "stderr": "",
-  "stdout": "",
+  "stdout": "rig 0.0.0\n",
   "tmux_argv": [
     [
       "tmux",

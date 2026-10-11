@@ -159,17 +159,16 @@ fn seeded_ledger_is_check_green() {
     let root = workspace_root();
     let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     let rows = parse_csv(&text).unwrap();
-    assert_eq!(rows.len(), 1303);
+    assert_eq!(rows.len(), 1312);
     for row in &rows {
         match row.status {
-            LedgerStatus::Todo => assert!(row.note.is_empty(), "{}", row.ts_path),
+            LedgerStatus::Todo => {}
             LedgerStatus::Waived => assert!(!row.note.trim().is_empty(), "{}", row.ts_path),
-            LedgerStatus::Ported | LedgerStatus::Reused | LedgerStatus::Diverged => {
-                panic!("{:?} on {}", row.status, row.ts_path);
+            LedgerStatus::Ported | LedgerStatus::Reused => {
+                assert!(row.rust_test.is_some(), "{}", row.ts_path);
             }
+            LedgerStatus::Diverged => assert!(row.pe_id.is_some(), "{}", row.ts_path),
         }
-        assert!(row.rust_test.is_none());
-        assert!(row.pe_id.is_none());
     }
     let markdown = fs::read_to_string(root.join("design/parity-exceptions.md")).unwrap();
     let pe_ids = pe_ids_in(&markdown).into_iter().collect();

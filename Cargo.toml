@@ -34,6 +34,13 @@ serde_json = "1.0.152"
 regex = "1.13.1"
 tempfile = "3.27.0"
 insta = "1.49.0"
+# Slice 7. Versions come from `cargo add` (crates.io, 2026-10-11), then hoisted.
+toml_edit = "0.25.17"
+clap = { version = "4.6.7", features = ["derive"] }
+anyhow = "1.0.104"
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+proptest = "1.12.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
