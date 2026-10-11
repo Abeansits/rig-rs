@@ -28,14 +28,11 @@ fn self_one(case: &LoadedCase, bin: &Path) -> Result<CaseReport, Error> {
     }
     let left = execute_rs(case, bin)?;
     let right = execute_rs(case, bin)?;
+    // expected_diff names a TypeScript-versus-rig difference. Both sides here are
+    // rig-rs, so a match is Equal. Stale exceptions are reported only by ts_reports.
     from_judge(
         &case.case.id,
-        judge(
-            &case.case.id,
-            &left.canonical,
-            &right.canonical,
-            case.case.expected_diff.as_ref(),
-        ),
+        judge(&case.case.id, &left.canonical, &right.canonical, None),
     )
 }
 

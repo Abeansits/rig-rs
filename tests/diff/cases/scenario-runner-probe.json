@@ -1,6 +1,7 @@
 {
   "id": "scenario-runner-probe",
   "project": "full",
+  "expected_diff": "PE-003",
   "scenario": "packages/test-system/scenarios/clean-lifecycle-no-residue.yaml",
   "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
   "steps": [

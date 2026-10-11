@@ -55,7 +55,7 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
     let reports = self_reports(&cases, &bin).unwrap();
     let text = format_report(&reports);
     assert!(
-        text.contains("daemon-health") && text.contains("needs slice 0"),
+        text.contains("daemon-health") && text.contains("needs UDS listener"),
         "{text}"
     );
     assert!(
@@ -73,9 +73,9 @@ fn initial_cases_are_equal_or_listed_as_ignored() {
 }
 
 #[test]
-#[ignore = "needs slice 0"]
+#[ignore = "needs UDS listener"]
 fn daemon_health_against_product_daemon() {
-    panic!("the product daemon does not listen on the Unix socket in this slice");
+    panic!("the product daemon does not listen on the Unix socket yet");
 }
 
 #[test]

@@ -111,6 +111,7 @@ fn missing_typescript_tree_exits_2_and_does_not_skip() {
     assert!(stderr.contains("will not skip"), "{stderr}");
     assert!(stderr.contains("v0.6.9"), "{stderr}");
     assert!(stderr.contains("4b48ca21"), "{stderr}");
+    assert!(stderr.contains("Node >= 22"), "{stderr}");
 }
 
 #[test]
@@ -123,7 +124,7 @@ fn self_mode_exits_0_and_update_with_self_is_a_usage_error() {
     let (code, stdout, stderr) = run(&["diff", "--self", "--bin", &bin_text], None, &[]).unwrap();
     assert_eq!(code, 0, "{stdout}\n{stderr}");
     assert!(stdout.contains("| version | Equal |"), "{stdout}");
-    assert!(stdout.contains("needs slice 0"), "{stdout}");
+    assert!(stdout.contains("needs UDS listener"), "{stdout}");
     assert!(stdout.contains("needs slice 1"), "{stdout}");
     let (code, _stdout, stderr) = run(
         &["diff", "--self", "--update", "--bin", &bin_text],

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::path::PathBuf;
 
 use xtask::diff::{PeId, pe_ids_in, workspace_root};
 use xtask::ledger::{LedgerRow, LedgerStatus, parse_csv, report, to_csv, validate, waiver_for};
@@ -139,6 +140,18 @@ fn waiver_rules_leave_in_scope_names_as_todo() {
             .unwrap()
             .is_some()
     );
+}
+
+#[test]
+fn workspace_root_walks_up_from_the_process() {
+    let root = workspace_root();
+    assert!(
+        root.join("parity/ledger.csv").is_file(),
+        "{}",
+        root.display()
+    );
+    assert!(root.join("xtask/Cargo.toml").is_file());
+    assert_ne!(root, PathBuf::from(env!("CARGO_MANIFEST_DIR")));
 }
 
 #[test]

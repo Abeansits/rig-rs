@@ -98,11 +98,12 @@ pub fn install_instructions(reason: &str) -> String {
     format!(
         "{reason}\n\
 The diff harness will not skip a missing TypeScript tree.\n\
+Node >= 22 is required (OpenRig v0.6.9 engines: ^22 || ^24).\n\
 Install OpenRig {OPENRIG_TAG} ({OPENRIG_COMMIT}) and build the CLI:\n\
   git clone --depth 1 --branch {OPENRIG_TAG} https://github.com/mvschwarz/openrig.git \"$HOME/.cache/rig-rs/openrig-v0.6.9\"\n\
-  cd \"$HOME/.cache/rig-rs/openrig-v0.6.9\" && npm ci && npm run build -w @openrig/cli\n\
+  cd \"$HOME/.cache/rig-rs/openrig-v0.6.9\" && npm ci && npm run build -w @openrig/daemon && npm run build -w @openrig/cli\n\
 Then re-run with OPENRIG_DIR set to that checkout, or leave it at the cache path above.\n\
-Node is required only for this TS side. `xtask diff --self` compares rig-rs to itself and does not need Node."
+`xtask diff --self` compares rig-rs to itself and does not need Node."
     )
 }
 
@@ -120,8 +121,6 @@ pub fn find_node() -> Result<PathBuf, Error> {
         }
     }
     Err(Error::TsMissing {
-        detail: install_instructions(
-            "node is not on PATH; the TypeScript side needs Node 20 or newer",
-        ),
+        detail: install_instructions("node is not on PATH; Node >= 22 is required"),
     })
 }

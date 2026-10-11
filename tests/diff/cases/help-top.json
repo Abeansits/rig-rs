@@ -1,6 +1,7 @@
 {
   "id": "help-top",
   "project": "help-names",
+  "expected_diff": "PE-003",
   "normalize": ["ulid", "timestamp", "socketpath", "abspath", "port"],
   "steps": [{ "op": "cli", "argv": ["--help"] }]
 }

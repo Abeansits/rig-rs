@@ -290,10 +290,42 @@ pub fn canonical(obs: &Observation) -> Result<String, Error> {
     Ok(text)
 }
 
-/// Workspace root, from this crate's manifest directory.
+/// Workspace root, resolved when the process runs.
+///
+/// Walks up from the working directory, then from the executable, until it finds
+/// the checkout that contains `xtask/Cargo.toml` and `parity/ledger.csv`.
 #[must_use]
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
+    std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(find_workspace)
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .as_deref()
+                .and_then(find_workspace)
+        })
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn find_workspace(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    if !current.is_dir() {
+        current.pop();
+    }
+    loop {
+        if is_workspace(&current) {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn is_workspace(dir: &Path) -> bool {
+    dir.join("xtask/Cargo.toml").is_file() && dir.join("parity/ledger.csv").is_file()
 }
 
 /// Git tag the harness runs on the TypeScript side.
