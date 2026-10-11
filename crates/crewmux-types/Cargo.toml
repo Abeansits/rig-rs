@@ -1,0 +1,11 @@
+[package]
+name = "crewmux-types"
+version = "0.0.0"
+description = "Shared IDs, enums and wire DTOs; no logic."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

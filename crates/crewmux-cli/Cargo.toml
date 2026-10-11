@@ -1,0 +1,17 @@
+[package]
+name = "crewmux-cli"
+version = "0.0.0"
+description = "Command tree, output formatting and daemon auto-start for the rig CLI."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crewmux-api.workspace = true
+crewmux-spec.workspace = true
+crewmux-provider.workspace = true
+crewmux-integrations.workspace = true
+
+[lints]
+workspace = true

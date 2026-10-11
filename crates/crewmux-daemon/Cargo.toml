@@ -1,0 +1,23 @@
+[package]
+name = "crewmux-daemon"
+version = "0.0.0"
+description = "The daemon: HTTP server, event streams, composition root and supervisors."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+crewmux-api.workspace = true
+crewmux-store.workspace = true
+crewmux-core.workspace = true
+crewmux-adapters.workspace = true
+crewmux-messaging.workspace = true
+crewmux-durability.workspace = true
+crewmux-orchestration.workspace = true
+crewmux-health.workspace = true
+crewmux-integrations.workspace = true
+crewmux-mux.workspace = true
+
+[lints]
+workspace = true

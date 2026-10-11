@@ -1,0 +1,20 @@
+msrv = "1.99"
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-print-in-tests = true
+allow-dbg-in-tests = true
+too-many-lines-threshold = 80
+too-many-arguments-threshold = 6
+cognitive-complexity-threshold = 20
+type-complexity-threshold = 250
+avoid-breaking-exported-api = false
+disallowed-methods = [
+  { path = "std::thread::sleep", reason = "blocks async runtime; use tokio::time::sleep" },
+  { path = "std::process::Command::output", reason = "use tokio::process or the tmux crate wrapper" },
+  { path = "std::env::set_var", reason = "unsafe in edition 2024 and racy; pass config explicitly" },
+]
+disallowed-types = [
+  { path = "std::sync::Mutex", reason = "use parking_lot/tokio Mutex deliberately, or better: an actor/channel" },
+]
