@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Count workspace members
+        id: members
+        shell: bash
+        run: |
+          n=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["packages"]))')
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          echo "Workspace members: $n"
+      - name: fmt
+        if: steps.members.outputs.count != '0'
+        run: cargo fmt --all --check
+      - name: clippy
+        if: steps.members.outputs.count != '0'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        if: steps.members.outputs.count != '0'
+        run: cargo test --workspace
