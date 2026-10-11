@@ -237,7 +237,7 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-nextest
-      - name: Real-tmux tests (crewmux-mux, feature tmux-it)
+      - name: Real-tmux tests (workspace, all-features, ci profile)
         shell: bash
         env:
           INSTA_UPDATE: "no"
@@ -245,11 +245,11 @@ jobs:
           RIG_REQUIRE_TMUX: "1"
         run: |
           set -euo pipefail
-          if ! grep -qE '^tmux-it *=' crates/crewmux-mux/Cargo.toml 2>/dev/null; then
-            echo "::notice::crewmux-mux has no tmux-it feature yet (pre slice 1b); nothing to run"
-            exit 0
-          fi
-          cargo nextest run -p crewmux-mux --features tmux-it --profile ci --locked --no-tests=warn
+          # Workspace-wide so slice-1 (and later) crates/*/tests real-tmux cases
+          # run on each pinned tmux, not only crewmux-mux. ci profile includes
+          # ::tmux_it:: and excludes ::differential::. Stays green when no
+          # crate has declared tmux-it yet (those modules simply are not built).
+          cargo nextest run --workspace --all-features --profile ci --locked --no-tests=warn
 
   # Single required check for branch protection: add only "ci-pass" as required.
   ci-pass:
