@@ -692,9 +692,12 @@ mod tests {
 
     #[test]
     fn ctrl_u_is_sent_as_c_u() {
-        let args = send_keys_args("%1", &[Key::CtrlU, Key::Enter]).expect("keys");
+        let args = send_keys_args("%1", &[Key::CtrlU]).expect("keys");
         let batch = args.first().expect("batch");
         assert!(batch.iter().any(|arg| arg == "C-u"), "{batch:?}");
-        assert!(batch.iter().any(|arg| arg == "Enter"), "{batch:?}");
+        assert!(
+            !batch.iter().any(|arg| arg == "Enter"),
+            "clear is C-u alone: {batch:?}"
+        );
     }
 }

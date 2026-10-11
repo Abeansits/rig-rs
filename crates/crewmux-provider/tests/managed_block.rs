@@ -145,27 +145,18 @@ fn sweep_ac10(bin: &std::path::Path) {
         let Ok(pid) = rest.parse::<u32>() else {
             continue;
         };
-        if pid != me && !process_dead(pid) {
+        if pid != me {
             continue;
         }
         kill_ac10(bin, name);
     }
 }
 
-fn process_dead(pid: u32) -> bool {
-    let Ok(raw) = i32::try_from(pid) else {
-        return false;
-    };
-    let Some(pid) = rustix::process::Pid::from_raw(raw) else {
-        return false;
-    };
-    matches!(
-        rustix::process::test_kill_process(pid),
-        Err(err) if err == rustix::io::Errno::SRCH
-    )
-}
-
 fn kill_ac10(bin: &std::path::Path, name: &str) {
+    let own = format!("rigrs-ac10-{}", std::process::id());
+    if name != own {
+        return;
+    }
     drop(run(bin, &["-L", name, "-f", "/dev/null", "kill-server"]));
     let path = std::path::PathBuf::from(format!(
         "/tmp/tmux-{}/{name}",

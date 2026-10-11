@@ -25,6 +25,7 @@ ulid = { version = "3.0.0", features = ["serde"] }
 # and crewmux-cli) and `getuid` / `test_kill_process` (`process`).
 # The mux crate uses `process` for the Linux SIGCHLD reap nudge.
 # Provider tests use `process` to reap leftover tmux sockets.
+# The stub agent uses `termios` so `C-u` reaches the process instead of the line discipline.
 # `cargo add -p crewmux-daemon rustix --features fs,process`
 # `cargo add -p crewmux-cli rustix --features fs`
 # `cargo add -p crewmux-provider --dev rustix --features process`

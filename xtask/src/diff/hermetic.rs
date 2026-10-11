@@ -245,6 +245,9 @@ impl HermeticHome {
 
 impl Drop for HermeticHome {
     fn drop(&mut self) {
+        if !harness_socket_owned(&self.tmux_socket) {
+            return;
+        }
         if let Some(real) = &self.real_tmux {
             let mut command = Command::new(real);
             command
@@ -314,12 +317,18 @@ fn python3_on_path() -> bool {
 
 fn fresh_socket_name() -> String {
     // Short on purpose: macOS `sockaddr_un` is 104 bytes, and tmux puts this
-    // name under a long temp directory.
+    // name under a long temp directory. The pid prefix is what Drop checks
+    // before `kill-server`, so a socket this process did not create stays up.
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.subsec_nanos());
     let seq = SOCKET_SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("r{seq:x}{nanos:08x}")
+    format!("r{:x}{seq:x}{nanos:08x}", std::process::id())
+}
+
+fn harness_socket_owned(name: &str) -> bool {
+    let prefix = format!("r{:x}", std::process::id());
+    name.starts_with(&prefix) && name.len() > prefix.len()
 }
 
 fn write_shim(path: &Path) -> Result<(), Error> {

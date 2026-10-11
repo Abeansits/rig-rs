@@ -213,7 +213,7 @@ fn signal(pid: u32, name: &str) {
 /// Process ids of `rig daemon run` whose environment names this `RIG_HOME`.
 #[must_use]
 pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
-    let needle = format!("RIG_HOME={}", rig_home.display());
+    let home = rig_home.display().to_string();
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
     };
@@ -230,16 +230,41 @@ pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
         }
         let dir: PathBuf = entry.path();
         let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
-        let cmd = String::from_utf8_lossy(&cmdline);
-        if !cmd.contains("daemon") || !cmd.contains("run") {
+        if !is_daemon_run(&cmdline) {
             continue;
         }
         let env = std::fs::read(dir.join("environ")).unwrap_or_default();
-        if String::from_utf8_lossy(&env).contains(&needle) {
+        if env_eq(&env, "RIG_HOME", &home) {
             pids.push(pid);
         }
     }
     pids
+}
+
+fn is_daemon_run(cmdline: &[u8]) -> bool {
+    let mut args = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty());
+    let Some(bin) = args.next() else {
+        return false;
+    };
+    if bin != b"rig" && !bin.ends_with(b"/rig") {
+        return false;
+    }
+    let mut prev_daemon = false;
+    for arg in args {
+        if prev_daemon && arg == b"run" {
+            return true;
+        }
+        prev_daemon = arg == b"daemon";
+    }
+    false
+}
+
+fn env_eq(env: &[u8], key: &str, value: &str) -> bool {
+    let needle = format!("{key}={value}");
+    env.split(|byte| *byte == 0)
+        .any(|entry| entry == needle.as_bytes())
 }
 
 /// Bind an ephemeral loopback port and release it.
@@ -256,4 +281,22 @@ pub(crate) fn free_port() -> Result<u16, Error> {
         .port();
     drop(listener);
     Ok(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{env_eq, is_daemon_run};
+
+    #[test]
+    fn daemon_match_is_the_exact_home_and_argv() {
+        let cmd = b"/usr/bin/rig\0daemon\0run\0";
+        assert!(is_daemon_run(cmd));
+        assert!(!is_daemon_run(b"/usr/bin/rig\0daemon\0status\0"));
+        assert!(!is_daemon_run(b"/usr/bin/not-rig\0daemon\0run\0"));
+        let env = b"PATH=/bin\0RIG_HOME=/tmp/scratch\0HOME=/tmp/scratch\0";
+        assert!(env_eq(env, "RIG_HOME", "/tmp/scratch"));
+        assert!(!env_eq(env, "RIG_HOME", "/tmp"));
+        assert!(!env_eq(env, "RIG_HOME", "/tmp/scratch-other"));
+        assert!(!env_eq(env, "HOME", "/tmp/scratch/nested"));
+    }
 }

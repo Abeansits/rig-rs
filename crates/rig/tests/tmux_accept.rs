@@ -100,6 +100,9 @@ mod live {
             let socket = crewmux_api::daemon_socket(&self.rig_home);
             let client = crewmux_api::Client::over_uds(socket).with_timeout(Duration::from_secs(2));
             drop(client.request("POST", "/shutdown", Some(b"{}")));
+            if !crewmux_mux::socket_owned_by(&self.socket, std::process::id()) {
+                return;
+            }
             let mut kill = Command::new("tmux");
             kill.args(["-L", &self.socket, "kill-server"])
                 .env_remove("TMUX")

@@ -90,13 +90,13 @@ pub(crate) async fn pasted_screen(
 
 /// Drop a failed paste from the composer.
 ///
-/// `C-u` kills the line the paste left in the tty. Enter then arrives after the
-/// paste burst, so the stub reprints `stub>` and the seat is back at a prompt.
+/// `C-u` alone kills the line. Enter is not sent: on a real composer an empty
+/// line would submit a turn. The stub redraws `stub>` when it sees `C-u`.
 /// An unchanged screen means the multiplexer did not redraw; stop waiting.
 pub(crate) async fn clear_composer(app: &App, pane: &PaneRef) -> Result<(), Error> {
     let started = Instant::now();
     let mut last = app.mux.capture(pane, CaptureRange::Visible).await?.text;
-    app.mux.send_keys(pane, &[Key::CtrlU, Key::Enter]).await?;
+    app.mux.send_keys(pane, &[Key::CtrlU]).await?;
     let mut stable = Instant::now();
     loop {
         let text = app.mux.capture(pane, CaptureRange::Visible).await?.text;

@@ -106,6 +106,9 @@ mod live {
     }
 
     fn kill_server(socket: &str) {
+        if !crewmux_mux::socket_owned_by(socket, std::process::id()) {
+            return;
+        }
         let mut kill = Command::new("tmux");
         kill.args(["-L", socket, "-f", "/dev/null", "kill-server"])
             .env_remove("TMUX")
