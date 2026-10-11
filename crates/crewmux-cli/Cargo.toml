@@ -9,9 +9,11 @@ publish.workspace = true
 
 [dependencies]
 crewmux-api.workspace = true
+crewmux-tui.workspace = true
 crewmux-spec.workspace = true
 crewmux-provider.workspace = true
 crewmux-integrations.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

@@ -12,8 +12,10 @@ name = "rig"
 path = "src/main.rs"
 
 [dependencies]
+crewmux-api.workspace = true
 crewmux-cli.workspace = true
 crewmux-daemon.workspace = true
+crewmux-integrations.workspace = true
 crewmux-tui.workspace = true
 crewmux-mcp.workspace = true
 

@@ -1,0 +1,28 @@
+---
+source: crates/crewmux-tui/src/render_tests.rs
+expression: paint(&state)
+---
+"rig-rs  explorer  unavailable                                                   "
+"> demo                  select a row                                            "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"j/k move  a attach  r refresh  q quit  1-5 section                              "
