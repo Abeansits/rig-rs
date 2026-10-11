@@ -7,7 +7,7 @@ Crate names follow Architect's design: `crewmux-*` (see `design/workspace-layout
 | Unit tests | in-module `#[cfg(test)] mod tests` at the bottom of the file | Pure logic, no I/O. If tests push the file past 400 lines, move them to `src/<mod>/tests.rs` |
 | Integration tests (crate API) | `crates/<crate>/tests/<topic>.rs` | One binary per topic; shared helpers in `crates/<crate>/tests/common/mod.rs` |
 | Parity tests | `crates/<crate>/tests/parity_sNN_<name>.rs` | Driven by `tests/fixtures/sNN-<name>/` through the testkit |
-| Golden fixtures | `tests/fixtures/sNN-<name>/*.json` (workspace root) | Captured from TS; see PARITY.md |
+| Golden fixtures | `tests/fixtures/sNN-<name>/*.json` (workspace root) | Captured from TS v0.6.9 (`4b48ca21`); see PARITY.md |
 | insta snapshots | `crates/<crate>/tests/snapshots/` (insta default) | `.snap` committed, `.snap.new` never |
 | Real-tmux tests | `mod tmux_it` inside the integration file, `#[cfg(feature = "tmux-it")]` | Private `-L` socket per test; nextest test-group `tmux` (serial) |
 | Differential tests | `mod differential`, `#[cfg(feature = "differential")]` | Need `OPENRIG_DIR` and node; excluded from the `ci` profile |
@@ -16,7 +16,7 @@ Crate names follow Architect's design: `crewmux-*` (see `design/workspace-layout
 
 ## Naming
 - Test fns: `<behaviour>_<condition>` in snake_case, e.g. `wake_ladder_escalates_after_three_nudges`. No `test_` prefix.
-- Ported tests keep the TS case name in a `/// ts: <file> > "<case>"` doc comment (reverse index for the ledger).
+- Ported tests are registered in `parity/ledger.csv`: `ts_path` → `rust_test` (the name as shown by `cargo test -- --list`), checked by `cargo xtask ledger check`. Optionally add a `/// ts: <ts_path> > "<case>"` doc comment as a human pointer; the ledger is authoritative.
 - Feature names: `tmux-it` (real tmux), `differential` (TS side-by-side). Both are off by default. **Each crate that uses them declares them in its own `[features]` table** (Dev Bot decision); the workspace Cargo.toml is not touched. CI runs with `--all-features`; nextest profiles filter suites that shouldn't run.
 
 ## nextest profiles (`.config/nextest.toml`)

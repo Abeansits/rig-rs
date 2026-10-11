@@ -125,17 +125,11 @@ jobs:
         shell: bash
         run: |
           if find . -name '*.snap.new' -o -name '*.pending-snap' | grep -q .; then echo "pending snapshots committed"; exit 1; fi
-      - name: Parity ledger references exist
-        shell: bash
-        run: |
-          f=tests/parity/LEDGER.md; [ -f "$f" ] || exit 0
-          rc=0
-          while IFS='|' read -r _ ts slice status rust _; do
-            status=$(echo "$status" | xargs); rust=$(echo "$rust" | xargs)
-            [ "$status" = ported ] || continue
-            for p in ${rust//,/ }; do p=${p%%::*}; p=${p//\`/}; [ -e "$p" ] || { echo "ledger: $ts -> missing $p"; rc=1; }; done
-          done < <(grep '^|' "$f" | tail -n +3)
-          exit $rc
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Parity ledger check (parity/ledger.csv)
+        run: cargo run -p xtask --locked -- ledger check
 
   coverage:
     name: coverage (informational)
