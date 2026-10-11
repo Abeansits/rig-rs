@@ -394,6 +394,7 @@ dependencies = [
  "crewmux-types",
  "insta",
  "predicates",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
@@ -501,6 +502,7 @@ name = "crewmux-provider"
 version = "0.0.0"
 dependencies = [
  "crewmux-types",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

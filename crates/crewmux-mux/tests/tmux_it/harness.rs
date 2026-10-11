@@ -94,8 +94,44 @@ while True:
                 if !name.starts_with("rig-rs-") {
                     continue;
                 }
+                let Some(pid) = owner_pid(name) else {
+                    continue;
+                };
+                if !process_dead(pid) {
+                    continue;
+                }
                 reap_one(name, &entry.path()).await;
             }
+        }
+
+        fn owner_pid(name: &str) -> Option<u32> {
+            let rest = name.strip_prefix("rig-rs-")?;
+            let token = rest.split('-').next()?;
+            let pid = token.parse::<u32>().ok()?;
+            if pid <= 1 { None } else { Some(pid) }
+        }
+
+        fn process_dead(pid: u32) -> bool {
+            let Ok(raw) = i32::try_from(pid) else {
+                return false;
+            };
+            let Some(pid) = rustix::process::Pid::from_raw(raw) else {
+                return false;
+            };
+            matches!(
+                rustix::process::test_kill_process(pid),
+                Err(err) if err == rustix::io::Errno::SRCH
+            )
+        }
+
+        #[test]
+        fn stale_socket_owner_is_the_pid_in_the_name() {
+            assert_eq!(owner_pid("rig-rs-42-7"), Some(42));
+            assert_eq!(owner_pid("rig-rs-42"), Some(42));
+            assert_eq!(owner_pid("rig-rs"), None);
+            assert_eq!(owner_pid("rig-rs-0"), None);
+            assert_eq!(owner_pid("rig-rs-1"), None);
+            assert!(!process_dead(std::process::id()));
         }
 
         async fn reap_one(name: &str, path: &Path) {

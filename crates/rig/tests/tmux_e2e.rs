@@ -36,7 +36,8 @@ mod live {
             let rig_home = root.path().join("rig");
             std::fs::create_dir_all(&home).expect("home");
             std::fs::create_dir_all(&rig_home).expect("rig");
-            let socket = format!("r{}", std::process::id());
+            let socket = format!("rig-rs-{}-e2e", std::process::id());
+            kill_server(&socket);
             Self {
                 root,
                 home,
@@ -53,6 +54,7 @@ mod live {
                 .env("RIG_TMUX_SOCKET", &self.socket)
                 .env_remove("RIG_FAKE_MUX")
                 .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
                 .current_dir(&self.home);
             command
         }
@@ -64,13 +66,19 @@ mod live {
             let socket = crewmux_api::daemon_socket(&self.rig_home);
             let client = crewmux_api::Client::over_uds(socket).with_timeout(Duration::from_secs(2));
             drop(client.request("POST", "/shutdown", Some(b"{}")));
-            let mut kill = Command::new("tmux");
-            kill.args(["-L", &self.socket, "kill-server"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            if let Ok(mut child) = kill.spawn() {
-                drop(child.wait());
-            }
+            kill_server(&self.socket);
+        }
+    }
+
+    fn kill_server(socket: &str) {
+        let mut kill = Command::new("tmux");
+        kill.args(["-L", socket, "-f", "/dev/null", "kill-server"])
+            .env_remove("TMUX")
+            .env_remove("TMUX_TMPDIR")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut child) = kill.spawn() {
+            drop(child.wait());
         }
     }
 
@@ -133,7 +141,11 @@ mod live {
         command
             .arg("-L")
             .arg(socket)
+            .arg("-f")
+            .arg("/dev/null")
             .args(args)
+            .env_remove("TMUX")
+            .env_remove("TMUX_TMPDIR")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let output = command

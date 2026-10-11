@@ -10,6 +10,35 @@ use crewmux_api::{Client, Endpoint, Healthz, daemon_socket, rig_home};
 
 use crate::error::Error;
 
+/// Exclusive lock on `run/daemon.start.lock` for one auto-start attempt.
+///
+/// `flock` releases when this process dies, so a killed CLI does not leave
+/// the next start waiting on a stale file.
+struct StartLock {
+    file: std::fs::File,
+}
+
+impl StartLock {
+    /// Take the lock, or `None` when another CLI holds it.
+    fn try_acquire(home: &Path) -> Result<Option<Self>, Error> {
+        let path = home.join("run/daemon.start.lock");
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        let file = crewmux_api::open_private(&path, &mut options)?;
+        match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+            Ok(()) => Ok(Some(Self { file })),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(err) => Err(Error::Io(err.into())),
+        }
+    }
+}
+
+impl Drop for StartLock {
+    fn drop(&mut self) {
+        let _unlocked = rustix::fs::flock(&self.file, rustix::fs::FlockOperation::Unlock);
+    }
+}
+
 /// Probe `/healthz` and spawn the daemon when it is down.
 ///
 /// # Errors
@@ -17,31 +46,22 @@ use crate::error::Error;
 /// Returns [`Error::Unreachable`] when the daemon does not answer after the spawn.
 pub(crate) fn ensure_daemon() -> Result<Client, Error> {
     let home = rig_home();
-    std::fs::create_dir_all(home.join("run"))?;
+    crewmux_api::create_private(&home)?;
+    crewmux_api::create_private(&home.join("run"))?;
     let socket = daemon_socket(&home);
     if health(&socket).is_some() {
         return Ok(client(&socket));
     }
-    let lock_path = home.join("run/daemon.start.lock");
-    match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(_lock) => {
-            if let Err(err) = spawn_daemon(&home) {
-                drop(std::fs::remove_file(&lock_path));
-                return Err(err);
-            }
-            let ready = wait_health(&socket);
-            drop(std::fs::remove_file(&lock_path));
-            ready?;
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-            wait_health(&socket)?;
-        }
-        Err(err) => return Err(err.into()),
+    let Some(held) = StartLock::try_acquire(&home)? else {
+        wait_health(&socket)?;
+        return Ok(client(&socket));
+    };
+    if health(&socket).is_none() {
+        spawn_daemon(&home)?;
     }
+    let ready = wait_health(&socket);
+    drop(held);
+    ready?;
     Ok(client(&socket))
 }
 
@@ -76,11 +96,9 @@ fn wait_health(socket: &Path) -> Result<(), Error> {
 
 fn spawn_daemon(home: &Path) -> Result<(), Error> {
     let exe = std::env::current_exe()?;
-    let log_path = home.join("run/daemon.log");
-    let log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    let log = crewmux_api::open_private(&home.join("run/daemon.log"), &mut options)?;
     let err_log = log.try_clone()?;
     let mut command = Command::new(exe);
     command

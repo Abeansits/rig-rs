@@ -21,9 +21,13 @@ tokio = { version = "1.53.2", features = ["fs", "io-std", "io-util", "macros", "
 tokio-util = { version = "0.7.20", features = ["rt"] }
 tracing = "0.1.44"
 ulid = { version = "3.0.0", features = ["serde"] }
-# `flock` for the daemon lock (`fs` on crewmux-daemon) and `getuid` (`process`).
+# `flock` for the daemon lock and the autostart lock (`fs` on crewmux-daemon
+# and crewmux-cli) and `getuid` / `test_kill_process` (`process`).
 # The mux crate uses `process` for the Linux SIGCHLD reap nudge.
-# `cargo add -p crewmux-daemon rustix --features fs,process`.
+# Provider tests use `process` to reap leftover tmux sockets.
+# `cargo add -p crewmux-daemon rustix --features fs,process`
+# `cargo add -p crewmux-cli rustix --features fs`
+# `cargo add -p crewmux-provider --dev rustix --features process`
 rustix = "1.1.5"
 crewmux-types = { path = "crates/crewmux-types" }
 crewmux-spec = { path = "crates/crewmux-spec" }

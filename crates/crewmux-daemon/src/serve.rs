@@ -73,7 +73,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     };
     {
         let pid = pid.clone();
-        tokio::task::spawn_blocking(move || std::fs::write(pid, std::process::id().to_string()))
+        tokio::task::spawn_blocking(move || write_pid(&pid))
             .await
             .map_err(crate::state::join_err)??;
     }
@@ -118,6 +118,14 @@ fn fake_mux_requested() -> bool {
     {
         false
     }
+}
+
+fn write_pid(pid: &Path) -> Result<(), std::io::Error> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    let mut file = crewmux_api::open_private(pid, &mut options)?;
+    write!(file, "{}", std::process::id())
 }
 
 fn remove_runtime_files(socket: &Path, pid: &Path) -> Result<(), Error> {

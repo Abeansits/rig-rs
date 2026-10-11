@@ -333,11 +333,11 @@ mod suite {
             }
         }
 
+        /// Linux max under 100ms over 15 trials; macOS median under 100ms with a hard cap of 250ms.
         #[tokio::test]
         async fn death_hook_doorbell_latency() {
             let server = Server::boot().await;
-            // Linux max under 100ms over 15 trials; macOS median under 100ms
-            // with a hard cap of 250ms. A hang still fails: the wait is 500ms.
+            // A hang still fails: the wait is 500ms.
             let mut samples = Vec::new();
             for trial in 0..15 {
                 samples.push(hook_trial(&server, trial).await);

@@ -26,12 +26,9 @@ impl DaemonLock {
     /// Returns [`Error`] when the file cannot be opened or the lock is taken.
     pub(crate) fn acquire(home: &Path) -> Result<Self, Error> {
         let path = home.join("run").join("daemon.lock");
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        let file = crewmux_api::open_private(&path, &mut options)?;
         match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
             Ok(()) => Ok(Self { file }),
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Err(Error::Message(
@@ -57,9 +54,9 @@ impl Drop for DaemonLock {
 ///
 /// Returns [`Error`] when a directory cannot be created.
 pub(crate) fn prepare_dirs(home: &Path) -> Result<(), Error> {
-    create_private(home)?;
-    create_private(&home.join("state"))?;
-    create_private(&home.join("run"))?;
+    crewmux_api::create_private(home)?;
+    crewmux_api::create_private(&home.join("state"))?;
+    crewmux_api::create_private(&home.join("run"))?;
     Ok(())
 }
 
@@ -73,7 +70,7 @@ pub(crate) fn bind_socket(path: &Path) -> Result<tokio::net::UnixListener, Error
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        let created = create_private(parent)?;
+        let created = crewmux_api::create_private(parent)?;
         if !created && is_fallback_dir(parent) {
             require_private_dir(parent)?;
         }
@@ -92,28 +89,6 @@ pub(crate) fn bind_socket(path: &Path) -> Result<tokio::net::UnixListener, Error
     perms.set_mode(0o600);
     std::fs::set_permissions(path, perms)?;
     Ok(listener)
-}
-
-/// `true` when this call created `dir` and chmod'd it to 0700.
-fn create_private(dir: &Path) -> Result<bool, Error> {
-    if let Some(parent) = dir.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
-    }
-    match std::fs::create_dir(dir) {
-        Ok(()) => {
-            set_mode(dir, 0o700)?;
-            Ok(true)
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(err) => Err(err.into()),
-    }
-}
-
-fn set_mode(dir: &Path, mode: u32) -> Result<(), Error> {
-    let mut perms = std::fs::metadata(dir)?.permissions();
-    perms.set_mode(mode);
-    std::fs::set_permissions(dir, perms)?;
-    Ok(())
 }
 
 /// `$TMPDIR/rig-<uid>` or `/tmp/rig-<uid>`, the short-socket fallback.
@@ -159,7 +134,7 @@ fn socket_connects(path: &Path) -> bool {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{bind_socket, create_private, is_fallback_dir, prepare_dirs, require_private_dir};
+    use super::{bind_socket, is_fallback_dir, prepare_dirs, require_private_dir};
 
     fn scratch(label: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!("rig-dirs-{label}-{}", std::process::id()));
@@ -255,7 +230,7 @@ mod tests {
     fn open_or_foreign_fallback_is_refused() {
         let root = scratch("own");
         let dir = root.join("socket-dir");
-        assert!(create_private(&dir).expect("create"));
+        assert!(crewmux_api::create_private(&dir).expect("create"));
         let mut perms = std::fs::metadata(&dir).expect("meta").permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&dir, perms).expect("mode");

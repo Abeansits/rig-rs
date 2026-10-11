@@ -132,7 +132,8 @@ fn attach_execs_exact_tmux_target() {
         env.rig()
             .args(["attach", "one"])
             .env("TMUX_ARGV_OUT", &log)
-            .env("PATH", format!("{}:{path}", bin.display())),
+            .env("PATH", format!("{}:{path}", bin.display()))
+            .env_remove("RIG_TMUX_SOCKET"),
     );
     assert_eq!(code, 0, "{err}");
     let text = std::fs::read_to_string(&log).expect("argv");
@@ -362,6 +363,55 @@ fn assert_scratch_contains_only_known_roots(home: &xtask::diff::HermeticHome) {
             || path == scratch.join("tmux-argv.jsonl");
         assert!(ok, "wrote outside the scratch tree: {}", path.display());
     }
+}
+
+/// Autostart creates `RIG_HOME` and `run` at 0700 and the daemon files at 0600.
+#[test]
+fn autostarted_ps_keeps_private_modes() {
+    let root = tempfile::TempDir::with_prefix("rig-modes-").expect("temp");
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    let rig_home = root.path().join("rig-home");
+    let guard = ModeGuard {
+        rig_home: rig_home.clone(),
+    };
+    let mut command = std::process::Command::cargo_bin("rig").expect("rig");
+    command
+        .args(["ps"])
+        .env("HOME", &home)
+        .env("RIG_HOME", &rig_home)
+        .env("RIG_FAKE_MUX", "1")
+        .env_remove("RIG_STUB_SCRIPT")
+        .env_remove("RIG_TMUX_SOCKET")
+        .env_remove("TMUX")
+        .current_dir(&home);
+    let (code, out, err) = stdout(&mut command);
+    assert_eq!(code, 0, "{err} {out}");
+    assert_eq!(mode_bits(&rig_home), 0o700, "RIG_HOME");
+    assert_eq!(mode_bits(&rig_home.join("run")), 0o700, "run");
+    assert_eq!(mode_bits(&rig_home.join("state")), 0o700, "state");
+    assert_eq!(mode_bits(&rig_home.join("run/daemon.lock")), 0o600);
+    assert_eq!(mode_bits(&rig_home.join("run/daemon.pid")), 0o600);
+    assert_eq!(mode_bits(&rig_home.join("run/daemon.log")), 0o600);
+    assert_eq!(mode_bits(&rig_home.join("run/daemon.start.lock")), 0o600);
+    assert_eq!(mode_bits(&rig_home.join("run/daemon.sock")), 0o600);
+    drop(guard);
+}
+
+struct ModeGuard {
+    rig_home: std::path::PathBuf,
+}
+
+impl Drop for ModeGuard {
+    fn drop(&mut self) {
+        let socket = crewmux_api::daemon_socket(&self.rig_home);
+        let client = crewmux_api::Client::over_uds(socket).with_timeout(Duration::from_secs(2));
+        drop(client.request("POST", "/shutdown", Some(b"{}")));
+    }
+}
+
+fn mode_bits(path: &std::path::Path) -> u32 {
+    std::fs::metadata(path).expect("meta").permissions().mode() & 0o777
 }
 
 fn walk(root: &std::path::Path) -> Vec<std::path::PathBuf> {
