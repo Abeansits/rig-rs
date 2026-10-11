@@ -18,11 +18,12 @@ mod hashutil;
 mod hub;
 mod parse;
 mod paste;
+mod reap;
 mod tmux_mux;
 mod types;
-mod version;
 
 pub use crewmux_types::Key;
+pub use crewmux_types::tmux_version::{self, Version, parse_version};
 pub use error::MuxError;
 pub use fake::FakeMux;
 pub use tmux_mux::{TmuxConfig, TmuxMux};
@@ -31,7 +32,6 @@ pub use types::{
     MuxEvent, OptScope, OutputStream, PANE_RING_BYTES, PaneInfo, PaneRef, PasteOpts, PasteReceipt,
     SessionSpec,
 };
-pub use version::{Version, parse_version};
 
 use tokio::sync::broadcast;
 

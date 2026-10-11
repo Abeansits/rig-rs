@@ -1,8 +1,9 @@
-//! tmux version parsing and the 3.3 minimum gate.
+//! Canonical tmux version parser and the 3.3 minimum.
+//!
+//! Slice 1b re-exports [`Version`] and [`parse_version`] from this module.
+//! The shape is `major`, `minor`, a letter `suffix`, and `next` for `tmux next-X.Y`.
 
 use std::fmt;
-
-use crate::error::MuxError;
 
 /// A tmux release parsed from `tmux -V`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,16 +19,16 @@ pub struct Version {
 }
 
 impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.next {
-            write!(f, "next-")?;
+            write!(formatter, "next-")?;
         }
-        write!(f, "{}.{}{}", self.major, self.minor, self.suffix)
+        write!(formatter, "{}.{}{}", self.major, self.minor, self.suffix)
     }
 }
 
 impl Version {
-    /// Oldest tmux this crate will connect to.
+    /// Oldest tmux this project will use.
     #[must_use]
     pub const fn minimum() -> Self {
         Self {
@@ -48,26 +49,30 @@ impl Version {
 }
 
 /// Parse `tmux -V` output such as `tmux 3.5a` or `tmux next-3.6`.
-pub fn parse_version(raw: &str) -> Result<Version, MuxError> {
+///
+/// # Errors
+///
+/// Returns a message when the text is not a tmux version line.
+pub fn parse_version(raw: &str) -> Result<Version, String> {
     let text = raw.trim();
-    let rest = text
-        .strip_prefix("tmux ")
-        .ok_or_else(|| MuxError::Control(format!("unrecognised tmux -V output: {text}")))?;
+    let Some(rest) = text.strip_prefix("tmux ") else {
+        return Err(format!("unrecognised tmux -V output: {text}"));
+    };
     let (next, ver) = if let Some(dev) = rest.strip_prefix("next-") {
         (true, dev)
     } else {
         (false, rest)
     };
     let (numeric, suffix) = split_suffix(ver);
-    let (major_s, minor_s) = numeric
-        .split_once('.')
-        .ok_or_else(|| MuxError::Control(format!("unrecognised tmux version: {text}")))?;
-    let major = major_s
-        .parse::<u32>()
-        .map_err(|_| MuxError::Control(format!("unrecognised tmux version: {text}")))?;
-    let minor = minor_s
-        .parse::<u32>()
-        .map_err(|_| MuxError::Control(format!("unrecognised tmux version: {text}")))?;
+    let Some((major_s, minor_s)) = numeric.split_once('.') else {
+        return Err(format!("unrecognised tmux version: {text}"));
+    };
+    let Ok(major) = major_s.parse::<u32>() else {
+        return Err(format!("unrecognised tmux version: {text}"));
+    };
+    let Ok(minor) = minor_s.parse::<u32>() else {
+        return Err(format!("unrecognised tmux version: {text}"));
+    };
     Ok(Version {
         major,
         minor,
@@ -78,29 +83,18 @@ pub fn parse_version(raw: &str) -> Result<Version, MuxError> {
 
 fn split_suffix(ver: &str) -> (&str, &str) {
     let end = ver
-        .find(|ch: char| !ch.is_ascii_digit() && ch != '.')
-        .unwrap_or(ver.len());
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii_digit() && *ch != '.')
+        .map_or(ver.len(), |(index, _)| index);
     match (ver.get(..end), ver.get(end..)) {
         (Some(numeric), Some(suffix)) => (numeric, suffix),
         _ => (ver, ""),
     }
 }
 
-/// Require `found` to be at least [`Version::minimum`].
-pub(crate) fn ensure_supported(found: &Version) -> Result<(), MuxError> {
-    if found.is_supported() {
-        Ok(())
-    } else {
-        Err(MuxError::TmuxTooOld {
-            found: found.clone(),
-            min: Version::minimum(),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ensure_supported, parse_version};
+    use super::{Version, parse_version};
 
     #[test]
     fn parses_supported_releases() {
@@ -113,19 +107,39 @@ mod tests {
         ] {
             let version = parse_version(raw).expect("parse");
             assert!(version.is_supported(), "{raw}");
-            ensure_supported(&version).expect("gate");
         }
         assert_eq!(parse_version("tmux 3.5a").expect("parse").suffix, "a");
         assert!(parse_version("tmux next-3.6").expect("parse").next);
+        assert_eq!(
+            parse_version("tmux 3.5a").expect("parse").to_string(),
+            "3.5a"
+        );
     }
 
     #[test]
     fn rejects_older_than_3_3() {
         let version = parse_version("tmux 3.2a").expect("parse");
         assert!(!version.is_supported());
-        let err = ensure_supported(&version).expect_err("too old");
-        let message = err.to_string();
-        assert!(message.contains("3.2a"), "{message}");
-        assert!(message.contains("3.3"), "{message}");
+        assert_eq!(version.major, 3);
+        assert_eq!(version.minor, 2);
+        assert!(!Version::minimum().next);
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert!(parse_version("not tmux").is_err());
+        assert!(parse_version("tmux next").is_err());
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn dotted_numbers_parse(major in 0u32..30, minor in 0u32..30) {
+            let raw = format!("tmux {major}.{minor}");
+            let version = parse_version(&raw).expect("parse");
+            assert_eq!(version.major, major);
+            assert_eq!(version.minor, minor);
+            assert_eq!(version.suffix, "");
+            assert_eq!(version.is_supported(), (major, minor) >= (3, 3));
+        }
     }
 }

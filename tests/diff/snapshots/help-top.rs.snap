@@ -7,6 +7,6 @@ expression: "rs:help-top"
   "files": [],
   "json": null,
   "stderr": "",
-  "stdout": "attach\ncapture\ndown\nhelp\nps\nup",
+  "stdout": "attach\ncapture\ndoctor\ndown\nhelp\nps\nsetup\nup",
   "tmux_argv": []
 }

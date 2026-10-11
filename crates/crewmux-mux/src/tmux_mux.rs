@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crewmux_types::parse_version;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -19,7 +20,7 @@ use crate::argv::{
 };
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::control::{ControlCtx, run_control};
-use crate::error::MuxError;
+use crate::error::{MuxError, ensure_supported};
 use crate::exec::{ProcessExec, TmuxExec, is_absence, resolve_tmux_binary};
 use crate::hub::Hub;
 use crate::parse::{parse_clients, parse_created, parse_cursor, parse_panes};
@@ -28,7 +29,6 @@ use crate::types::{
     Capture, CaptureRange, ClientInfo, DeathStream, GuardInputs, MuxEvent, OptScope, OutputStream,
     PaneInfo, PaneRef, PasteOpts, PasteReceipt, SessionSpec,
 };
-use crate::version::{ensure_supported, parse_version};
 
 /// How to reach a tmux server.
 #[derive(Clone, Debug)]
@@ -125,6 +125,7 @@ impl TmuxMux {
         };
         let control = tracker.spawn(run_control(ctx));
         wait_ready(&cancel, &control, boot_rx).await?;
+        tracker.spawn(crate::reap::nudge(Arc::clone(&exec), cancel.clone()));
         let bell = match open_bell(exec.as_ref()).await {
             Ok(bell) => bell,
             Err(err) => {
@@ -162,7 +163,8 @@ async fn open_bell(exec: &dyn TmuxExec) -> Result<String, MuxError> {
 
 async fn ensure_version(exec: &dyn TmuxExec) -> Result<(), MuxError> {
     let out = exec.run(&["-V".to_owned()]).await?;
-    ensure_supported(&parse_version(&out.stdout)?)
+    let found = parse_version(&out.stdout).map_err(MuxError::Control)?;
+    ensure_supported(&found)
 }
 
 async fn wait_ready(

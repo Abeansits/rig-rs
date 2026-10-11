@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/setup-dry-run.json
+expression: "rs:setup-dry-run"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "{\n  \"steps\": [\n    {\n      \"kind\": \"write\",\n      \"id\": \"claude_mcp\",\n      \"file\": \"<PATH:1>\",\n      \"change\": \"upsert\"\n    },\n    {\n      \"kind\": \"write\",\n      \"id\": \"claude_settings\",\n      \"file\": \"<PATH:2>\",\n      \"change\": \"upsert\"\n    },\n    {\n      \"kind\": \"write\",\n      \"id\": \"codex\",\n      \"file\": \"<PATH:5>\",\n      \"change\": \"upsert\"\n    },\n    {\n      \"kind\": \"write\",\n      \"id\": \"opencode\",\n      \"file\": \"<PATH:3>\",\n      \"change\": \"upsert\"\n    },\n    {\n      \"kind\": \"write\",\n      \"id\": \"tmux_conf\",\n      \"file\": \"<PATH:6>\",\n      \"change\": \"upsert\"\n    },\n    {\n      \"kind\": \"extract\",\n      \"skills_dir\": \"<PATH:4>\"\n    },\n    {\n      \"kind\": \"skip\",\n      \"what\": \"herdr\",\n      \"reason\": \"disabled with --no-herdr\"\n    },\n    {\n      \"kind\": \"skip\",\n      \"what\": \"ghostty\",\n      \"reason\": \"disabled with --no-ghostty\"\n    }\n  ]\n}\n",
+  "tmux_argv": []
+}

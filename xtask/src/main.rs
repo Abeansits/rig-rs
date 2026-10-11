@@ -19,10 +19,13 @@ xtask ledger seed [--openrig DIR]
 xtask ledger check
 xtask ledger report
 xtask lint-mux
+xtask lint claude-json
+xtask lint window-size
 
 diff exits 0 when every verdict is Equal or ExpectedDiff, 1 on Unexpected or a
 stale exception, and 2 on a harness error. --update rewrites only TS goldens.
 --self compares the rig binary to itself and does not need Node.
+lint exits 1 when a source check fails.
 ";
 
 fn main() {
@@ -60,6 +63,7 @@ fn dispatch() -> Result<i32, Error> {
         Some("diff") => cmd_diff(&mut args),
         Some("ledger") => cmd_ledger(&mut args),
         Some("lint-mux") => Ok(cmd_lint_mux()),
+        Some("lint") => cmd_lint(&mut args),
         Some("--help" | "-h") | None => {
             out(HELP);
             Ok(0)
@@ -123,6 +127,35 @@ fn parse_diff_flags(args: &mut impl Iterator<Item = String>) -> Result<DiffFlags
         }
     }
     Ok(flags)
+}
+
+fn cmd_lint(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
+    let root = workspace_root();
+    match args.next().as_deref() {
+        Some("claude-json") => match xtask::lint_claude_json(&root) {
+            Ok(()) => {
+                out("lint-claude-json ok");
+                Ok(0)
+            }
+            Err(error) => {
+                err(&error.to_string());
+                Ok(1)
+            }
+        },
+        Some("window-size") => match xtask::lint_window_size(&root) {
+            Ok(()) => {
+                out("lint-window-size ok");
+                Ok(0)
+            }
+            Err(error) => {
+                err(&error.to_string());
+                Ok(1)
+            }
+        },
+        other => Err(Error::Usage(format!(
+            "unknown lint command {other:?}\n{HELP}"
+        ))),
+    }
 }
 
 fn cmd_ledger(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {

@@ -13,6 +13,13 @@ tmux 3.3a does not emit `%paste-buffer-changed`. The `pane-died` hook still runs
 the window id is the bell window. A rename of any other window is ignored, even
 when the new name looks like `rig-dead-%N`.
 
+Ubuntu's tmux is linked with libutempter. Closing the pane pty can swallow
+`SIGCHLD`, so `pane_dead` is set while `pane_dead_status` stays empty and the
+hook never runs. Upstream tmux sends itself `SIGCHLD` after those utempter
+calls. While a server is connected, this crate does the same from outside
+(`kill -s CHLD` on the server pid) so `waitpid` records the status and the
+hook fires.
+
 ## list-clients format
 
 Human-client reads use

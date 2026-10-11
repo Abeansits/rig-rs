@@ -11,12 +11,21 @@ pub enum Error {
     /// The daemon could not be started or reached. Exit 2.
     #[error("{0}")]
     Unreachable(String),
-    /// Reading or spawning failed.
+    /// The invocation was rejected before any file was written. Exit 1.
+    #[error("{0}")]
+    Usage(String),
+    /// A provider writer failed. Exit 1.
+    #[error(transparent)]
+    Provider(#[from] crewmux_provider::ProviderError),
+    /// Reading or spawning failed. Exit 1.
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// The daemon returned a body that was not JSON.
+    /// The daemon returned a body that was not JSON. Exit 1.
     #[error("{0}")]
     Json(String),
+    /// Doctor fixture JSON could not be read. Exit 1.
+    #[error("doctor fixture: {0}")]
+    Fixture(String),
 }
 
 impl Error {
@@ -25,7 +34,12 @@ impl Error {
     pub const fn code(&self) -> i32 {
         match self {
             Self::Unreachable(_) => 2,
-            Self::User(_) | Self::Io(_) | Self::Json(_) => 1,
+            Self::User(_)
+            | Self::Usage(_)
+            | Self::Provider(_)
+            | Self::Io(_)
+            | Self::Json(_)
+            | Self::Fixture(_) => 1,
         }
     }
 }

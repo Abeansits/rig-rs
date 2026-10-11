@@ -1,17 +1,23 @@
-//! Shared IDs, enums and wire DTOs.
+//! Shared IDs, enums, wire DTOs, and the tmux version parser.
 //!
-//! [`Key`] is the multiplexer key enum from slice 1b. The rest of this crate
-//! is the slice 1 seat vocabulary: ids, runtimes, and readiness codes.
+//! [`Key`] is the multiplexer key enum. Seat ids, runtimes, and readiness
+//! codes are the slice 1 vocabulary. [`tmux_version`] is the canonical parser;
+//! slice 1b re-exports it from `crewmux-mux`.
 
+mod doctor;
 mod error;
 mod id;
 mod readiness;
 mod runtime;
 
+pub mod tmux_version;
+
+pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
 pub use id::{RigId, RigName, SeatId, SeatName, SessionId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
+pub use tmux_version::{Version, parse_version};
 
 /// A key delivered with `send-keys`.
 ///

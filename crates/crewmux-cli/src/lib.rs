@@ -1,10 +1,26 @@
 //! `rig` verbs. State changes go through the daemon; this crate does not link it.
+//!
+//! `setup` plans provider, tmux, skill, and install steps. `doctor` is read-only.
 
 mod autostart;
+mod command;
+mod doctor_cmd;
+mod doctor_eval;
+mod doctor_facts;
+mod doctor_fixture;
+mod doctor_live;
 mod error;
+mod herdr_probe;
 pub mod output;
+mod paths;
+mod setup_apply;
+mod setup_cmd;
+mod setup_plan;
+mod spawn;
 
 pub use error::Error;
+pub use output::{print_stderr, print_stdout};
+pub use setup_plan::{SetupPlan, SetupStep};
 
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -16,6 +32,7 @@ use crewmux_api::{AttachInfo, CaptureSeat, CreateRigUp, Endpoint, ListSeats, Rig
 use serde_json::Value;
 
 use crate::autostart::ensure_daemon;
+use crate::paths::Paths;
 
 /// Parsed argv for every verb except `daemon`, which the binary dispatches itself.
 #[derive(Debug, Parser)]
@@ -65,6 +82,10 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Plan or apply provider, tmux, skill, and install steps.
+    Setup(command::SetupArgs),
+    /// Read-only version and environment checks.
+    Doctor(command::DoctorArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -98,6 +119,8 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Capture { seat, lines, json } => capture(&seat, lines, json),
         Commands::Attach { seat } => attach(&seat),
         Commands::Down { rig, json } => down(rig.as_deref(), json),
+        Commands::Setup(args) => setup_cmd::run(&Paths::capture()?, &args),
+        Commands::Doctor(args) => doctor_cmd::run(&Paths::capture()?, &args),
     }
 }
 

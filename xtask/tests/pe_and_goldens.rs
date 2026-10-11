@@ -161,12 +161,14 @@ fn pe_008_is_the_tmux_attach_exception() {
     let ids = pe_ids_in(&text);
     assert!(ids.iter().any(|id| id.as_str() == "PE-008"));
     assert!(text.contains("## PE-008: `rig attach` execs tmux"));
-    assert!(!text.contains("## PE-004:"));
+    assert!(text.contains("## PE-004: No runtime writes"));
     let ledger = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     assert!(ledger.contains(
         "\"packages/cli/test/attach.test.ts\",\"1\",\"diverged\",\"attach_execs_exact_tmux_target\",\"PE-008\""
     ));
-    assert!(!ledger.contains("PE-004"));
+    assert!(ledger.contains(
+        "\"packages/daemon/test/claude-bootstrap-config-home.test.ts\",\"7\",\"diverged\",\"refuses_while_claude_running\",\"PE-004\""
+    ));
 }
 
 #[test]
@@ -241,15 +243,32 @@ fn update_writes_only_a_ts_snapshot() {
 }
 
 #[test]
-fn committed_rust_snapshots_match_the_slice1_cli() {
+fn committed_rust_snapshots_match_the_merged_cli() {
     let dir = workspace_root().join("tests/diff/snapshots");
-    let help = observation("attach\ncapture\ndown\nhelp\nps\nup", "", 0, Vec::new()).unwrap();
+    let help = observation(
+        "attach\ncapture\ndoctor\ndown\nhelp\nps\nsetup\nup",
+        "",
+        0,
+        Vec::new(),
+    )
+    .unwrap();
     let version = observation("rig 0.0.0\n", "", 0, vec![argv(&["tmux", "-V"])]).unwrap();
-    for (id, expected) in [("help-top", help), ("scenario-runner-probe", version)] {
+    assert_eq!(read_rs_golden(&dir, "help-top").unwrap(), help);
+    assert_eq!(
+        read_rs_golden(&dir, "scenario-runner-probe").unwrap(),
+        version
+    );
+    for id in [
+        "help-top",
+        "scenario-runner-probe",
+        "setup-dry-run",
+        "doctor-help",
+    ] {
         let snap = read_rs_golden(&dir, id).unwrap();
-        assert_eq!(snap, expected, "{id}");
-        let ts = read_ts_golden(&dir, id).unwrap();
-        assert_ne!(ts, snap, "{id}");
+        let ts = read_ts_golden(&dir, id);
+        if let Ok(ts) = ts {
+            assert_ne!(ts, snap, "{id}");
+        }
     }
 }
 

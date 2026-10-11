@@ -1,8 +1,5 @@
-//! One control-mode client per tmux server.
-//!
-//! The client attaches to the hidden `crewmux-control` session (no `-d`, which
-//! makes tmux exit immediately). User windows are linked in so `%output` is
-//! delivered. Format strings on this channel are single-quoted.
+//! One control-mode client on `crewmux-control` (no `-d`). Linked windows
+//! deliver `%output`. Format strings on this channel are single-quoted.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -314,9 +311,8 @@ async fn boot_on_session(state: &mut DriveState<'_>) -> Result<(), MuxError> {
 }
 
 async fn finish_boot(state: &mut DriveState<'_>) -> Result<(), MuxError> {
-    // Do not set `window-size` globally. On tmux 3.5a a control-mode client plus
-    // `set-option -g window-size manual` makes the next `new-session` kill the
-    // server (`%exit server exited unexpectedly`). Each session sets it itself.
+    // Not `set-option -g window-size`: on tmux 3.5a that plus a control client
+    // makes the next `new-session` kill the server. Each session sets it itself.
     let listed = state.ctx.exec.run(&list_panes_args()).await?;
     let panes = parse_panes(&listed.stdout)?;
     state.ctx.hub.lock().await.note_panes(&panes);
@@ -359,9 +355,10 @@ async fn confirm_death(
 ) {
     let mut status = None;
     let mut dead = false;
+    let mut empty_status = 0u8;
     for attempt in 0..8 {
         if attempt > 0 {
-            tokio::time::sleep(Duration::from_millis(15)).await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
         let Ok(output) = exec.run(&dead_status_args(&pane_id)).await else {
             continue;
@@ -369,16 +366,25 @@ async fn confirm_death(
         let Ok((is_dead, pane_status)) = parse_dead_status(&output.stdout) else {
             continue;
         };
-        if is_dead {
-            dead = true;
-            status = pane_status;
+        if !is_dead {
+            continue;
+        }
+        dead = true;
+        status = pane_status;
+        if status.is_some() {
+            break;
+        }
+        empty_status = empty_status.saturating_add(1);
+        if empty_status >= 4 {
             break;
         }
     }
     if dead && hub.lock().await.should_emit(&pane_id) {
         drop(events.send(MuxEvent::PaneDied { pane_id, status }));
     }
-    delete_buffer(&exec, buffer.as_deref()).await;
+    if dead {
+        delete_buffer(&exec, buffer.as_deref()).await;
+    }
 }
 
 async fn delete_buffer(exec: &Arc<dyn TmuxExec>, buffer: Option<&str>) {

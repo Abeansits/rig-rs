@@ -346,49 +346,31 @@ mod suite {
         }
 
         async fn hook_trial(server: &Server, trial: u32) -> Duration {
-            let dir = scratch();
-            let marker = dir.join(format!("armed-{trial}"));
-            let release = dir.join(format!("go-{trial}"));
-            let made = std::process::Command::new("mkfifo")
-                .arg(&release)
-                .status()
-                .expect("mkfifo");
-            assert!(made.success(), "mkfifo {}", release.display());
             let mut spec = sleep_spec(&format!("hook-{trial}"));
-            // Apt tmux 3.4 (systemd cgroups) does not deliver the pane-died
-            // doorbell within 500ms for an external TERM or HUP: `wait` defers
-            // the trap, and the signal never becomes a `PaneDied`. Arm the HUP
-            // trap, then release the shell with a fifo byte so it exits 7 the
-            // same way `fast_exit_still_arms_the_hook` does. The clock starts
-            // when that byte is in the pipe.
-            spec.env
-                .insert("RIG_ARMED".into(), marker.display().to_string());
-            spec.env
-                .insert("RIG_GO".into(), release.display().to_string());
+            // TERM is not a stable status 7: bash can die from the signal before
+            // the trap runs. The shell exits 7 when this flag appears.
+            let flag = std::env::temp_dir().join(format!("rig-die-{}-{trial}", std::process::id()));
+            let path = flag.display().to_string();
+            assert!(
+                path.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-')
+                }),
+                "{path}"
+            );
+            drop(std::fs::remove_file(&flag));
             spec.argv = vec![
                 "bash".into(),
                 "-c".into(),
-                "trap 'exit 7' HUP; touch \"$RIG_ARMED\"; read < \"$RIG_GO\"; exit 7".into(),
+                format!("while [ ! -e {path} ]; do sleep 0.01; done; exit 7"),
             ];
             spec.remain_on_exit = true;
             let mut deaths = server.mux.death_events();
             let pane = server.mux.create_session(&spec).await.expect("create");
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                if tokio::fs::try_exists(&marker).await.expect("marker") {
-                    break;
-                }
-                assert!(Instant::now() < deadline, "trap was not armed");
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            let released = tokio::task::spawn_blocking(move || {
-                std::fs::write(&release, b"\n").expect("release");
-                Instant::now()
-            })
-            .await
-            .expect("release thread");
+            let start = Instant::now();
+            std::fs::write(&flag, b"x").expect("flag");
             let event = wait_death(&mut deaths, Duration::from_millis(500)).await;
-            let elapsed = released.elapsed();
+            drop(std::fs::remove_file(&flag));
+            let elapsed = start.elapsed();
             match event {
                 MuxEvent::PaneDied { status, pane_id } => {
                     assert_eq!(Some(pane_id).as_ref(), pane.pane_id.as_ref());
