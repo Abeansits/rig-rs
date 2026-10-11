@@ -1,0 +1,14 @@
+rig-rs (working name)
+Copyright 2026 Sebastian Nystorm
+
+This project is a Rust port of OpenRig.
+Portions derived from OpenRig, (c) mvschwarz / contributors,
+licensed under the Apache License, Version 2.0.
+https://github.com/mvschwarz/openrig
+
+OpenRig had no NOTICE file at the time this port began.
+Files translated from OpenRig carry a header naming the source file
+they were derived from and stating that they were ported to Rust.
+
+"OpenRig" is used here only to identify the upstream project. This
+project is not affiliated with or endorsed by the OpenRig authors.
