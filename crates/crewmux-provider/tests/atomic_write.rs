@@ -59,8 +59,12 @@ fn follows_a_symlink_to_a_regular_file() {
     let target = dir.path().join("target.txt");
     let link = dir.path().join("link.txt");
     fs::write(&target, b"old").unwrap();
+    let mut permissions = fs::metadata(&target).unwrap().permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(&target, permissions).unwrap();
     std::os::unix::fs::symlink(&target, &link).unwrap();
     AtomicWrite::write(&link, b"new", None).unwrap();
     assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
     assert_eq!(fs::read(&target).unwrap(), b"new");
+    assert_eq!(fs::metadata(&target).unwrap().mode() & 0o777, 0o600);
 }

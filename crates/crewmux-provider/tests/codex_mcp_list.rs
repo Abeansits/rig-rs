@@ -6,6 +6,10 @@ use std::process::{Command, Stdio};
 use crewmux_provider::{CodexConfig, RIG_MCP_NAME, rig_mcp_command};
 
 #[test]
+#[cfg_attr(
+    not(codex_binary_present),
+    ignore = "skipped: codex binary is not present"
+)]
 fn codex_mcp_list_lists_our_server() {
     let Some(codex) = which("codex") else {
         eprintln!("skipped: codex binary is not present");

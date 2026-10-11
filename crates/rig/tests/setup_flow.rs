@@ -28,7 +28,11 @@ fn dry_run_json_writes_nothing() {
     let sentinel = home.join(".tmux.conf");
     fs::write(&sentinel, "keep\n").unwrap();
     let before = fs::metadata(&sentinel).unwrap();
+    let bin = dir.path().join("bin");
+    let exec_log = dir.path().join("exec.log");
+    let path = exec_shims(&bin, &exec_log);
     let output = rig(&home, &rig_home)
+        .env("PATH", &path)
         .args(["setup", "--dry-run", "--json", "--no-herdr", "--no-ghostty"])
         .assert()
         .success()
@@ -47,6 +51,28 @@ fn dry_run_json_writes_nothing() {
     assert_eq!(after.modified().unwrap(), before.modified().unwrap());
     assert_eq!(fs::read(&sentinel).unwrap(), b"keep\n");
     assert!(!rig_home.exists());
+    let recorded = fs::read_to_string(&exec_log).unwrap_or_default();
+    assert!(recorded.is_empty(), "dry-run made exec calls:\n{recorded}");
+}
+
+fn exec_shims(bin: &Path, log: &Path) -> String {
+    fs::create_dir_all(bin).unwrap();
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$0 $*\" >> '{log}'\nexit 0\n",
+        log = log.display()
+    );
+    for name in ["sh", "bash", "curl", "brew"] {
+        let path = bin.join(name);
+        fs::write(&path, &script).unwrap();
+        let mut mode = fs::metadata(&path).unwrap().permissions();
+        mode.set_mode(0o755);
+        fs::set_permissions(&path, mode).unwrap();
+    }
+    format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
 }
 
 #[test]

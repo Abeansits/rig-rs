@@ -32,9 +32,14 @@ fn upsert_is_idempotent_and_remove_is_exact() {
     let replaced = ManagedBlock::TMUX
         .upsert(&doubled, TMUX_BLOCK_BODY)
         .unwrap();
-    assert_eq!(replaced.matches("# >>> rig-rs managed >>>").count(), 2);
+    assert_eq!(replaced.matches("# >>> rig-rs managed >>>").count(), 1);
     assert!(!replaced.contains("stale-body"));
     assert!(replaced.contains("tail"));
+    assert!(replaced.contains(outside_after));
+    let collapsed_again = ManagedBlock::TMUX
+        .upsert(&replaced, TMUX_BLOCK_BODY)
+        .unwrap();
+    assert_eq!(collapsed_again, replaced);
     let crlf = once.replace('\n', "\r\n");
     let crlf_next = ManagedBlock::TMUX.upsert(&crlf, TMUX_BLOCK_BODY).unwrap();
     assert!(crlf_next.contains("\r\n"));

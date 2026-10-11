@@ -1,7 +1,7 @@
 // Derived from openrig packages/cli/src/commands/doctor.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! Pure doctor checks. Names and order match the slice 7 table.
 
-use crewmux_provider::{classify_config, managed_block_current};
+use crewmux_provider::{classify_config, global_window_size_manual, managed_block_current};
 use crewmux_types::{CheckStatus, DoctorCheck, parse_version};
 
 use crate::command::Providers;
@@ -95,11 +95,15 @@ fn check_tmux_conf(facts: &DoctorFacts) -> DoctorCheck {
 }
 
 fn check_window_size(facts: &DoctorFacts) -> DoctorCheck {
-    let from_probe = facts
-        .window_size
-        .as_deref()
-        .is_some_and(|value| value == "manual");
-    if from_probe {
+    // A failed `tmux show` (no server) is not evidence the setting is safe.
+    // `window-size manual` crashes tmux 3.5a, so this does not start a server
+    // to re-read the option. It scans the config the failed query left unread.
+    let manual = match facts.window_size.as_deref() {
+        Some("manual") => true,
+        Some(_) => false,
+        None => global_window_size_manual(&facts.tmux_conf),
+    };
+    if manual {
         DoctorCheck::fail(
             "tmux_global_window_size",
             "global window-size is manual",
@@ -455,6 +459,44 @@ mod tests {
             .find(|check| check.name == "claude")
             .expect("claude");
         assert_eq!(claude.message, "claude 1.0.0");
+    }
+
+    #[test]
+    fn no_server_manual_conf_fails_window_size() {
+        let options = DoctorOptions {
+            providers: Providers::all(),
+            herdr: true,
+        };
+        let mut facts = passing();
+        facts.window_size = None;
+        facts.tmux_conf = "set -g window-size manual\n".to_owned();
+        let failed = evaluate(&facts, &options);
+        let check = failed
+            .checks
+            .iter()
+            .find(|check| check.name == "tmux_global_window_size")
+            .expect("tmux_global_window_size");
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(check.fix.is_some());
+
+        facts.tmux_conf = "set -g mouse on\n".to_owned();
+        let clean = evaluate(&facts, &options);
+        let passed = clean
+            .checks
+            .iter()
+            .find(|check| check.name == "tmux_global_window_size")
+            .expect("tmux_global_window_size");
+        assert_eq!(passed.status, CheckStatus::Pass);
+
+        facts.window_size = Some("latest".to_owned());
+        facts.tmux_conf = "set -g window-size manual\n".to_owned();
+        let live = evaluate(&facts, &options);
+        let from_server = live
+            .checks
+            .iter()
+            .find(|check| check.name == "tmux_global_window_size")
+            .expect("tmux_global_window_size");
+        assert_eq!(from_server.status, CheckStatus::Pass);
     }
 
     #[test]

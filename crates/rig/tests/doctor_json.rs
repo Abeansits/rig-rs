@@ -5,6 +5,7 @@
 )]
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use assert_cmd::Command;
@@ -113,6 +114,64 @@ fn json_scenarios_match_goldens() {
         }
         insta::assert_snapshot!(name, stdout);
     }
+}
+
+#[test]
+fn no_server_manual_conf_fails_window_size() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let bin = dir.path().join("bin");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    let tmux = bin.join("tmux");
+    fs::write(
+        &tmux,
+        "#!/bin/sh\nif [ \"$1\" = \"-V\" ]; then echo \"tmux 3.5a\"; exit 0; fi\necho \"no server running\" >&2\nexit 1\n",
+    )
+    .unwrap();
+    let mut mode = fs::metadata(&tmux).unwrap().permissions();
+    mode.set_mode(0o755);
+    fs::set_permissions(&tmux, mode).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    fs::write(home.join(".tmux.conf"), "set -g window-size manual\n").unwrap();
+    assert_eq!(
+        window_size_status(&home, &path),
+        "fail",
+        "no server and a manual conf must not pass"
+    );
+    fs::write(home.join(".tmux.conf"), "set -g mouse on\n").unwrap();
+    assert_eq!(window_size_status(&home, &path), "pass");
+}
+
+fn window_size_status(home: &Path, path: &str) -> String {
+    let mut cmd = Command::cargo_bin("rig").unwrap();
+    let asserted = cmd
+        .env("HOME", home)
+        .env("RIG_HOME", home.join("rig-home"))
+        .env("PATH", path)
+        .env_remove("RIG_DOCTOR_FIXTURE")
+        .env_remove("TMUX")
+        .args(["doctor", "--json", "--no-herdr"])
+        .assert();
+    let stdout = String::from_utf8_lossy(&asserted.get_output().stdout).into_owned();
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    parsed
+        .get("checks")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|checks| {
+            checks.iter().find(|check| {
+                check.get("name").and_then(serde_json::Value::as_str)
+                    == Some("tmux_global_window_size")
+            })
+        })
+        .and_then(|check| check.get("status"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap()
+        .to_owned()
 }
 
 #[test]

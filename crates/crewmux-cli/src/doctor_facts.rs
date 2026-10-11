@@ -80,7 +80,8 @@ pub(crate) struct DoctorFacts {
     pub tmux_version_line: Option<String>,
     /// Bytes of the user tmux config. Empty when the file is absent.
     pub tmux_conf: String,
-    /// Effective global window size, when known. `manual` fails the check.
+    /// Value from `tmux show -g window-size`. `None` means that query failed,
+    /// including when no server is running. The check then scans `tmux_conf`.
     pub window_size: Option<String>,
     /// `GET /healthz` on the daemon socket succeeded.
     pub daemon_up: bool,

@@ -115,6 +115,10 @@ fn codex_config(paths: &Paths) -> crate::doctor_facts::CodexView {
     }
 }
 
+/// Live `tmux show -g window-size`. `None` when tmux is missing or the query
+/// fails, which is what `show -g` does with no server. The check scans the
+/// config in that case. This does not start a server: `window-size manual`
+/// crashes tmux 3.5a (ADR 0005 rule 6).
 fn probe_window_size(paths: &Paths) -> Option<String> {
     let program = which(&paths.path_env, "tmux")?;
     let captured = capture(

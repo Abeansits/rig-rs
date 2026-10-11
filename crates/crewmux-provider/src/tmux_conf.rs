@@ -21,9 +21,9 @@ impl ManagedBlock {
         end: "# <<< rig-rs managed <<<",
     };
 
-    /// Replace every managed region, or append one. A second call with the same
-    /// body returns the same string. Files that use CRLF keep CRLF outside the
-    /// replacement and inside the new block.
+    /// Collapse every managed region into one current block, or append one.
+    /// Text outside the markers stays in order. A second call with the same
+    /// body returns the same string. Files that use CRLF keep CRLF.
     ///
     /// # Errors
     ///
@@ -48,9 +48,11 @@ impl ManagedBlock {
                 }
                 Span::Found { start, end } => {
                     out.push_str(rest.get(..start).unwrap_or(""));
-                    out.push_str(&block);
+                    if !replaced {
+                        out.push_str(&block);
+                        replaced = true;
+                    }
                     rest = rest.get(end..).unwrap_or("");
-                    replaced = true;
                 }
             }
         }
