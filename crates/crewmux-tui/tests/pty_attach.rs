@@ -376,21 +376,24 @@ mod tmux_it {
         .all(|seq| text.contains(seq))
     }
 
-    fn wait_for_wide(pty: &Pty) -> bool {
+    /// Force a real size change. A `SIGWINCH` that leaves the column count
+    /// unchanged is a no-op diff, so shrink to 80x24 before growing to 100x30.
+    fn wait_for_wide(pty: &Pty) -> Result<(), String> {
+        let mut last = String::new();
         for _ in 0..4 {
-            if resize(pty).is_err() {
-                return false;
-            }
+            set_winsize(pty, 80, 24)?;
+            thread::park_timeout(Duration::from_millis(200));
+            set_winsize(pty, 100, 30)?;
             let wide = pty.screen.len();
             if wait_pred(
                 || wider_than_80(&pty.screen.since(wide)),
-                Duration::from_secs(1),
+                Duration::from_secs(2),
             ) {
-                return true;
+                return Ok(());
             }
-            thread::park_timeout(Duration::from_millis(50));
+            last = String::from_utf8_lossy(&pty.screen.since(wide)).into_owned();
         }
-        false
+        Err(last)
     }
 
     fn session_gone(screen: &Screen) -> bool {
@@ -482,12 +485,12 @@ mod tmux_it {
         pty.master.write_all(bytes).map_err(|err| err.to_string())
     }
 
-    fn resize(pty: &Pty) -> Result<(), String> {
+    fn set_winsize(pty: &Pty, cols: u16, rows: u16) -> Result<(), String> {
         rustix::termios::tcsetwinsize(
             &pty.master,
             rustix::termios::Winsize {
-                ws_row: 30,
-                ws_col: 100,
+                ws_row: rows,
+                ws_col: cols,
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             },
@@ -563,9 +566,6 @@ mod tmux_it {
     }
 
     fn one_cycle(pty: &mut Pty, sock: &str, cycle: u16) -> Result<(), String> {
-        if cycle == 10 {
-            resize(pty)?;
-        }
         let mark = pty.screen.len();
         press(pty, b"a")?;
         if !wait_pred(|| has_client(sock), Duration::from_secs(3)) {
@@ -593,12 +593,13 @@ mod tmux_it {
                 dump(&pty.screen)
             ));
         }
-        if cycle == 10 && !wait_for_wide(pty) {
+        if cycle == 10
+            && let Err(tail) = wait_for_wide(pty)
+        {
             let size = rustix::termios::tcgetwinsize(&pty.slave)
                 .map_or((0, 0), |size| (size.ws_col, size.ws_row));
             return Err(format!(
-                "cycle 10 stayed within 80 columns size={size:?}\n{}",
-                dump(&pty.screen)
+                "cycle 10 stayed within 80 columns size={size:?}\n{tail}"
             ));
         }
         Ok(())

@@ -8,14 +8,14 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 fail-fast = true
 # Real-tmux / differential tests are behind per-crate cargo features (tmux-it, differential)
 # and are also filtered out here so a stray `--all-features` locally doesn't spawn tmux by surprise.
-default-filter = "not (test(/::tmux_it::/) | test(/::differential::/))"
+default-filter = "not (test(/tmux_it::/) | test(/differential::/))"
 
 [profile.ci]
 retries = 0                      # flakes must be fixed, not retried; see TEST-LAYOUT.md
 fail-fast = false
 failure-output = "immediate-final"
 slow-timeout = { period = "60s", terminate-after = 3 }
-default-filter = "not test(/::differential::/)"
+default-filter = "not test(/differential::/)"
 
 [profile.ci.junit]
 path = "junit.xml"
@@ -27,7 +27,7 @@ retries = 0
 fail-fast = false
 failure-output = "immediate-final"
 slow-timeout = { period = "60s", terminate-after = 3 }
-default-filter = "not (test(/::tmux_it::/) | test(/::differential::/))"
+default-filter = "not (test(/tmux_it::/) | test(/differential::/))"
 
 [profile.slow]
 fail-fast = false
