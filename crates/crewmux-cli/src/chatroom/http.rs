@@ -1,6 +1,9 @@
 //! Chat HTTP calls and the human-readable lines.
 
 use std::fmt::Write as _;
+use std::io::ErrorKind;
+use std::thread;
+use std::time::Duration;
 
 use crewmux_api::{ChatHistory, ChatSend, Client, Endpoint, RigSummary};
 use crewmux_types::{SEAT_ID_ENV, SEAT_ID_HEADER, SEAT_TOKEN_ENV, SEAT_TOKEN_HEADER};
@@ -58,9 +61,7 @@ pub(super) fn history(request: &HistoryRequest<'_>) -> Result<i32, Error> {
     if let Some(sender) = request.sender {
         push_query(&mut path, "sender", sender);
     }
-    let response = client
-        .request(ChatHistory::METHOD, &path, None)
-        .map_err(|err| Error::Unreachable(err.to_string()))?;
+    let response = call(&client, ChatHistory::METHOD, &path, None, &[])?;
     if response.status != 200 {
         return fail(response.status, &response.body, request.json);
     }
@@ -119,9 +120,7 @@ pub(super) fn clear(rig: &str, json: bool) -> Result<i32, Error> {
 }
 
 pub(super) fn rig_id(client: &Client, name: &str) -> Result<String, Error> {
-    let response = client
-        .request(RigSummary::METHOD, RigSummary::PATH, None)
-        .map_err(|err| Error::Unreachable(err.to_string()))?;
+    let response = call(client, RigSummary::METHOD, RigSummary::PATH, None, &[])?;
     if response.status != 200 {
         return match fail(response.status, &response.body, false) {
             Err(err) => Err(err),
@@ -141,10 +140,18 @@ pub(super) fn open_watch(
 ) -> Result<(String, crewmux_api::HttpStream), Error> {
     let id = rig_id(client, rig)?;
     let path = format!("/api/rigs/{id}/chat/watch");
-    let stream = client
-        .open("GET", &path, &[])
-        .map_err(|err| Error::Unreachable(err.to_string()))?;
-    Ok((path, stream))
+    let mut last = String::new();
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            thread::park_timeout(RETRY_GAP);
+        }
+        match client.open("GET", &path, &[]) {
+            Ok(stream) => return Ok((path, stream)),
+            Err(err) if transient(&err) => last = err.to_string(),
+            Err(err) => return Err(Error::Unreachable(err.to_string())),
+        }
+    }
+    Err(Error::Unreachable(last))
 }
 
 fn post(client: &Client, path: &str, body: &[u8]) -> Result<crewmux_api::Response, Error> {
@@ -153,9 +160,47 @@ fn post(client: &Client, path: &str, body: &[u8]) -> Result<crewmux_api::Respons
         .iter()
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
-    client
-        .request_with_headers(ChatSend::METHOD, path, Some(body), &view)
-        .map_err(|err| Error::Unreachable(err.to_string()))
+    call(client, ChatSend::METHOD, path, Some(body), &view)
+}
+
+const ATTEMPTS: u32 = 8;
+const RETRY_GAP: Duration = Duration::from_millis(20);
+
+fn call(
+    client: &Client,
+    method: &str,
+    path: &str,
+    body: Option<&[u8]>,
+    headers: &[(&str, &str)],
+) -> Result<crewmux_api::Response, Error> {
+    let mut last = String::new();
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            thread::park_timeout(RETRY_GAP);
+        }
+        match client.request_with_headers(method, path, body, headers) {
+            Ok(response) => return Ok(response),
+            Err(err) if method == "GET" && transient(&err) => last = err.to_string(),
+            Err(err) => return Err(Error::Unreachable(err.to_string())),
+        }
+    }
+    Err(Error::Unreachable(last))
+}
+
+fn transient(err: &crewmux_api::Error) -> bool {
+    let (crewmux_api::Error::Connect { source, .. } | crewmux_api::Error::Exchange { source, .. }) =
+        err
+    else {
+        return false;
+    };
+    matches!(
+        source.kind(),
+        ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::BrokenPipe
+            | ErrorKind::TimedOut
+            | ErrorKind::Interrupted
+    )
 }
 
 fn seat_headers() -> Vec<(&'static str, String)> {

@@ -1,5 +1,9 @@
-//! Chat HTTP bodies. The watch stream uses [`StreamEvent`], the same envelope
-//! slice 4's `/api/events` route is planned to carry.
+//! Chat HTTP bodies.
+//!
+//! Watch stays on `GET /api/rigs/{id}/chat/watch`. The live `/api/events` tail
+//! uses [`crate::StreamEvent`]: a numeric log id and a seat payload. A chat
+//! frame resumes from the message id and carries the chat row, so it is
+//! [`ChatWatchEvent`] on its own route until slice 4 owns the canonical stream.
 
 use serde::{Deserialize, Serialize};
 
@@ -93,9 +97,12 @@ pub struct ChatWire {
     pub created_at: String,
 }
 
-/// SSE payload `{id, type, payload}`.
+/// Chat SSE payload `{id, type, payload}`.
+///
+/// `id` is the message id. The shared [`crate::StreamEvent`] uses a log sequence
+/// and a seat payload, so chat does not reuse that struct.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StreamEvent<T> {
+pub struct ChatWatchEvent<T> {
     /// Event id. For chat this is the message id, and it is also the SSE `id:` line.
     pub id: String,
     /// Event name, such as `chat.message`.

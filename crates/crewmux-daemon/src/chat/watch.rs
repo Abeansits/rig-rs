@@ -1,7 +1,8 @@
 //! Temporary `GET /api/rigs/{id}/chat/watch` SSE stream.
 //!
 //! The frame is `{id, type, payload}` with the message id on the SSE `id:` line
-//! so `Last-Event-ID` can resume. Fold this into `/api/events` with slice 4.
+//! so `Last-Event-ID` can resume. `/api/events` tails the event log with a
+//! numeric id and a seat payload, so chat messages stay on this route.
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -9,7 +10,7 @@ use std::task::{Context, Poll};
 
 use axum::response::IntoResponse;
 use axum::response::sse::{Event, Sse};
-use crewmux_api::{CHAT_MESSAGE_TYPE, StreamEvent};
+use crewmux_api::{CHAT_MESSAGE_TYPE, ChatWatchEvent};
 use crewmux_core::chat::{ChatMessage, ChatRepo, HistoryQuery};
 use crewmux_types::{ChatCursor, RigId};
 use tokio::sync::{broadcast, mpsc};
@@ -156,7 +157,7 @@ async fn send_one(tx: &mpsc::Sender<Event>, message: &ChatMessage) -> bool {
 fn frame(message: &ChatMessage) -> Event {
     let payload = wire(message);
     let id = payload.id.clone();
-    let envelope = StreamEvent {
+    let envelope = ChatWatchEvent {
         id: id.clone(),
         event_type: CHAT_MESSAGE_TYPE.to_owned(),
         payload,

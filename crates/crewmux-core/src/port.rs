@@ -107,4 +107,18 @@ pub trait EventLog {
     ///
     /// Returns [`Error::Store`] on persistence failure.
     fn list(&self) -> Result<Vec<DomainEvent>, Error>;
+
+    /// Events with a sequence strictly after `after`, oldest first. At most 32.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Store`] on persistence failure.
+    fn after(&self, after: Seq) -> Result<Vec<(Seq, DomainEvent)>, Error>;
+
+    /// Highest sequence, or [`Seq`]`(0)` when the log is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Store`] on persistence failure.
+    fn tip(&self) -> Result<Seq, Error>;
 }

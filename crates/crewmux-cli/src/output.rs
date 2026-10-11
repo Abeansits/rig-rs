@@ -105,3 +105,8 @@ pub fn print_stderr(text: &str) {
         eprintln!("{text}");
     }
 }
+
+/// Write `rig: {message}` to stderr.
+pub fn error_line(message: &str) {
+    print_stderr(&format!("rig: {message}"));
+}

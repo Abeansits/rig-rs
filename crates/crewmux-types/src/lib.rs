@@ -10,6 +10,7 @@ mod error;
 mod id;
 mod readiness;
 mod runtime;
+mod ui;
 
 pub mod tmux_version;
 
@@ -23,6 +24,7 @@ pub use id::{RigId, RigName, SeatId, SeatName, SessionId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use tmux_version::{Version, parse_version};
+pub use ui::{LauncherKind, PodName, SeatKey, TmuxSession};
 
 /// A key delivered with `send-keys`.
 ///

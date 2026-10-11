@@ -12,6 +12,15 @@ use std::time::Duration;
 
 use crate::error::Error;
 
+/// macOS `sun_path` is about 104 bytes. The TUI guards at 100.
+pub const MAX_SUN_PATH_BYTES: usize = 100;
+
+/// Byte length of a path, which is what `sun_path` counts.
+#[must_use]
+pub fn path_bytes(path: &Path) -> usize {
+    path.as_os_str().len()
+}
+
 /// How long a single daemon request may block, unless [`Client::with_timeout`] says otherwise.
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -207,6 +216,28 @@ pub fn daemon_socket(rig_home: &Path) -> PathBuf {
     short_socket(&preferred)
 }
 
+/// `$RIG_HOME/run/tui.sock`, with the same `sun_path` fallback as [`daemon_socket`].
+#[must_use]
+pub fn tui_socket(rig_home: &Path) -> PathBuf {
+    let preferred = rig_home.join("run").join("tui.sock");
+    if preferred.as_os_str().len() <= 100 {
+        return preferred;
+    }
+    short_socket(&preferred)
+}
+
+/// Daemon socket path. `tmp` and `uid` are ignored; slice 1's [`daemon_socket`] picks the fallback.
+#[must_use]
+pub fn daemon_bind_path(rig_home: &Path, _tmp: &Path, _uid: u32) -> PathBuf {
+    daemon_socket(rig_home)
+}
+
+/// TUI control socket. `tmp` and `uid` are ignored; see [`tui_socket`].
+#[must_use]
+pub fn tui_socket_path(rig_home: &Path, _tmp: &Path, _uid: u32) -> PathBuf {
+    tui_socket(rig_home)
+}
+
 fn short_socket(preferred: &Path) -> PathBuf {
     let file = format!(
         "rig-{:016x}.sock",
@@ -357,14 +388,74 @@ fn exchange(
             target: target.to_owned(),
             source,
         })?;
+    parse_response(&read_message(stream, target)?)
+}
+
+/// Read one response. A reset after a complete `Content-Length` body is the
+/// peer closing; the bytes already read are the response.
+fn read_message(stream: &mut impl Read, target: &str) -> Result<Vec<u8>, Error> {
     let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .map_err(|source| Error::Exchange {
-            target: target.to_owned(),
-            source,
-        })?;
-    parse_response(&buf)
+    let mut chunk = [0_u8; 1024];
+    loop {
+        if message_complete(&buf) {
+            return Ok(buf);
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                if header_end(&buf).is_some() {
+                    return Ok(buf);
+                }
+                return Err(Error::Exchange {
+                    target: target.to_owned(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "closed before an HTTP response",
+                    ),
+                });
+            }
+            Ok(n) => {
+                if let Some(bytes) = chunk.get(..n) {
+                    buf.extend_from_slice(bytes);
+                }
+            }
+            Err(_) if message_complete(&buf) => return Ok(buf),
+            Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(source) => {
+                return Err(Error::Exchange {
+                    target: target.to_owned(),
+                    source,
+                });
+            }
+        }
+    }
+}
+
+fn message_complete(buf: &[u8]) -> bool {
+    let Some(split) = header_end(buf) else {
+        return false;
+    };
+    let Some(head) = buf.get(..split) else {
+        return false;
+    };
+    let Some(len) = content_length(head) else {
+        return false;
+    };
+    buf.len().saturating_sub(split.saturating_add(4)) >= len
+}
+
+fn header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn content_length(head: &[u8]) -> Option<usize> {
+    let text = std::str::from_utf8(head).ok()?;
+    for line in text.split("\r\n").skip(1) {
+        let (name, value) = line.split_once(':')?;
+        if name.eq_ignore_ascii_case("content-length") {
+            return value.trim().parse().ok();
+        }
+    }
+    None
 }
 
 fn parse_response(buf: &[u8]) -> Result<Response, Error> {

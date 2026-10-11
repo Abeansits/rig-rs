@@ -157,13 +157,23 @@ pub(super) async fn exchange(
         for _ in 0..8 {
             match client.request_with_headers(&method, &path, body.as_deref(), &view) {
                 Ok(response) => return response,
-                Err(err) => last = err.to_string(),
+                Err(err) if method == "GET" || refused(&err) => last = err.to_string(),
+                Err(err) => panic!("http: {err}"),
             }
         }
         panic!("http: {last}");
     })
     .await
     .expect("join")
+}
+
+fn refused(err: &crewmux_api::Error) -> bool {
+    let (crewmux_api::Error::Connect { source, .. } | crewmux_api::Error::Exchange { source, .. }) =
+        err
+    else {
+        return false;
+    };
+    source.kind() == std::io::ErrorKind::ConnectionRefused
 }
 
 pub(super) fn json(body: &str) -> Value {
