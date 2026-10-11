@@ -11,6 +11,15 @@ use std::time::Duration;
 
 use crate::error::Error;
 
+/// macOS `sun_path` is about 104 bytes. The TUI guards at 100.
+pub const MAX_SUN_PATH_BYTES: usize = 100;
+
+/// Byte length of a path, which is what `sun_path` counts.
+#[must_use]
+pub fn path_bytes(path: &Path) -> usize {
+    path.as_os_str().len()
+}
+
 /// How long a single daemon request may block, unless [`Client::with_timeout`] says otherwise.
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -136,6 +145,28 @@ pub fn daemon_socket(rig_home: &Path) -> PathBuf {
         return preferred;
     }
     short_socket(&preferred)
+}
+
+/// `$RIG_HOME/run/tui.sock`, with the same `sun_path` fallback as [`daemon_socket`].
+#[must_use]
+pub fn tui_socket(rig_home: &Path) -> PathBuf {
+    let preferred = rig_home.join("run").join("tui.sock");
+    if preferred.as_os_str().len() <= 100 {
+        return preferred;
+    }
+    short_socket(&preferred)
+}
+
+/// Daemon socket path. `tmp` and `uid` are ignored; slice 1's [`daemon_socket`] picks the fallback.
+#[must_use]
+pub fn daemon_bind_path(rig_home: &Path, _tmp: &Path, _uid: u32) -> PathBuf {
+    daemon_socket(rig_home)
+}
+
+/// TUI control socket. `tmp` and `uid` are ignored; see [`tui_socket`].
+#[must_use]
+pub fn tui_socket_path(rig_home: &Path, _tmp: &Path, _uid: u32) -> PathBuf {
+    tui_socket(rig_home)
 }
 
 fn short_socket(preferred: &Path) -> PathBuf {

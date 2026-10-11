@@ -12,6 +12,7 @@ mod output;
 
 pub mod diff;
 pub mod ledger;
+pub mod record_tui;
 
 pub use error::{Error, io_err};
 pub use lint::{lint_claude_json, lint_window_size};

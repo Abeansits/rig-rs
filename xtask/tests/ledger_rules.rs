@@ -232,7 +232,7 @@ fn seeded_ledger_is_check_green() {
     let root = workspace_root();
     let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     let rows = parse_csv(&text).unwrap();
-    assert_eq!(rows.len(), 1324);
+    assert_eq!(rows.len(), 1355);
     for row in &rows {
         match row.status {
             LedgerStatus::Todo => {
@@ -245,7 +245,11 @@ fn seeded_ledger_is_check_green() {
                 assert!(row.pe_id.is_none(), "{}", row.ts_path);
             }
             LedgerStatus::Ported | LedgerStatus::Reused => {
-                assert!(row.rust_test.is_some(), "{}", row.ts_path);
+                assert!(
+                    !row.rust_test.as_deref().unwrap_or("").trim().is_empty(),
+                    "{}",
+                    row.ts_path
+                );
                 assert!(row.pe_id.is_none(), "{}", row.ts_path);
             }
             LedgerStatus::Diverged => assert!(row.pe_id.is_some(), "{}", row.ts_path),

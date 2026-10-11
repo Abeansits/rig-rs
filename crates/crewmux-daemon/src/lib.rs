@@ -3,6 +3,7 @@
 mod db;
 mod death;
 mod error;
+mod events;
 mod http;
 mod launch;
 mod query;

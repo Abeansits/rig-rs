@@ -26,6 +26,7 @@ pub(crate) fn router(app: App) -> Router {
         .route(CaptureSeat::PATH, post(capture_seat))
         .route(AttachInfo::PATH, post(attach))
         .route(RigDown::PATH, post(rig_down))
+        .route(crate::events::PATH, get(crate::events::events))
         .route("/shutdown", post(shutdown))
         .layer(map_response(connection_close))
         .with_state(app)

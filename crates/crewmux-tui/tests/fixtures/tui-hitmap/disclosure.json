@@ -1,0 +1,7 @@
+{
+  "shift_reason": "Coordinates are ratatui widget rects. ADR-0004 does not require pixel parity with the TypeScript renderer, so every point is annotated rather than copied from the TS hit map.",
+  "points": [
+    {"x": 1, "y": 2, "action": "toggle", "note": "disclosure cell is registered first and wins"},
+    {"x": 2, "y": 2, "action": "select", "note": "the rest of the row selects"}
+  ]
+}

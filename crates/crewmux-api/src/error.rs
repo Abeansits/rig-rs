@@ -37,4 +37,20 @@ pub enum Error {
     /// The body was not UTF-8.
     #[error("daemon response body was not UTF-8")]
     BodyEncoding,
+    /// The status was not 2xx.
+    #[error("daemon returned HTTP {status} for {path}")]
+    Status {
+        /// Request path.
+        path: String,
+        /// HTTP status.
+        status: u16,
+    },
+    /// The body was not the expected JSON type.
+    #[error("daemon JSON for {path} did not match the contract: {message}")]
+    Json {
+        /// Request path.
+        path: String,
+        /// serde message.
+        message: String,
+    },
 }

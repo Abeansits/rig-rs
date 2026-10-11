@@ -1,8 +1,20 @@
-//! The `rig` binary: CLI verbs, and `rig daemon run` for the background server.
+//! The `rig` binary: CLI verbs, `rig daemon`, and `rig tui`.
+//!
+//! `rig tui` is intercepted before clap so the slice 1 verb list stays the help surface.
 
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("tui") {
+        return match crewmux_cli::run_tui() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                crewmux_cli::report(&err);
+                ExitCode::from(1)
+            }
+        };
+    }
     let code = match real_main() {
         Ok(code) => code,
         Err(err) => {

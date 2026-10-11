@@ -1,0 +1,233 @@
+{
+  "screen": "explorer-expanded-pod",
+  "source": "openrig v0.6.9",
+  "cols": 120,
+  "rows": 40,
+  "shift_reason": "Coordinates are ratatui widget rects. ADR-0004 does not require cell parity with the TypeScript renderer, so hits are compared by action kind and target.",
+  "hits": [
+    {
+      "y": 3,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "topology"
+      },
+      "identity": null
+    },
+    {
+      "y": 4,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "host",
+        "name": "vm-host"
+      },
+      "identity": {
+        "kind": "select",
+        "target": "host:vm-host"
+      }
+    },
+    {
+      "y": 5,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "rig",
+        "name": "openrig-build",
+        "target": {
+          "host": "vm-host"
+        }
+      },
+      "identity": {
+        "kind": "select",
+        "target": "rig:openrig-build"
+      }
+    },
+    {
+      "y": 6,
+      "x1": 10,
+      "x2": 10,
+      "raw": {
+        "type": "toggle-expand",
+        "key": "pod:vm-host/openrig-build/dev50"
+      },
+      "identity": {
+        "kind": "toggle",
+        "target": "pod:vm-host/openrig-build/dev50"
+      }
+    },
+    {
+      "y": 6,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "pod",
+        "name": "dev50",
+        "target": {
+          "host": "vm-host",
+          "rig": "openrig-build"
+        }
+      },
+      "identity": {
+        "kind": "select",
+        "target": "pod:dev50"
+      }
+    },
+    {
+      "y": 7,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "agent",
+        "name": "dev50.driver",
+        "target": {
+          "host": "vm-host",
+          "rig": "openrig-build",
+          "pod": "dev50"
+        }
+      },
+      "identity": {
+        "kind": "select",
+        "target": "agent:dev50.driver"
+      }
+    },
+    {
+      "y": 8,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "agent",
+        "name": "dev50.guard",
+        "target": {
+          "host": "vm-host",
+          "rig": "openrig-build",
+          "pod": "dev50"
+        }
+      },
+      "identity": {
+        "kind": "select",
+        "target": "agent:dev50.guard"
+      }
+    },
+    {
+      "y": 9,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "agent",
+        "name": "dev50.qa",
+        "target": {
+          "host": "vm-host",
+          "rig": "openrig-build",
+          "pod": "dev50"
+        }
+      },
+      "identity": {
+        "kind": "select",
+        "target": "agent:dev50.qa"
+      }
+    },
+    {
+      "y": 10,
+      "x1": 10,
+      "x2": 10,
+      "raw": {
+        "type": "toggle-expand",
+        "key": "pod:vm-host/openrig-build/orch"
+      },
+      "identity": {
+        "kind": "toggle",
+        "target": "pod:vm-host/openrig-build/orch"
+      }
+    },
+    {
+      "y": 10,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "pod",
+        "name": "orch",
+        "target": {
+          "host": "vm-host",
+          "rig": "openrig-build"
+        }
+      },
+      "identity": {
+        "kind": "select",
+        "target": "pod:orch"
+      }
+    },
+    {
+      "y": 11,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "drill",
+        "resource": "host",
+        "name": "remote-host"
+      },
+      "identity": {
+        "kind": "select",
+        "target": "host:remote-host"
+      }
+    },
+    {
+      "y": 12,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "specs"
+      },
+      "identity": null
+    },
+    {
+      "y": 13,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "scopes"
+      },
+      "identity": null
+    },
+    {
+      "y": 14,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "terminals"
+      },
+      "identity": null
+    },
+    {
+      "y": 15,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "needs"
+      },
+      "identity": null
+    },
+    {
+      "y": 16,
+      "x1": 1,
+      "x2": 30,
+      "raw": {
+        "type": "jump",
+        "section": "system"
+      },
+      "identity": null
+    }
+  ]
+}
