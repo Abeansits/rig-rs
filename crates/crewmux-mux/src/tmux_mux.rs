@@ -12,15 +12,15 @@ use tokio_util::task::TaskTracker;
 use crate::Key;
 use crate::Multiplexer;
 use crate::argv::{
-    canonical_session_name, capture_args, cursor_args, has_session_args, is_pane_id,
-    kill_session_args, link_into_control_args, list_clients_args, list_panes_args,
-    manual_size_args, new_session_args, pane_died_hook_args, pane_mode_args, pane_target,
-    remain_on_exit_args, resize_args, send_keys_args, set_option_args,
+    armed_session_args, bell_window_args, canonical_session_name, capture_args, cursor_args,
+    has_session_args, is_pane_id, kill_session_args, link_into_control_args, list_clients_args,
+    list_panes_args, manual_size_args, pane_mode_args, pane_target, parse_bell_id,
+    reject_global_window_size, resize_args, send_keys_args, set_option_args,
 };
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::control::{ControlCtx, run_control};
 use crate::error::MuxError;
-use crate::exec::{ProcessExec, TmuxExec, is_absence};
+use crate::exec::{ProcessExec, TmuxExec, is_absence, resolve_tmux_binary};
 use crate::hub::Hub;
 use crate::parse::{parse_clients, parse_created, parse_cursor, parse_panes};
 use crate::paste::perform_paste;
@@ -57,6 +57,8 @@ impl Default for TmuxConfig {
 pub struct TmuxMux {
     exec: Arc<dyn TmuxExec>,
     socket: String,
+    binary: String,
+    bell: String,
     hub: Arc<tokio::sync::Mutex<Hub>>,
     events: broadcast::Sender<MuxEvent>,
     own_write: watch::Sender<Option<Instant>>,
@@ -78,10 +80,14 @@ impl TmuxMux {
     ///
     /// A version older than 3.3 returns [`MuxError::TmuxTooOld`] and does not spawn.
     pub async fn connect(config: TmuxConfig) -> Result<Self, MuxError> {
-        let exec: Arc<dyn TmuxExec> = Arc::new(ProcessExec::new(
-            config.binary.clone(),
-            config.socket.clone(),
-        ));
+        let binary = resolve_tmux_binary(&config.binary).await;
+        let exec: Arc<dyn TmuxExec> =
+            Arc::new(ProcessExec::new(binary.clone(), config.socket.clone()));
+        let config = TmuxConfig {
+            binary,
+            socket: config.socket,
+            pause_after: config.pause_after,
+        };
         Self::connect_with_exec(config, exec).await
     }
 
@@ -94,14 +100,20 @@ impl TmuxMux {
         exec: Arc<dyn TmuxExec>,
     ) -> Result<Self, MuxError> {
         ensure_version(exec.as_ref()).await?;
+        let binary = config
+            .binary
+            .to_str()
+            .ok_or_else(|| MuxError::Control("tmux path is not utf-8".into()))?;
+        let binary = binary.to_owned();
         let cancel = CancellationToken::new();
         let tracker = TaskTracker::new();
         let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
         let (events, _) = broadcast::channel(2048);
         let (own_write, _) = watch::channel(None);
+        let (bell_tx, bell_rx) = watch::channel(None);
         let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
         let ctx = ControlCtx {
-            binary: config.binary,
+            binary: config.binary.clone(),
             socket: config.socket.clone(),
             pause_after: config.pause_after,
             exec: Arc::clone(&exec),
@@ -109,12 +121,24 @@ impl TmuxMux {
             events: events.clone(),
             cancel: cancel.clone(),
             boot_tx: Some(boot_tx),
+            bell: bell_rx,
         };
         let control = tracker.spawn(run_control(ctx));
         wait_ready(&cancel, &control, boot_rx).await?;
+        let bell = match open_bell(exec.as_ref()).await {
+            Ok(bell) => bell,
+            Err(err) => {
+                cancel.cancel();
+                control.abort();
+                return Err(err);
+            }
+        };
+        bell_tx.send_replace(Some(bell.clone()));
         Ok(Self {
             exec,
             socket: config.socket,
+            binary,
+            bell,
             hub,
             events,
             own_write,
@@ -129,6 +153,11 @@ impl TmuxMux {
     pub fn socket(&self) -> &str {
         &self.socket
     }
+}
+
+async fn open_bell(exec: &dyn TmuxExec) -> Result<String, MuxError> {
+    let out = exec.run(&bell_window_args()).await?;
+    parse_bell_id(&out.stdout)
 }
 
 async fn ensure_version(exec: &dyn TmuxExec) -> Result<(), MuxError> {
@@ -179,7 +208,15 @@ fn require_pane_id(pane: &PaneRef) -> Result<String, MuxError> {
 #[async_trait::async_trait]
 impl Multiplexer for TmuxMux {
     async fn create_session(&self, spec: &SessionSpec) -> Result<PaneRef, MuxError> {
-        let created = self.exec.run(&new_session_args(spec)).await?;
+        let created = self
+            .exec
+            .run(&armed_session_args(
+                spec,
+                &self.binary,
+                &self.socket,
+                &self.bell,
+            )?)
+            .await?;
         let (pane_id, session) = parse_created(&created.stdout)?;
         self.exec.run(&manual_size_args(&session)).await?;
         self.exec
@@ -189,12 +226,6 @@ impl Multiplexer for TmuxMux {
                 spec.geometry.rows,
             ))
             .await?;
-        if spec.remain_on_exit {
-            self.exec.run(&remain_on_exit_args(&session, true)).await?;
-            self.exec
-                .run(&pane_died_hook_args(&session, &self.socket))
-                .await?;
-        }
         self.exec.run(&link_into_control_args(&session)).await?;
         let panes = self.list_panes().await?;
         self.hub.lock().await.note_panes(&panes);
@@ -259,6 +290,7 @@ impl Multiplexer for TmuxMux {
     }
 
     async fn set_option(&self, scope: OptScope, key: &str, value: &str) -> Result<(), MuxError> {
+        reject_global_window_size(&scope, key)?;
         self.exec
             .run(&set_option_args(&scope, key, value))
             .await

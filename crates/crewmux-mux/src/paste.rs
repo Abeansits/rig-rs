@@ -115,13 +115,22 @@ mod tests {
         let calls = exec.calls.lock().await.clone();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].first().map(String::as_str), Some("load-buffer"));
-        assert_eq!(calls[1].first().map(String::as_str), Some("paste-buffer"));
-        assert!(
-            calls[1]
-                .windows(2)
-                .any(|pair| pair == ["-d", "-p"] || pair == ["-p", "-r"])
+        assert_eq!(
+            calls[1],
+            vec![
+                "paste-buffer",
+                "-t",
+                "%1",
+                "-b",
+                receipt.buffer.as_str(),
+                "-d",
+                "-p",
+                "-r",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
         );
-        assert!(calls[1].iter().any(|arg| arg == "-r"));
         assert!(!calls.iter().flatten().any(|arg| arg == "Enter"));
         assert_eq!(*exec.mode.lock().await, Some(0o600));
         let path = calls[0].last().expect("path");

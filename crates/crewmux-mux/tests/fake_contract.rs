@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crewmux_mux::{
-    Capture, CaptureRange, ClientInfo, FakeMux, GuardInputs, Key, Multiplexer, MuxEvent, PasteOpts,
-    SessionSpec,
+    Capture, CaptureRange, ClientInfo, FakeMux, GuardInputs, Key, Multiplexer, MuxError, MuxEvent,
+    OptScope, PasteOpts, SessionSpec,
 };
 
 fn spec(name: &str) -> SessionSpec {
@@ -93,6 +93,34 @@ async fn remain_on_exit_records_the_doorbell_hook() {
     assert!(joined.contains("rig-dead-"), "{joined}");
     assert!(joined.contains("-L sock"), "{joined}");
     assert!(joined.contains("=demo:"), "{joined}");
+}
+
+#[tokio::test]
+async fn window_size_never_global() {
+    let mux = FakeMux::new();
+    let err = mux
+        .set_option(OptScope::Global, "window-size", "manual")
+        .await
+        .expect_err("global window-size");
+    assert!(matches!(err, MuxError::Forbidden(_)), "{err}");
+    let calls = mux.recorded().await;
+    assert!(
+        !calls
+            .iter()
+            .flatten()
+            .any(|arg| arg == "window-size" || arg == "-g"),
+        "{calls:?}"
+    );
+    mux.set_option(OptScope::Session("demo".into()), "window-size", "manual")
+        .await
+        .expect("session scope");
+    let calls = mux.recorded().await;
+    let set = calls
+        .iter()
+        .find(|argv| argv.iter().any(|arg| arg == "window-size"))
+        .expect("session set");
+    assert!(!set.iter().any(|arg| arg == "-g"), "{set:?}");
+    assert!(set.iter().any(|arg| arg == "-t"));
 }
 
 #[tokio::test]

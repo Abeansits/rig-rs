@@ -46,6 +46,31 @@ impl ProcessExec {
     }
 }
 
+/// Absolute path for a `PATH` lookup of `binary`. A path that already contains
+/// a directory is returned unchanged. The lookup uses `tokio::fs` so it does
+/// not block a worker thread.
+pub(crate) async fn resolve_tmux_binary(binary: &std::path::Path) -> PathBuf {
+    if binary.is_absolute() || binary.components().nth(1).is_some() {
+        return binary.to_path_buf();
+    }
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return binary.to_path_buf();
+    };
+    for dir in std::env::split_paths(&path_var) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = dir.join(binary);
+        if tokio::fs::metadata(&candidate)
+            .await
+            .is_ok_and(|meta| meta.is_file())
+        {
+            return candidate;
+        }
+    }
+    binary.to_path_buf()
+}
+
 #[async_trait]
 impl TmuxExec for ProcessExec {
     async fn run(&self, args: &[String]) -> Result<ExecOutput, MuxError> {

@@ -12,6 +12,11 @@ pub(crate) enum Action {
     WindowClose { window_id: String },
     /// `%paste-buffer-changed <name>`.
     PasteBuffer { name: String },
+    /// `%window-renamed` / `%unlinked-window-renamed` for a `rig-dead-%N` name.
+    ///
+    /// tmux 3.3a does not emit `%paste-buffer-changed`. The death hook renames the
+    /// bell window. The driver ignores the rename unless `window_id` is that bell.
+    WindowRenamed { window_id: String, pane_id: String },
     /// Backstop subscription reported `#{pane_dead}` = 1.
     Subscription { pane_id: String },
     /// `%sessions-changed`.
@@ -68,6 +73,12 @@ pub(crate) fn classify(line: &[u8]) -> Action {
             name: lossy_trim(rest),
         };
     }
+    if let Some(rest) = line.strip_prefix(b"%window-renamed ") {
+        return renamed_action(rest);
+    }
+    if let Some(rest) = line.strip_prefix(b"%unlinked-window-renamed ") {
+        return renamed_action(rest);
+    }
     if let Some(rest) = line.strip_prefix(b"%subscription-changed ") {
         return subscription_action(rest);
     }
@@ -105,6 +116,24 @@ fn extended_action(rest: &[u8]) -> Action {
     Action::Output {
         pane_id: pane_id.to_owned(),
         data,
+    }
+}
+
+fn renamed_action(rest: &[u8]) -> Action {
+    let text = lossy_trim(rest);
+    let Some((window_id, name)) = text.split_once(' ') else {
+        return Action::Ignore;
+    };
+    let window_id = window_id.trim();
+    if window_id.is_empty() {
+        return Action::Ignore;
+    }
+    match pane_from_dead_buffer(name.trim()) {
+        Some(pane_id) => Action::WindowRenamed {
+            window_id: window_id.to_owned(),
+            pane_id,
+        },
+        None => Action::Ignore,
     }
 }
 
@@ -232,6 +261,22 @@ mod tests {
             classify(b"%extended-output %2 10 : z"),
             Action::Output { ref pane_id, ref data } if pane_id == "%2" && data == b"z"
         ));
+    }
+
+    #[test]
+    fn window_renames_carry_the_doorbell_pane() {
+        assert!(matches!(
+            classify(b"%window-renamed @4 rig-dead-%2"),
+            Action::WindowRenamed { ref window_id, ref pane_id }
+                if window_id == "@4" && pane_id == "%2"
+        ));
+        assert!(matches!(
+            classify(b"%unlinked-window-renamed @4 rig-dead-%3"),
+            Action::WindowRenamed { ref window_id, ref pane_id }
+                if window_id == "@4" && pane_id == "%3"
+        ));
+        assert_eq!(classify(b"%window-renamed @4 crewmux-bell"), Action::Ignore);
+        assert_eq!(classify(b"%window-renamed rig-dead-%2"), Action::Ignore);
     }
 
     #[test]

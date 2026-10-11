@@ -1,6 +1,6 @@
 # rig-rs QA plan: CI gates
 
-Status: prepared by QA Bot on 2026-10-11 against `Abeansits/rig-rs` main @ `37677ee`. Updated with Dev Bot's decisions (crewmux-* names, MSRV from Cargo.toml, SHA-pinned actions including `check`, features per crate, deny.toml from slice 0). Nothing has been pushed yet.
+Status: prepared by QA Bot on 2026-10-11 against `Abeansits/rig-rs` main @ `37677ee`. Updated with Dev Bot's decisions (crewmux-* names, MSRV from Cargo.toml, SHA-pinned actions including `check`, features per crate, deny.toml from slice 0). Parity: `parity/ledger.csv` is the single ledger (`tests/parity/LEDGER.md` retired); TS reference OpenRig v0.6.9 @ `4b48ca21`.
 The ready-to-PR files are in `qa/pr/`.
 
 ## Baseline (main @ 37677ee, read via the GitHub-xai connector)
@@ -15,7 +15,7 @@ The ready-to-PR files are in `qa/pr/`.
 | `cargo-deny (bans licenses sources)` | every PR + main | yes | Uses `deny.toml` **shipped by slice 0** (RUST-AGENT-GUIDE §2.5 + bans). This PR does not include `deny.toml`; rebase onto slice 0 |
 | `cargo-deny (advisories)` | every PR + main | **on main only** | `continue-on-error` on PRs, so a new RUSTSEC entry can't block unrelated work; a red result on main gets triaged |
 | `msrv` | every PR + main | yes | Reads `workspace.package.rust-version` from `Cargo.toml` (slice 0 sets a real stable). If absent, the job **skips with a notice** and succeeds — no hardcoded fallback |
-| `guards` | every PR + main | yes | 800-line cap on non-test `.rs` files, no bare `#[ignore]`, no committed `.snap.new`, and every `ported` row in the parity ledger must point at a Rust test that exists |
+| `guards` | every PR + main | yes | 800-line cap on non-test `.rs` files, no bare `#[ignore]`, no committed `.snap.new`, and `cargo xtask ledger check` validates `parity/ledger.csv` (the single parity ledger; statuses todo/ported/reused/waived/diverged; `ported`/`reused` must name a test listed by `cargo test -- --list`) |
 | `coverage (informational)` | every PR + main | **no** | `cargo llvm-cov nextest --all-features` produces an lcov artifact plus a summary in the job summary |
 | `ci-pass` | always | **the only required check** | Fails unless check, nextest, deny, msrv and guards all succeeded |
 

@@ -107,7 +107,7 @@ async fn exact_target_does_not_select_a_prefix_sibling() {
     assert!(created.windows(2).any(|pair| pair == ["-s", "worker-long"]));
 }
 
-/// ts: packages/daemon/test/tmux-session-names-native.test.ts > "discovers names containing the metadata separator"
+/// ts: packages/daemon/test/tmux-session-names-native.test.ts > "rewrites dot and colon in the stored name and ignores a prefix"
 #[tokio::test]
 async fn session_names_rewrite_dot_and_colon() {
     let mux = FakeMux::new();

@@ -159,7 +159,9 @@ pub struct PaneInfo {
     /// Session name.
     pub session: String,
     /// Process id of the pane command.
-    pub pid: u32,
+    ///
+    /// `None` when tmux omits `#{pane_pid}` for a dead remain-on-exit pane.
+    pub pid: Option<u32>,
     /// Foreground command name.
     pub current_cmd: String,
     /// `pane_dead`.
@@ -215,7 +217,7 @@ pub enum MuxEvent {
     ServerExited,
     /// The control client attached again and rebuilt pane state.
     Reconnected,
-    /// A subscriber fell behind the 64 KiB per-pane buffer.
+    /// A subscriber did not drain its queue, so bytes were dropped.
     Gap {
         /// Pane whose bytes were dropped.
         pane_id: String,
@@ -244,6 +246,8 @@ pub struct GuardInputs {
 /// Where `set-option` applies.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OptScope {
+    /// Global option (`-g`). `window-size` is rejected here.
+    Global,
     /// Server option (`-s`).
     Server,
     /// Session option. The name is canonicalised.
