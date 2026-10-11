@@ -116,6 +116,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Source-only OpenRig pin for ledger case-name verification (no npm/build; <1 min).
+      # Same pin, action SHA, and persist-credentials as .github/workflows/diff-ts.yml.
+      # Checked out under the workspace (actions/checkout requires that), then moved
+      # to runner.temp so lint-mux's workspace walk does not scan TS fixtures.
+      - name: Checkout OpenRig v0.6.9
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: mvschwarz/openrig
+          ref: 4b48ca21a9bd072aa05a08b3da6d9c0708e093c5
+          path: openrig
+          persist-credentials: false
+      - name: Move OpenRig out of the workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${{ runner.temp }}/openrig"
+          mv openrig "${{ runner.temp }}/openrig"
       - name: File size limit (800 lines, non-test .rs)
         shell: bash
         run: |
@@ -133,16 +150,11 @@ jobs:
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Parity ledger check (parity/ledger.csv)
+        env:
+          OPENRIG_DIR: ${{ runner.temp }}/openrig
         run: cargo run -p xtask --locked -- ledger check
-      # lint-mux lands with PR #4; remove the skip branch once it is on main.
       - name: lint-mux (crewmux-mux human-client / shell ban)
-        shell: bash
-        run: |
-          if ! grep -rqs '"lint-mux"' xtask/src; then
-            echo "::notice::xtask has no lint-mux subcommand yet (lands with PR #4); skipping"
-            exit 0
-          fi
-          cargo run -p xtask --locked -- lint-mux
+        run: cargo run -p xtask --locked -- lint-mux
 
   coverage:
     name: coverage (informational)
