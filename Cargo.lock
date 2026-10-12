@@ -2141,6 +2141,7 @@ dependencies = [
  "crewmux-mcp",
  "crewmux-mux",
  "crewmux-provider",
+ "crewmux-transcript",
  "crewmux-tui",
  "insta",
  "predicates",

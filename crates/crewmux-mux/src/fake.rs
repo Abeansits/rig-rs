@@ -45,6 +45,7 @@ struct FakeInner {
     guard_reads: u32,
     hooks: ScriptHooks,
     hub: Hub,
+    last_paste: Option<String>,
 }
 
 struct ScriptHooks {
@@ -106,6 +107,7 @@ impl FakeMux {
                     swallow: false,
                 },
                 hub: Hub::default(),
+                last_paste: None,
             })),
             events,
             own_write,
@@ -176,6 +178,11 @@ impl FakeMux {
                 }
             }
         });
+    }
+
+    /// Text of the most recent [`paste`](Multiplexer::paste).
+    pub async fn last_paste(&self) -> Option<String> {
+        self.inner.lock().await.last_paste.clone()
     }
 
     /// Argv recorded so far, including `tmux -L <socket> -f /dev/null`.
@@ -410,6 +417,11 @@ impl Multiplexer for FakeMux {
         text: &str,
         opts: PasteOpts,
     ) -> Result<PasteReceipt, MuxError> {
+        {
+            let mut guard = self.inner.lock().await;
+            guard.last_paste = Some(text.to_owned());
+        }
+        crate::fake_script::echo_paste(text);
         let exec = RecordingExec {
             inner: Arc::clone(&self.inner),
         };

@@ -180,7 +180,7 @@ fn parse_turns(path: &Path, tail: &[u8], start: usize) -> Result<Vec<UserTurn>, 
 }
 
 fn ignored_compact_record(value: &serde_json::Value, text: &str) -> bool {
-    compact_record(value) || command_envelope(text.trim())
+    compact_record(value) || compact_command(text.trim())
 }
 
 /// Structure, not a substring. A prose turn that quotes `<local-command-stdout>` stays.
@@ -198,6 +198,18 @@ fn compact_record(value: &serde_json::Value) -> bool {
 
 fn flag(value: &serde_json::Value, key: &str) -> bool {
     value.get(key).and_then(serde_json::Value::as_bool) == Some(true)
+}
+
+/// A command-tag envelope whose `command-name` is `/compact`.
+///
+/// v0.6.9 does not skip command tags. Other command-only messages stay user
+/// turns. `/compact` is skipped because that record is not a confirmable turn.
+fn compact_command(text: &str) -> bool {
+    command_envelope(text)
+        && command_name_body(text).is_some_and(|body| {
+            let name = body.trim();
+            name == "/compact" || name == "compact"
+        })
 }
 
 /// The whole turn is only `command-name` / `command-args` / `command-message` /
@@ -241,6 +253,26 @@ fn is_command_tag(name: &str) -> bool {
         name,
         "command-name" | "command-args" | "command-message" | "command-contents"
     )
+}
+
+fn command_name_body(text: &str) -> Option<&str> {
+    let mut rest = text;
+    while !rest.is_empty() {
+        let name = tag_name(rest)?;
+        if !is_command_tag(name) {
+            return None;
+        }
+        let open_end = rest.find('>')?;
+        let after = rest.get(open_end.saturating_add(1)..)?;
+        let close = format!("</{name}>");
+        let at = after.find(&close)?;
+        let body = after.get(..at)?;
+        if name == "command-name" {
+            return Some(body);
+        }
+        rest = after.get(at.saturating_add(close.len())..)?.trim_start();
+    }
+    None
 }
 
 fn user_text(value: &serde_json::Value) -> Option<String> {

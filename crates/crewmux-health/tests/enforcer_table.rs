@@ -24,6 +24,9 @@ fn enforcer_table() {
     send_failed_does_not_dedup();
     env_threshold_fallback();
     manual_then_auto_dedup();
+    second_manual_after_the_first_settles();
+    manual_after_cancel_sends_prep();
+    auto_after_finished_manual();
 }
 
 fn prompts() {
@@ -362,6 +365,93 @@ fn manual_then_auto_dedup() {
         held,
         EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyTriggeredAboveThreshold)
     ));
+}
+
+fn second_manual_after_the_first_settles() {
+    let mut enforcer = Enforcer::new();
+    let first = manual_sample("a", Some(20));
+    assert!(matches!(
+        enforcer.decide_manual(&first, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    let sent = manual_prep("a", PrepStatus::CompactSent, true);
+    assert!(matches!(
+        enforcer.decide_manual(&first, &manual_prep("a", PrepStatus::Waiting, true), 1_000),
+        EnforcerOutcome::SendCompact(_)
+    ));
+    let blocked = enforcer.decide_manual(&manual_sample("b", Some(20)), &sent, 2_000);
+    assert!(matches!(
+        blocked,
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress)
+    ));
+    enforcer.note_settled("claude", ManualCompactionStage::Failed);
+    let again = enforcer.decide_manual(&manual_sample("c", Some(20)), &sent, 3_000);
+    assert!(
+        matches!(again, EnforcerOutcome::SendPrep(_)),
+        "a settled compact must allow another manual prep"
+    );
+    assert_eq!(stage(&enforcer), Some("preparing"));
+}
+
+fn manual_after_cancel_sends_prep() {
+    let mut enforcer = Enforcer::new();
+    let sample = manual_sample("a", Some(20));
+    assert!(matches!(
+        enforcer.decide_manual(&sample, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    assert!(matches!(
+        enforcer.decide_manual(&sample, &manual_prep("a", PrepStatus::Waiting, true), 1_000),
+        EnforcerOutcome::SendCompact(_)
+    ));
+    enforcer.cancel("claude");
+    let again = enforcer.decide_manual(
+        &manual_sample("b", Some(20)),
+        &PreparationState::idle(),
+        2_000,
+    );
+    assert!(
+        matches!(again, EnforcerOutcome::SendPrep(_)),
+        "cancel clears the armed compact"
+    );
+    assert_eq!(stage(&enforcer), Some("preparing"));
+}
+
+fn auto_after_finished_manual() {
+    let mut enforcer = Enforcer::new();
+    let manual = manual_sample("a", Some(20));
+    assert!(matches!(
+        enforcer.decide_manual(&manual, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    assert!(matches!(
+        enforcer.decide_manual(&manual, &manual_prep("a", PrepStatus::Waiting, true), 1_000),
+        EnforcerOutcome::SendCompact(_)
+    ));
+    let auto = input(
+        Some(95),
+        true,
+        true,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    let stale = manual_prep("a", PrepStatus::CompactSent, true);
+    let held = enforcer.decide(&auto, &stale, 62_000);
+    assert!(matches!(
+        held,
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyTriggeredAboveThreshold)
+    ));
+    enforcer.note_settled("claude", ManualCompactionStage::Failed);
+    let early = enforcer.decide(&auto, &stale, 30_000);
+    assert!(matches!(
+        early,
+        EnforcerOutcome::Skip(EnforcerSkipReason::DedupWindow)
+    ));
+    let next = enforcer.decide(&auto, &stale, 62_000);
+    assert!(
+        matches!(next, EnforcerOutcome::SendPrep(_)),
+        "auto compaction resumes after a finished manual attempt, past the dedup window"
+    );
 }
 
 fn stage(enforcer: &Enforcer) -> Option<&'static str> {

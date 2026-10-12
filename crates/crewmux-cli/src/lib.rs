@@ -139,6 +139,10 @@ enum Commands {
     /// Per-rig chatroom: send, history, watch, topic, and clear.
     Chatroom(chatroom::ChatroomArgs),
     /// Compact a Claude seat, cancel it, or print its status.
+    ///
+    /// Exit 0 means the daemon accepted the request. A compact returns as soon
+    /// as `/compact` is submitted; the attempt can still abort later, for
+    /// example `no_post_compact` after 120s. `--status` reports that outcome.
     Compact(compact::CompactArgs),
     /// Claude hook entry. Reads JSON on stdin and exits 0.
     ///

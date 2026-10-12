@@ -133,6 +133,15 @@ impl ManualCompactionStage {
             Self::Failed => "failed",
         }
     }
+
+    /// Preparing, waiting for the map, compacting, or restoring.
+    #[must_use]
+    pub const fn is_open(self) -> bool {
+        matches!(
+            self,
+            Self::Preparing | Self::WaitingMap | Self::Compacting | Self::Restoring
+        )
+    }
 }
 
 /// Automatic or manual preparation.
@@ -302,6 +311,19 @@ impl Enforcer {
         prep: &PreparationState,
         now_ms: u64,
     ) -> EnforcerOutcome {
+        if self.settled_compact(&input.session, prep) {
+            let idle = PreparationState::idle();
+            return self.finish_manual(input, &idle, now_ms);
+        }
+        self.finish_manual(input, prep, now_ms)
+    }
+
+    fn finish_manual(
+        &mut self,
+        input: &EnforcerInput,
+        prep: &PreparationState,
+        now_ms: u64,
+    ) -> EnforcerOutcome {
         if manual_blocked(prep, input) {
             return EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress);
         }
@@ -321,8 +343,24 @@ impl Enforcer {
 
     /// `rig compact <seat> --cancel`.
     pub fn cancel(&mut self, session: &str) {
-        self.tracks.entry(session.to_owned()).or_default().stage =
-            Some(ManualCompactionStage::Cancelled);
+        let track = self.tracks.entry(session.to_owned()).or_default();
+        track.stage = Some(ManualCompactionStage::Cancelled);
+        track.armed = false;
+    }
+
+    /// The attempt is done, aborted, or failed. A later compact may start.
+    ///
+    /// Does not start the post-restore cooldown. That stays on
+    /// [`Self::note_restore_finished`].
+    pub fn note_settled(&mut self, session: &str, stage: ManualCompactionStage) {
+        if stage.is_open() {
+            return;
+        }
+        let track = self.tracks.entry(session.to_owned()).or_default();
+        track.armed = false;
+        if track.stage.is_none_or(ManualCompactionStage::is_open) {
+            track.stage = Some(stage);
+        }
     }
 
     /// Record that the restore prompt landed, and start the cooldown.
@@ -390,6 +428,11 @@ impl Enforcer {
         prep: &PreparationState,
         now_ms: u64,
     ) -> EnforcerOutcome {
+        // A finished manual attempt must not keep auto compaction parked.
+        if self.settled_compact(&input.session, prep) {
+            let idle = PreparationState::idle();
+            return self.prepare(input, &idle, now_ms, PrepMode::Automatic);
+        }
         if prep.active && prep.mode == PrepMode::Manual && prep.status != PrepStatus::Stopped {
             return EnforcerOutcome::Skip(EnforcerSkipReason::PreparationPending);
         }
@@ -427,6 +470,7 @@ impl Enforcer {
     }
 
     fn send_prep(&mut self, input: &EnforcerInput, now_ms: u64, mode: PrepMode) -> EnforcerOutcome {
+        self.clear_settled(&input.session);
         if !input.ready {
             return EnforcerOutcome::Skip(EnforcerSkipReason::SendFailed);
         }
@@ -488,6 +532,24 @@ impl Enforcer {
         if let Some(track) = self.tracks.get_mut(session) {
             track.armed = false;
         }
+    }
+
+    fn clear_settled(&mut self, session: &str) {
+        let Some(track) = self.tracks.get_mut(session) else {
+            return;
+        };
+        if track.stage.is_some_and(|stage| !stage.is_open()) {
+            track.stage = None;
+        }
+    }
+
+    fn settled_compact(&self, session: &str, prep: &PreparationState) -> bool {
+        self.stage_terminal(session) && prep.active && prep.status == PrepStatus::CompactSent
+    }
+
+    fn stage_terminal(&self, session: &str) -> bool {
+        self.manual_stage(session)
+            .is_some_and(|stage| !stage.is_open())
     }
 
     fn fail_manual(&mut self, session: &str, reason: EnforcerSkipReason) -> EnforcerOutcome {

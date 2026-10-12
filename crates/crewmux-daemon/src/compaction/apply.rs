@@ -68,6 +68,7 @@ async fn apply_event(
     let mut guard = app.compaction.lock().await;
     let effect = guard.book.on_hook(seat_key, event, now_ms());
     guard.book.tick(now_ms());
+    super::trigger::release_finished(&mut guard);
     if let Some(session) = session
         && guard
             .book
@@ -126,6 +127,7 @@ async fn fail_restore(app: &App, attempt: &Attempt, reason: &str) -> Result<(), 
     {
         let mut guard = app.compaction.lock().await;
         guard.book.mark_failed(&attempt.id, reason);
+        super::trigger::release_finished(&mut guard);
     }
     save(app).await
 }
@@ -136,6 +138,7 @@ async fn mark_restored(app: &App, attempt: &Attempt, session: &str) -> Result<()
         guard.book.mark_restore_sent(&attempt.id);
         guard.book.mark_done(&attempt.id);
         guard.enforcer.note_restore_finished(session, now_ms());
+        super::trigger::release_finished(&mut guard);
     }
     save(app).await
 }

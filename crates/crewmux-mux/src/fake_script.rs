@@ -54,6 +54,44 @@ pub(crate) fn session_screen(plan: &StubPlan, stub_script: Option<&str>) -> Stri
     render_stub(plan)
 }
 
+/// Append `text` to `RIG_PASTE_SINK` when that path is set.
+///
+/// Debug builds only. The product confirm path still reads the Claude jsonl.
+/// A test copies the echoed paste into that file; it does not skip the check.
+/// Callers must not run this on a tokio worker thread.
+pub(crate) fn echo_paste(text: &str) {
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var_os("RIG_PASTE_SINK").is_none() {
+            return;
+        }
+        let owned = text.to_owned();
+        drop(tokio::task::spawn_blocking(move || note_paste(&owned)));
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = text;
+    }
+}
+
+fn note_paste(text: &str) {
+    let Ok(path) = std::env::var("RIG_PASTE_SINK") else {
+        return;
+    };
+    let mut record = Vec::new();
+    record.extend(text.len().to_string().into_bytes());
+    record.push(b'\n');
+    record.extend(text.as_bytes());
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    drop(std::io::Write::write_all(&mut file, &record));
+}
+
 fn debug_capture_override() -> Option<String> {
     #[cfg(debug_assertions)]
     {

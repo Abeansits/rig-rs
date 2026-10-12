@@ -10,6 +10,8 @@ mod spool;
 mod trigger;
 
 #[cfg(test)]
+mod settle;
+#[cfg(test)]
 mod skip_map;
 
 use std::collections::BTreeMap;
@@ -94,8 +96,9 @@ async fn tick(app: &App) -> Result<(), crate::error::Error> {
     let changed = {
         let mut guard = app.compaction.lock().await;
         let expired = guard.book.tick(crate::state::now_ms());
+        let released = trigger::release_finished(&mut guard);
         trigger::expire_preps(&mut guard, crate::state::now_ms());
-        expired
+        expired || released
     };
     if changed {
         save(app).await?;

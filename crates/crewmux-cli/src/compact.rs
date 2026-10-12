@@ -31,6 +31,11 @@ pub(crate) struct CompactArgs {
     pub(crate) json: bool,
 }
 
+/// Returns 0 when the daemon accepts the request.
+///
+/// A compact that submits `/compact` returns 0 at that moment. A later abort,
+/// including `no_post_compact` after 120s, does not change this exit code.
+/// `--status` reports the attempt.
 pub(crate) fn run(args: &CompactArgs) -> Result<i32, Error> {
     let client = ensure_daemon()?;
     let (method, path, body) = request(args)?;

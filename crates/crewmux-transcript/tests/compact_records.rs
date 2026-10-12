@@ -5,9 +5,9 @@
 //! `compactMetadata`, `isCompactSummary`, and `sessionId`. Those two objects
 //! are copied below. The content-bearing lines are not spike bytes: the
 //! archive does not include the jsonl they were projected from. Skips follow
-//! record structure (`isCompactSummary`, `isMeta`, `subtype`, or a command-tag
-//! envelope), so a user message that merely quotes `<local-command-stdout>`
-//! still counts.
+//! record structure (`isCompactSummary`, `isMeta`, `subtype`, or a `/compact`
+//! command-tag envelope). A different command-only message still counts, as
+//! does a user message that merely quotes `<local-command-stdout>`.
 #![expect(
     clippy::expect_used,
     reason = "a temp-dir or fixture failure should fail the test"
@@ -41,8 +41,9 @@ fn compact_records_do_not_hide_a_real_user_turn() {
     let sent = "S2T3 Restore check after compaction: what is the codeword?";
     let quoted = "notes mention <local-command-stdout>compacted</local-command-stdout> in prose";
     let only_tag = "<local-command-stdout>compacted</local-command-stdout>";
+    let help = "<command-name>/help</command-name><command-args></command-args>";
     let body = format!(
-        "{PROJECTED}{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+        "{PROJECTED}{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
         user(sent, &[]),
         user(
             "summary that must not count",
@@ -59,11 +60,12 @@ fn compact_records_do_not_hide_a_real_user_turn() {
             "<command-name>/compact</command-name>\n<command-args>keep</command-args>",
             &[]
         ),
+        user(help, &[]),
     );
     let path = write_transcript(&root, &body);
     let turns = user_turns_after(&path, 0).expect("turns");
     let texts: Vec<&str> = turns.iter().map(|turn| turn.text.as_str()).collect();
-    assert_eq!(texts, vec![sent, quoted, only_tag]);
+    assert_eq!(texts, vec![sent, quoted, only_tag, help]);
     drop(std::fs::remove_dir_all(&root));
 }
 

@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use crewmux_core::Seat;
 use crewmux_health::compaction::{
-    AttemptId, EnforcerInput, EnforcerOutcome, EnforcerSkipReason, MANUAL_PREP_WAIT, PrepMode,
-    PrepStatus, PreparationState, Threshold, gated_submit,
+    AttemptId, AttemptState, EnforcerInput, EnforcerOutcome, EnforcerSkipReason, MANUAL_PREP_WAIT,
+    ManualCompactionStage, PrepMode, PrepStatus, PreparationState, Threshold, gated_submit,
 };
 use crewmux_types::{RuntimeKind, SeatId};
 use serde::Deserialize;
@@ -57,6 +57,8 @@ pub(crate) async fn cancel(app: &App, body: &[u8]) -> Result<Value, Error> {
         guard.book.cancel(&key);
         guard.enforcer.cancel(&session);
         if let Some(prep) = guard.preps.get_mut(&session) {
+            prep.active = false;
+            prep.attempt_id.clear();
             prep.status = PrepStatus::Stopped;
             prep.reason = Some("cancelled".to_owned());
         }
@@ -72,6 +74,59 @@ pub(crate) async fn status(app: &App, body: &[u8]) -> Result<Value, Error> {
     super::apply::deliver_seat(app, &seat.id.to_string()).await?;
     let guard = app.compaction.lock().await;
     Ok(status_value(&guard, &seat, None, None))
+}
+
+/// Drop a preparation whose attempt is done, aborted, failed, or cancelled.
+pub(super) fn release_finished(runtime: &mut Runtime) -> bool {
+    let sessions = runtime.preps.keys().cloned().collect::<Vec<_>>();
+    let mut changed = false;
+    for session in sessions {
+        if release_one(runtime, &session) {
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn release_one(runtime: &mut Runtime, session: &str) -> bool {
+    let Some(prep) = runtime.preps.get(session) else {
+        return false;
+    };
+    if !prep.active {
+        return false;
+    }
+    let attempt_id = prep.attempt_id.clone();
+    if attempt_id.is_empty() {
+        return false;
+    }
+    let Some(stage) = terminal_stage(runtime, &attempt_id) else {
+        return false;
+    };
+    if let Some(prep) = runtime.preps.get_mut(session) {
+        prep.active = false;
+        prep.attempt_id.clear();
+    }
+    runtime.enforcer.note_settled(session, stage);
+    true
+}
+
+fn terminal_stage(runtime: &Runtime, attempt_id: &str) -> Option<ManualCompactionStage> {
+    runtime.book.attempts().iter().rev().find_map(|attempt| {
+        if attempt.id.as_str() != attempt_id {
+            return None;
+        }
+        match &attempt.state {
+            AttemptState::Done => Some(ManualCompactionStage::Done),
+            AttemptState::Aborted(_) | AttemptState::Failed(_) => {
+                Some(ManualCompactionStage::Failed)
+            }
+            AttemptState::Cancelled => Some(ManualCompactionStage::Cancelled),
+            AttemptState::Requested
+            | AttemptState::PreCompactSeen { .. }
+            | AttemptState::Completed { .. }
+            | AttemptState::RestoreSent => None,
+        }
+    })
 }
 
 pub(super) fn expire_preps(runtime: &mut Runtime, now: u64) {
@@ -153,7 +208,7 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
     let mut guard = app.compaction.lock().await;
     let session = seat.name.as_str();
     let prep = guard.prep(session);
-    let attempt_id = if prep.attempt_id.is_empty() {
+    let attempt_id = if !prep.active || prep.attempt_id.is_empty() {
         guard.book.next_manual_id(&seat.id.to_string()).0
     } else {
         prep.attempt_id.clone()
