@@ -141,6 +141,9 @@ enum Commands {
     /// Compact a Claude seat, cancel it, or print its status.
     Compact(compact::CompactArgs),
     /// Claude hook entry. Reads JSON on stdin and exits 0.
+    ///
+    /// Hidden: `hook` is the Claude process entry, not an operator verb.
+    #[command(hide = true)]
     Hook {
         /// Hook event name, such as `PreCompact`.
         event: String,

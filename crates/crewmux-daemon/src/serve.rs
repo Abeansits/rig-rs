@@ -45,7 +45,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
         stub_bin.clone(),
     )));
     registry.register(Arc::new(CodexAdapter::new(Arc::clone(&mux))));
-    registry.register(Arc::new(ClaudeAdapter::new(
+    registry.register(Arc::new(claude_adapter(
         Arc::clone(&mux),
         home.join("seats"),
         user_home(&home),
@@ -128,6 +128,31 @@ async fn build_mux(socket: &str, cancel: CancellationToken) -> Result<Arc<dyn Mu
     };
     let mux = TmuxMux::connect_until(config, cancel).await?;
     Ok(Arc::new(mux))
+}
+
+fn claude_adapter(
+    mux: Arc<dyn Multiplexer>,
+    seats: std::path::PathBuf,
+    home: std::path::PathBuf,
+) -> ClaudeAdapter {
+    let adapter = ClaudeAdapter::new(mux, seats, home);
+    #[cfg(debug_assertions)]
+    {
+        submit_wait_from_env(adapter)
+    }
+    #[cfg(not(debug_assertions))]
+    adapter
+}
+
+#[cfg(debug_assertions)]
+fn submit_wait_from_env(adapter: ClaudeAdapter) -> ClaudeAdapter {
+    let Ok(raw) = std::env::var("RIG_SUBMIT_WAIT_MS") else {
+        return adapter;
+    };
+    let Ok(ms) = raw.parse::<u64>() else {
+        return adapter;
+    };
+    adapter.with_submit_wait(Duration::from_millis(ms))
 }
 
 fn fake_mux_requested() -> bool {

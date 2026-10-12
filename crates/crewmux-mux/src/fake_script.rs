@@ -43,3 +43,29 @@ pub(crate) fn render_stub(plan: &StubPlan) -> String {
 pub(crate) fn banner() -> &'static str {
     "stub-agent\n"
 }
+
+/// Stub script wins. Otherwise a debug `RIG_FAKE_CAPTURE` can show a Claude pane.
+pub(crate) fn session_screen(plan: &StubPlan, stub_script: Option<&str>) -> String {
+    if stub_script.is_none()
+        && let Some(text) = debug_capture_override()
+    {
+        return text;
+    }
+    render_stub(plan)
+}
+
+fn debug_capture_override() -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        let raw = std::env::var("RIG_FAKE_CAPTURE").ok()?;
+        if raw == "claude-ready" {
+            let rule = "─".repeat(40);
+            return Some(format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"));
+        }
+        Some(raw)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}

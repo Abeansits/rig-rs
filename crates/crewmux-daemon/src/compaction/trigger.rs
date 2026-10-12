@@ -119,7 +119,13 @@ async fn drive(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Resul
         match step.text {
             Some(text) if step.compact => {
                 save(app).await?;
-                submit_text(app, seat.name.as_str(), &text).await?;
+                // `/compact` is not a user turn, so the transcript cannot confirm it.
+                // Enter still happened: NotVerified and Contaminated count as sent.
+                match submit_text(app, seat.name.as_str(), &text).await {
+                    Ok(_) => {}
+                    Err(Error::Adapter(err)) if compact_entered(&err) => {}
+                    Err(err) => return Err(err),
+                }
                 compact_sent = true;
                 break;
             }

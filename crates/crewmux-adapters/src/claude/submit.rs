@@ -103,6 +103,9 @@ impl ClaudeIo {
     }
 
     async fn confirm(&self, sent: &str, after: TranscriptCursor) -> Result<(), Error> {
+        if confirm_without_transcript(sent) {
+            return Ok(());
+        }
         let deadline = Instant::now() + self.submit_wait;
         let sent = sent.to_owned();
         loop {
@@ -147,6 +150,20 @@ impl ClaudeIo {
         .await
         .map_err(|err| Error::Message(err.to_string()))?
         .map_err(map_transcript)
+    }
+}
+
+/// Debug CLI tests confirm a prep turn without a jsonl row. `/compact` still waits.
+fn confirm_without_transcript(sent: &str) -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("RIG_CONFIRM_NON_COMPACT").ok().as_deref() == Some("1")
+            && !sent.starts_with("/compact")
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = sent;
+        false
     }
 }
 

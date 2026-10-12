@@ -57,7 +57,7 @@ fn publish_file(path: &Path, marker: &str) -> Result<bool, Error> {
         return Ok(true);
     }
     let tmp = tmp_path(path);
-    if !read_complete(&tmp, marker) {
+    if is_symlink(&tmp) || !read_complete(&tmp, marker) {
         return Ok(false);
     }
     if let Some(parent) = path.parent() {
@@ -75,9 +75,13 @@ fn tmp_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.tmp", path.display()))
 }
 
+fn is_symlink(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{publish_file, tmp_path};
+    use super::{is_symlink, publish_file, tmp_path};
     use crewmux_health::compaction::completion_marker;
 
     #[test]
@@ -92,6 +96,22 @@ mod tests {
         assert!(publish_file(&path, &marker).expect("publish"));
         assert_eq!(std::fs::read_to_string(&path).expect("final"), body);
         assert!(!tmp_path(&path).exists());
+        drop(std::fs::remove_dir_all(&root));
+    }
+
+    #[test]
+    fn symlinked_tmp_is_not_published() {
+        let root = std::env::temp_dir().join(format!("rig-map-link-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&root));
+        std::fs::create_dir_all(&root).expect("dir");
+        let path = root.join("RESTORE-MAP.md");
+        let marker = completion_marker("attempt-1", "seat");
+        let real = root.join("elsewhere.md");
+        std::fs::write(&real, format!("# map\n{marker}\n")).expect("real");
+        std::os::unix::fs::symlink(&real, tmp_path(&path)).expect("link");
+        assert!(!publish_file(&path, &marker).expect("publish"));
+        assert!(!path.exists());
+        assert!(is_symlink(&tmp_path(&path)));
         drop(std::fs::remove_dir_all(&root));
     }
 }

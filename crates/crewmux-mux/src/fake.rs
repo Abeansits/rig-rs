@@ -331,7 +331,8 @@ impl Multiplexer for FakeMux {
         let script = scripted_plan(&guard, spec);
         if let Some(plan) = &script {
             let text = if plan.ready_after_ms == 0 {
-                crate::fake_script::render_stub(plan)
+                let script = spec.env.get("RIG_STUB_SCRIPT").map(String::as_str);
+                crate::fake_script::session_screen(plan, script)
             } else {
                 crate::fake_script::banner().to_owned()
             };
@@ -391,6 +392,9 @@ impl Multiplexer for FakeMux {
         }
         if keys.iter().any(|key| matches!(key, Key::CtrlU)) && guard.replay.is_empty() {
             clear_composer(&mut guard, pane);
+        }
+        if keys.iter().any(|key| matches!(key, Key::Enter)) && guard.replay.is_empty() {
+            clear_chevron_composer(&mut guard, pane);
         }
         if guard.replay.len() > 1 {
             guard.replay.pop_front();
@@ -512,6 +516,22 @@ impl Multiplexer for FakeMux {
     fn attach_program(&self) -> (String, String) {
         ("tmux".to_owned(), format!("/tmp/rig-fake-{}", self.label))
     }
+}
+
+/// Enter clears a `❯` composer so the next paste is not a draft. A `stub>` screen stays.
+fn clear_chevron_composer(guard: &mut FakeInner, pane: &PaneRef) {
+    if guard.capture.text.contains('❯') {
+        guard.capture = clear_prompt(&guard.capture);
+    }
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get(&session) else {
+        return;
+    };
+    if !screen.text.contains('❯') {
+        return;
+    }
+    let cleared = clear_prompt(screen);
+    guard.screens.insert(session, cleared);
 }
 
 /// `C-u` restores an empty Claude composer on the capture and the session screen.

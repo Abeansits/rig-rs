@@ -180,21 +180,67 @@ fn parse_turns(path: &Path, tail: &[u8], start: usize) -> Result<Vec<UserTurn>, 
 }
 
 fn ignored_compact_record(value: &serde_json::Value, text: &str) -> bool {
-    if value
-        .get("isCompactSummary")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-    {
-        return true;
+    compact_record(value) || command_envelope(text.trim())
+}
+
+/// Structure, not a substring. A prose turn that quotes `<local-command-stdout>` stays.
+fn compact_record(value: &serde_json::Value) -> bool {
+    flag(value, "isCompactSummary")
+        || flag(value, "isMeta")
+        || value
+            .get("message")
+            .is_some_and(|message| flag(message, "isMeta"))
+        || matches!(
+            value.get("subtype").and_then(serde_json::Value::as_str),
+            Some("compact_boundary" | "local_command")
+        )
+}
+
+fn flag(value: &serde_json::Value, key: &str) -> bool {
+    value.get(key).and_then(serde_json::Value::as_bool) == Some(true)
+}
+
+/// The whole turn is only `command-name` / `command-args` / `command-message` /
+/// `command-contents` tags. Anything else, including a quoted tag, is a user turn.
+fn command_envelope(text: &str) -> bool {
+    if text.is_empty() {
+        return false;
     }
-    if value.get("subtype").and_then(serde_json::Value::as_str) == Some("compact_boundary") {
-        return true;
+    let mut rest = text;
+    let mut saw = false;
+    while !rest.is_empty() {
+        let Some(next) = one_command_tag(rest) else {
+            return false;
+        };
+        saw = true;
+        rest = next.trim_start();
     }
-    if text.contains("<local-command-stdout") {
-        return true;
+    saw
+}
+
+fn one_command_tag(text: &str) -> Option<&str> {
+    let name = tag_name(text)?;
+    if !is_command_tag(name) {
+        return None;
     }
-    text.contains("<command-name>/compact</command-name>")
-        || text.contains("<command-name>/compact ")
+    let open_end = text.find('>')?;
+    let body = text.get(open_end.saturating_add(1)..)?;
+    let close = format!("</{name}>");
+    let at = body.find(&close)?;
+    body.get(at.saturating_add(close.len())..)
+}
+
+fn tag_name(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('<')?;
+    let end = rest.find(['>', ' ', '\t', '\n', '\r'])?;
+    rest.get(..end)
+}
+
+fn is_command_tag(name: &str) -> bool {
+    matches!(
+        name,
+        "command-name" | "command-args" | "command-message" | "command-contents"
+    )
 }
 
 fn user_text(value: &serde_json::Value) -> Option<String> {

@@ -9,6 +9,9 @@ mod persist;
 mod spool;
 mod trigger;
 
+#[cfg(test)]
+mod skip_map;
+
 use std::collections::BTreeMap;
 
 use crewmux_health::compaction::{Book, Enforcer, PreparationState, Threshold};

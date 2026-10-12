@@ -4,7 +4,10 @@
 //! `compact_boundary_rows` in `s2-result.json` down to `type`, `subtype`,
 //! `compactMetadata`, `isCompactSummary`, and `sessionId`. Those two objects
 //! are copied below. The content-bearing lines are not spike bytes: the
-//! archive does not include the jsonl they were projected from.
+//! archive does not include the jsonl they were projected from. Skips follow
+//! record structure (`isCompactSummary`, `isMeta`, `subtype`, or a command-tag
+//! envelope), so a user message that merely quotes `<local-command-stdout>`
+//! still counts.
 #![expect(
     clippy::expect_used,
     reason = "a temp-dir or fixture failure should fail the test"
@@ -15,6 +18,7 @@ use std::path::PathBuf;
 use crewmux_transcript::{
     ClaudeTranscript, Delivery, TranscriptCursor, user_turns_after, verify_delivery,
 };
+use serde_json::{Value, json};
 
 const SESSION: &str = "b5461a7f-0588-427a-b7a2-31a9bb2c5b99";
 
@@ -35,22 +39,59 @@ fn projected_spike_rows_are_not_user_turns() {
 fn compact_records_do_not_hide_a_real_user_turn() {
     let root = scratch("mixed");
     let sent = "S2T3 Restore check after compaction: what is the codeword?";
+    let quoted = "notes mention <local-command-stdout>compacted</local-command-stdout> in prose";
+    let only_tag = "<local-command-stdout>compacted</local-command-stdout>";
     let body = format!(
-        "{PROJECTED}\
-{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"{sent}\"}}}}\n\
-{{\"type\":\"user\",\"isCompactSummary\":true,\"message\":{{\"role\":\"user\",\"content\":\"summary that must not count\"}}}}\n\
-{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"<local-command-stdout>compacted</local-command-stdout>\"}}}}\n\
-{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"<command-name>/compact</command-name>\\n<command-args>keep</command-args>\"}}}}\n"
+        "{PROJECTED}{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+        user(sent, &[]),
+        user(
+            "summary that must not count",
+            &[("isCompactSummary", json!(true))]
+        ),
+        user("meta that must not count", &[("isMeta", json!(true))]),
+        user(
+            "stdout that must not count",
+            &[("subtype", json!("local_command"))]
+        ),
+        user(quoted, &[]),
+        user(only_tag, &[]),
+        user(
+            "<command-name>/compact</command-name>\n<command-args>keep</command-args>",
+            &[]
+        ),
     );
     let path = write_transcript(&root, &body);
     let turns = user_turns_after(&path, 0).expect("turns");
-    assert_eq!(turns.len(), 1);
-    assert_eq!(turns.first().expect("turn").text, sent);
+    let texts: Vec<&str> = turns.iter().map(|turn| turn.text.as_str()).collect();
+    assert_eq!(texts, vec![sent, quoted, only_tag]);
+    drop(std::fs::remove_dir_all(&root));
+}
+
+#[test]
+fn quoted_stdout_tag_still_confirms() {
+    let root = scratch("quoted");
+    let sent = "<local-command-stdout>compacted</local-command-stdout>";
+    let path = write_transcript(&root, &format!("{}\n", user(sent, &[])));
+    assert!(path.is_file());
     let source =
         ClaudeTranscript::open(&root, PathBuf::from("/tmp/work").as_path(), SESSION).expect("open");
     let delivery = verify_delivery(&source, TranscriptCursor(0), sent).expect("verify");
     assert_eq!(delivery, Delivery::Landed);
     drop(std::fs::remove_dir_all(&root));
+}
+
+fn user(content: &str, extra: &[(&str, Value)]) -> String {
+    let mut value = json!({
+        "type": "user",
+        "message": {"role": "user", "content": content}
+    });
+    let Some(object) = value.as_object_mut() else {
+        return value.to_string();
+    };
+    for (key, item) in extra {
+        object.insert((*key).to_owned(), item.clone());
+    }
+    value.to_string()
 }
 
 fn write_transcript(root: &std::path::Path, body: &str) -> PathBuf {
