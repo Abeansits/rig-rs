@@ -7,6 +7,6 @@ expression: "rs:help-top"
   "files": [],
   "json": null,
   "stderr": "",
-  "stdout": "ask\nattach\nbroadcast\ncapture\nchatroom\ndoctor\ndown\nhelp\nps\nqueue\nsend\nsetup\nunclaim\nup\nwhoami",
+  "stdout": "ask\nattach\nbroadcast\ncapture\nchatroom\ndoctor\ndown\nhealth\nhelp\nps\nqueue\nsend\nsetup\nstream\nunclaim\nup\nusage\nwhoami",
   "tmux_argv": []
 }
