@@ -121,11 +121,15 @@ fn global_window_size_is_rejected_in_strings_and_other_files() {
     .expect("write");
     let err = lint_mux_at(&root).expect_err("joined strings");
     assert!(err.contains("argv.rs"), "{err}");
-    let notes = root.join("notes.md");
+    let notes = root.join("crates/crewmux-mux/notes.md");
     write(&notes, &format!("set-option {flag} {key} manual\n")).expect("write");
     write(&rust, "fn probe() {}\n").expect("write");
     let err = lint_mux_at(&root).expect_err("markdown");
     assert!(err.contains("notes.md"), "{err}");
+    write(&notes, "clean\n").expect("write");
+    let vendored = root.join("tmux-3.3a/tmux.1.mdoc");
+    write(&vendored, &format!("set-option {flag} {key} manual\n")).expect("write");
+    lint_mux_at(&root).expect("a tree outside the crate dirs is not scanned");
     drop(fs::remove_dir_all(&root));
 }
 

@@ -13,7 +13,11 @@ pub fn workspace_root() -> PathBuf {
 /// a short flag containing `g`, or spawn a shell from `crewmux-mux`.
 pub fn lint_mux_at(root: &Path) -> Result<(), String> {
     let mut files = Vec::new();
-    walk(root, &mut files)?;
+    // Crate trees only. A tmux source build (`tmux-3.3a/tmux.1.mdoc`) must not
+    // be scanned; that man page names a format this lint rejects.
+    for name in ["crates", "xtask"] {
+        walk(&root.join(name), &mut files)?;
+    }
     let needle = attached_needle();
     let command = command_re()?;
     let binding = binding_re()?;
