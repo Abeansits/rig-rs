@@ -150,7 +150,7 @@ mod live {
         wait_prompt(&live);
         let (_pane, pid) = pane_of(&live);
         std::fs::write(&trigger, "1").expect("trigger");
-        wait_comm(pid, "bash");
+        wait_image(pid, "bash");
         let before = history(&live);
         let (code, out, err) = send(&live);
         assert_ne!(code, 0, "{out}");
@@ -208,18 +208,48 @@ mod live {
         panic!("pane did not become ready: {last}");
     }
 
-    fn wait_comm(pid: u32, want: &str) {
+    fn wait_image(pid: u32, want: &str) {
         let start = Instant::now();
-        let path = format!("/proc/{pid}/comm");
         let mut last = String::new();
         while start.elapsed() < Duration::from_secs(20) {
-            last = std::fs::read_to_string(&path).unwrap_or_default();
-            if last.trim() == want {
+            last = process_image(pid);
+            if image_base(&last) == want {
                 return;
             }
             std::thread::park_timeout(Duration::from_millis(50));
         }
-        panic!("pid {pid} comm is {last:?}, wanted {want}");
+        panic!("pid {pid} image is {last:?}, wanted {want}");
+    }
+
+    /// Linux names the image in `/proc`. macOS does not, so `ps` is the fallback.
+    fn process_image(pid: u32) -> String {
+        let proc = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+        let proc = proc.trim();
+        if !proc.is_empty() {
+            return proc.to_owned();
+        }
+        ps_comm(pid)
+    }
+
+    fn ps_comm(pid: u32) -> String {
+        let mut command = Command::new("ps");
+        command
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .env("LC_ALL", "C")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let Ok(child) = command.spawn() else {
+            return String::new();
+        };
+        let Ok(output) = child.wait_with_output() else {
+            return String::new();
+        };
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    fn image_base(command: &str) -> &str {
+        let name = command.rsplit(['/', '\\']).next().unwrap_or(command);
+        name.strip_prefix('-').unwrap_or(name)
     }
 
     fn pane_of(live: &Live) -> (String, u32) {
