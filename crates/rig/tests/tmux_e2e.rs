@@ -84,6 +84,11 @@ mod live {
         }
 
         #[test]
+        fn tall_buffer_paste_recovers_the_prompt() {
+            super::tall_buffer_paste_recovers_the_prompt();
+        }
+
+        #[test]
         fn rig_down_then_shutdown_reaps_tmux() {
             super::rig_down_then_shutdown_reaps_tmux();
         }
@@ -168,6 +173,9 @@ mod live {
         if let Ok(mut child) = kill.spawn() {
             drop(child.wait());
         }
+        // The server unlinks this on a clean exit. A raced or already-dead
+        // server leaves `rig-rs-<pid>-*-e2e` in `/tmp/tmux-<uid>`.
+        drop(std::fs::remove_file(crewmux_mux::socket_path(socket)));
     }
 
     fn run() {
@@ -442,7 +450,9 @@ mod live {
     }
 
     fn history_cap_fails_closed_without_submit() {
-        let live = boot(None);
+        // `buffer=1` prints SUBMIT when Enter lands. Without it the check below
+        // cannot fail, because the plain stub never writes that word.
+        let live = boot(Some("buffer=1"));
         assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
         // 600 rows at 90 columns is past `capture-pane -S -500` plus the visible
         // pane. The verdict-time prompt scrolls out of the window, so the check
@@ -460,6 +470,29 @@ mod live {
             !shot.contains("SUBMIT"),
             "history cap submitted the paste: {shot}"
         );
+        wait_prompt(&live, "one");
+    }
+
+    fn tall_buffer_paste_recovers_the_prompt() {
+        let live = boot(Some("buffer=1"));
+        assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
+        let body = vec!["W"; 600].join("\n");
+        let (code, value, err) = send(&live, &["send", "--to", "one@pair", &body, "--json"]);
+        assert_ne!(
+            outcome(&value),
+            "delivered",
+            "{code} {err} {value} {}",
+            log(&live)
+        );
+        let shot = history(&live, "one__pair");
+        assert!(
+            !shot.contains("SUBMIT"),
+            "tall buffer paste submitted: {shot}"
+        );
+        wait_prompt(&live, "one");
+        let (again, next, err) = send(&live, &["send", "--to", "one@pair", "after-tall", "--json"]);
+        assert_eq!(again, 0, "{err} {next} {}", log(&live));
+        assert_eq!(outcome(&next), "delivered", "{next}");
     }
 
     fn rig_down_then_shutdown_reaps_tmux() {

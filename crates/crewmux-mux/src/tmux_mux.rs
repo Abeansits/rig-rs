@@ -82,6 +82,11 @@ impl Drop for TmuxMux {
             // that client, including when a parent process chose the socket
             // name (`rig-rs-<their pid>-…`). Tests still refuse to kill a
             // socket they do not own; see [`socket_owned_by`].
+            //
+            // `kill -9` of the daemon skips this Drop. That server stays up
+            // until the next daemon starts: `new-session -A` attaches to it
+            // instead of leaving a second server, and the next graceful
+            // shutdown is what finally kills it.
             kill_server(&binary, &socket);
         });
         drop(reaper.join());
@@ -105,6 +110,14 @@ pub fn socket_owned_by(socket: &str, pid: u32) -> bool {
     }
 }
 
+/// Default tmux socket file for `-L name`.
+///
+/// Commands clear `TMUX_TMPDIR`, so the server uses `/tmp/tmux-<uid>/<name>`.
+#[must_use]
+pub fn socket_path(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("/tmp/tmux-{}", rustix::process::getuid().as_raw())).join(name)
+}
+
 fn kill_server(binary: &str, socket: &str) {
     let mut command = std::process::Command::new(binary);
     command
@@ -115,6 +128,8 @@ fn kill_server(binary: &str, socket: &str) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     drop(command.status());
+    // A server that has already exited leaves the socket file behind.
+    drop(std::fs::remove_file(socket_path(socket)));
 }
 
 impl TmuxMux {

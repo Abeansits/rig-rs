@@ -136,8 +136,11 @@ fn settled(elapsed: Duration, before: &str, after: &str, payload: &str) -> bool 
 /// Drop a failed paste. Enter is never sent.
 ///
 /// The stub's clear is `C-u`, once per pasted line and at least 8 times.
-/// Returns whether a recapture shows an empty composer. A composer that stays
-/// dirty is reported by the caller; this does not submit.
+/// A tall buffer paste can still fill the pane after that budget: the prompt
+/// scrolls off and the seat looks like `unrecognised_screen`. One `C-g` drops
+/// the rest of the draft and redraws the prompt. Returns whether a recapture
+/// shows an empty composer. A composer that stays dirty is reported by the
+/// caller; this does not submit.
 pub(crate) async fn clear_composer(
     app: &App,
     pane: &PaneRef,
@@ -156,12 +159,24 @@ pub(crate) async fn clear_composer(
             }
         }
         if sent >= budget || (sent > 0 && Instant::now() >= deadline) {
-            return Ok(false);
+            return reset_composer(app, pane, range, parser).await;
         }
         app.mux.send_keys(pane, parser.clear_keys()).await?;
         sent = sent.saturating_add(1);
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+}
+
+async fn reset_composer(
+    app: &App,
+    pane: &PaneRef,
+    range: CaptureRange,
+    parser: ComposerParser,
+) -> Result<bool, Error> {
+    app.mux.send_keys(pane, parser.reset_keys()).await?;
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let text = app.mux.capture(pane, range).await?.text;
+    Ok(composer_empty(parser, &text))
 }
 
 /// `C-u` passes for a paste of `lines` lines. Short pastes stay at 8.

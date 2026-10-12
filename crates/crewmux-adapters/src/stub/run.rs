@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 use crate::error::Error;
-use crate::stub::buffer::{Scanner, StdinEvent};
+use crate::stub::buffer::{RESET_DRAFT, Scanner, StdinEvent};
 use crate::stub::script::{StubScript, parse_script};
 
 /// Run the fixture until stdin closes or `exit_after_ms` elapses.
@@ -110,12 +110,13 @@ async fn write_event(
                 stdout.write_all(b"EXTRA\n").await?;
             }
         }
+        // Reprinting the whole remainder of a tall paste scrolls the prompt off
+        // the visible pane, and the seat stays `unrecognised_screen`. Show only
+        // a short tail so the prompt stays on screen while `C-u` walks the draft.
         StdinEvent::Partial(text) => {
             stdout.write_all(b"stub> \n").await?;
-            stdout.write_all(text.as_bytes()).await?;
-            if !text.ends_with('\n') {
-                stdout.write_all(b"\n").await?;
-            }
+            let current = text.rsplit('\n').next().unwrap_or("");
+            stdout.write_all(tail_chars(current, 40).as_bytes()).await?;
         }
         StdinEvent::Submit(text) => {
             stdout.write_all(b"SUBMIT\n").await?;
@@ -223,7 +224,7 @@ fn read_raw(
             return;
         };
         for &byte in bytes {
-            if byte == CLEAR_LINE {
+            if byte == CLEAR_LINE || byte == RESET_DRAFT {
                 pending.clear();
                 last_byte = std::time::Instant::now();
                 if tx.send(StdinEvent::Redraw).is_err() {
@@ -297,6 +298,17 @@ fn write_extra() {
     let mut out = std::io::stdout();
     drop(writeln!(out, "EXTRA"));
     drop(out.flush());
+}
+
+fn tail_chars(text: &str, max: usize) -> &str {
+    let mut count = 0usize;
+    for (idx, _) in text.char_indices().rev() {
+        count = count.saturating_add(1);
+        if count == max {
+            return text.get(idx..).unwrap_or("");
+        }
+    }
+    text
 }
 
 fn exit_due(exit_at: Option<tokio::time::Instant>) -> bool {

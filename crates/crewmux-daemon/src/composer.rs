@@ -43,6 +43,17 @@ impl ComposerParser {
             }
         }
     }
+
+    /// Drop whatever `C-u` left and redraw an empty prompt.
+    #[must_use]
+    pub(crate) fn reset_keys(self) -> &'static [Key] {
+        match self {
+            Self::Stub => {
+                static KEYS: [Key; 1] = [Key::CtrlG];
+                &KEYS
+            }
+        }
+    }
 }
 
 fn stub_region(screen: &str) -> Option<String> {

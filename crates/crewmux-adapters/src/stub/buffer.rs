@@ -28,6 +28,10 @@ enum Mode {
     PasteCsi,
 }
 
+/// `C-g`. Drops the whole draft from any scanner state and redraws the prompt.
+/// Not a tty signal, so the stub stays up.
+pub(crate) const RESET_DRAFT: u8 = 0x07;
+
 /// Byte scanner for `buffer=1`.
 pub(crate) struct Scanner {
     mode: Mode,
@@ -49,6 +53,9 @@ impl Scanner {
     }
 
     pub(crate) fn push(&mut self, byte: u8) -> Option<StdinEvent> {
+        if byte == RESET_DRAFT {
+            return Some(self.reset());
+        }
         match self.mode {
             Mode::Text => self.text(byte),
             Mode::Esc => self.esc(byte, false),
@@ -77,6 +84,15 @@ impl Scanner {
         let line = String::from_utf8_lossy(&self.pending).into_owned();
         self.pending.clear();
         Some(StdinEvent::Line(line))
+    }
+
+    fn reset(&mut self) -> StdinEvent {
+        self.mode = Mode::Text;
+        self.pending.clear();
+        self.paste.clear();
+        self.csi.clear();
+        self.held.clear();
+        StdinEvent::Redraw
     }
 
     fn clear_line(&mut self) -> StdinEvent {
@@ -178,5 +194,19 @@ mod tests {
             }
             other => panic!("enter submitted the remainder: {other:?}"),
         }
+    }
+
+    #[test]
+    fn reset_drops_a_partial_paste_and_the_held_draft() {
+        let mut scan = Scanner::new();
+        for &byte in b"\x1b[200~line\nmore" {
+            drop(scan.push(byte));
+        }
+        assert_eq!(scan.push(super::RESET_DRAFT), Some(StdinEvent::Redraw));
+        let enter = scan.push(b'\n');
+        assert!(
+            !matches!(enter, Some(StdinEvent::Submit(_))),
+            "reset draft must not submit: {enter:?}"
+        );
     }
 }

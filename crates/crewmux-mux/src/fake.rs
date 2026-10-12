@@ -362,7 +362,10 @@ impl Multiplexer for FakeMux {
         for batch in &batches {
             record(&mut guard, batch);
         }
-        if keys.iter().any(|key| matches!(key, Key::CtrlU)) {
+        if keys
+            .iter()
+            .any(|key| matches!(key, Key::CtrlU | Key::CtrlG))
+        {
             clear_stub_draft(&mut guard, pane);
         }
         drop(guard);

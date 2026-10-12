@@ -34,6 +34,9 @@ pub enum Key {
     CtrlC,
     /// Kill the current line. Clears a paste that failed verification.
     CtrlU,
+    /// Drop a whole draft and redraw the prompt. Used when line clears cannot
+    /// bring a tall buffer paste back to an empty composer.
+    CtrlG,
     /// Up arrow.
     Up,
     /// Down arrow.
