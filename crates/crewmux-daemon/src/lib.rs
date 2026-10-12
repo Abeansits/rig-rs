@@ -8,6 +8,9 @@ mod death;
 mod deliver;
 mod error;
 mod events;
+mod health_http;
+mod health_query;
+mod health_watch;
 mod http;
 mod hub;
 mod inbox_http;
@@ -23,6 +26,7 @@ mod send_http;
 mod serve;
 mod settle;
 mod state;
+mod stream_http;
 mod submit;
 mod taps;
 mod transcripts;
@@ -33,6 +37,8 @@ pub use serve::run;
 
 #[cfg(test)]
 mod flow;
+#[cfg(test)]
+mod health_tests;
 #[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]

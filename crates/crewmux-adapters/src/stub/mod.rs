@@ -47,7 +47,10 @@ impl AgentAdapter for StubAdapter {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        Capabilities {
+            usage_telemetry: true,
+            ..Capabilities::default()
+        }
     }
 
     async fn list_installed(

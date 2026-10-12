@@ -12,6 +12,7 @@ mod doctor_facts;
 mod doctor_fixture;
 mod doctor_live;
 mod error;
+mod health_cmd;
 mod herdr_probe;
 pub mod output;
 mod paths;
@@ -136,6 +137,12 @@ enum Commands {
     Whoami,
     /// Per-rig chatroom: send, history, watch, topic, and clear.
     Chatroom(chatroom::ChatroomArgs),
+    /// Health findings.
+    Health(health_cmd::HealthArgs),
+    /// Operator stream and the classifier lease.
+    Stream(health_cmd::StreamArgs),
+    /// Context usage samples.
+    Usage(health_cmd::UsageArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -178,6 +185,9 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Unclaim(args) => slice4::unclaim(&args),
         Commands::Whoami => slice4::whoami(),
         Commands::Chatroom(args) => chatroom::run(&args),
+        Commands::Health(args) => health_cmd::health(&args),
+        Commands::Stream(args) => health_cmd::stream(&args),
+        Commands::Usage(args) => health_cmd::usage(&args),
     }
 }
 

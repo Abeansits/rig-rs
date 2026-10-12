@@ -22,17 +22,33 @@ use crate::state::App;
 /// Route the TUI opens. The interim tail used this path.
 pub(crate) const PATH: &str = "/api/events";
 
+/// Which hub events a tail keeps. Gap is always kept so a resume can see a hole.
+#[derive(Clone, Copy)]
+pub(crate) enum Tail {
+    /// Every kind.
+    All,
+    /// Queue changes.
+    Queue,
+    /// Stream items. This is `/api/stream/watch`, not a second bus.
+    Stream,
+}
+
 pub(crate) async fn events(State(app): State<App>, req: Request) -> Response {
     app.touch();
-    dispatch(app, req, false).await
+    dispatch(app, req, Tail::All).await
 }
 
 pub(crate) async fn watch(State(app): State<App>, req: Request) -> Response {
     app.touch();
-    dispatch(app, req, true).await
+    dispatch(app, req, Tail::Queue).await
 }
 
-async fn dispatch(app: App, req: Request, queue_only: bool) -> Response {
+pub(crate) async fn stream_watch(State(app): State<App>, req: Request) -> Response {
+    app.touch();
+    dispatch(app, req, Tail::Stream).await
+}
+
+async fn dispatch(app: App, req: Request, tail: Tail) -> Response {
     let (mut parts, body) = req.into_parts();
     let last = resume_id(&parts.headers, parts.uri.query());
     let upgrade = parts
@@ -42,21 +58,29 @@ async fn dispatch(app: App, req: Request, queue_only: bool) -> Response {
         .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
     if upgrade {
         return match WebSocketUpgrade::from_request_parts(&mut parts, &app).await {
-            Ok(ws) => ws.on_upgrade(move |socket| ws_pump(socket, app, last, queue_only)),
+            Ok(ws) => ws.on_upgrade(move |socket| ws_pump(socket, app, last, tail)),
             Err(err) => err.into_response(),
         };
     }
     drop(parts);
     drop(body);
-    sse(&app, last, queue_only)
+    sse(&app, last, tail)
 }
 
-fn sse(app: &App, last: Option<u64>, queue_only: bool) -> Response {
+fn passes(tail: Tail, kind: StreamKind) -> bool {
+    match tail {
+        Tail::All => true,
+        Tail::Queue => matches!(kind, StreamKind::QueueChanged | StreamKind::Gap),
+        Tail::Stream => matches!(kind, StreamKind::StreamEmitted | StreamKind::Gap),
+    }
+}
+
+fn sse(app: &App, last: Option<u64>, tail: Tail) -> Response {
     let (tx, rx) = mpsc::channel(32);
     let hub = std::sync::Arc::clone(&app.hub);
     let cancel = app.cancel.clone();
     app.tasks.spawn(async move {
-        let replay = replay(&hub, last, queue_only).await;
+        let replay = replay(&hub, last, tail).await;
         for event in replay {
             if tx.send(format_sse(&event)).await.is_err() {
                 return;
@@ -68,7 +92,7 @@ fn sse(app: &App, last: Option<u64>, queue_only: bool) -> Response {
                 () = cancel.cancelled() => break,
                 event = live.recv() => {
                     match event {
-                        Ok(event) if !queue_only || event.kind == StreamKind::QueueChanged => {
+                        Ok(event) if passes(tail, event.kind) => {
                             if tx.send(format_sse(&event)).await.is_err() {
                                 break;
                             }
@@ -94,8 +118,8 @@ fn sse(app: &App, last: Option<u64>, queue_only: bool) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-async fn ws_pump(mut socket: WebSocket, app: App, last: Option<u64>, queue_only: bool) {
-    for event in replay(&app.hub, last, queue_only).await {
+async fn ws_pump(mut socket: WebSocket, app: App, last: Option<u64>, tail: Tail) {
+    for event in replay(&app.hub, last, tail).await {
         let text = serde_json::to_string(&event).unwrap_or_default();
         if socket.send(Message::Text(text.into())).await.is_err() {
             return;
@@ -107,7 +131,7 @@ async fn ws_pump(mut socket: WebSocket, app: App, last: Option<u64>, queue_only:
             () = app.cancel.cancelled() => break,
             event = live.recv() => {
                 let Ok(event) = event else { break };
-                if queue_only && event.kind != StreamKind::QueueChanged {
+                if !passes(tail, event.kind) {
                     continue;
                 }
                 let text = serde_json::to_string(&event).unwrap_or_default();
@@ -119,11 +143,7 @@ async fn ws_pump(mut socket: WebSocket, app: App, last: Option<u64>, queue_only:
     }
 }
 
-async fn replay(
-    hub: &crate::hub::EventHub,
-    last: Option<u64>,
-    queue_only: bool,
-) -> Vec<StreamEvent> {
+async fn replay(hub: &crate::hub::EventHub, last: Option<u64>, tail: Tail) -> Vec<StreamEvent> {
     let mut out = Vec::new();
     match hub.missed(last).await {
         Missed::CaughtUp => {}
@@ -141,9 +161,7 @@ async fn replay(
             out.extend(events);
         }
     }
-    if queue_only {
-        out.retain(|event| event.kind == StreamKind::QueueChanged || event.kind == StreamKind::Gap);
-    }
+    out.retain(|event| passes(tail, event.kind));
     out
 }
 
@@ -234,14 +252,14 @@ async fn terminal_pump(mut socket: WebSocket, app: App, seat: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::replay;
+    use super::{Tail, replay};
     use crate::hub::EventHub;
     use crewmux_api::StreamKind;
 
     #[tokio::test]
     async fn last_event_id_past_the_head_is_a_gap() {
         let hub = EventHub::new();
-        let missed = replay(&hub, Some(3), false).await;
+        let missed = replay(&hub, Some(3), Tail::All).await;
         let gap = missed.first().expect("gap");
         assert_eq!(gap.kind, StreamKind::Gap);
         assert_eq!(gap.id, hub.head());
@@ -250,13 +268,37 @@ mod tests {
         assert_eq!(missed.len(), 1);
 
         let published = hub.publish(StreamKind::Activity, None).await;
-        let caught = replay(&hub, Some(published.id), false).await;
+        let caught = replay(&hub, Some(published.id), Tail::All).await;
         assert_eq!(caught.len(), 0);
-        let ahead = replay(&hub, Some(published.id.saturating_add(2)), false).await;
+        let ahead = replay(&hub, Some(published.id.saturating_add(2)), Tail::All).await;
         let gap = ahead.first().expect("ahead");
         assert_eq!(gap.kind, StreamKind::Gap);
         assert_eq!(gap.id, hub.head());
         assert_ne!(gap.id, hub.head().saturating_add(1));
         assert!(ahead.iter().all(|event| event.kind == StreamKind::Gap));
+    }
+
+    #[tokio::test]
+    async fn stream_tail_keeps_emitted_items_and_resumes() {
+        let hub = EventHub::new();
+        let queue = hub.publish(StreamKind::QueueChanged, None).await;
+        let emitted = hub
+            .publish(
+                StreamKind::StreamEmitted,
+                Some(crewmux_api::StreamPayload {
+                    stream_id: Some("item-1".to_owned()),
+                    ..crewmux_api::StreamPayload::default()
+                }),
+            )
+            .await;
+        let all = replay(&hub, None, Tail::Stream).await;
+        assert!(
+            all.iter()
+                .all(|event| event.kind != StreamKind::QueueChanged)
+        );
+        assert_eq!(all.last().map(|event| event.id), Some(emitted.id));
+        let resumed = replay(&hub, Some(emitted.id), Tail::Stream).await;
+        assert_eq!(resumed, []);
+        assert_eq!(queue.kind, StreamKind::QueueChanged);
     }
 }

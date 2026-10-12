@@ -39,6 +39,9 @@ pub enum Error {
     /// A chat write or history query failed.
     #[error(transparent)]
     Chat(#[from] crewmux_core::chat::ChatError),
+    /// A health, lease, stream, or classification rule failed.
+    #[error(transparent)]
+    Health(#[from] crewmux_health::Error),
 }
 
 impl Error {
@@ -55,7 +58,8 @@ impl Error {
             | Self::Io(_)
             | Self::Domain(_)
             | Self::Event(_)
-            | Self::CrashHook(_) => crewmux_core::chat::ChatError::Store(rendered),
+            | Self::CrashHook(_)
+            | Self::Health(_) => crewmux_core::chat::ChatError::Store(rendered),
         }
     }
 }
