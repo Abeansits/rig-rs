@@ -20,6 +20,7 @@ mod setup_apply;
 mod setup_cmd;
 mod setup_plan;
 mod slice4;
+mod slice8;
 mod spawn;
 mod tui_cmd;
 
@@ -143,6 +144,16 @@ enum Commands {
     Stream(health_cmd::StreamArgs),
     /// Context usage samples.
     Usage(health_cmd::UsageArgs),
+    /// Capture or inspect a rig snapshot.
+    Snapshot(slice8::SnapshotArgs),
+    /// Relaunch a rig and reconcile in-flight deliveries.
+    Restore(slice8::RestoreArgs),
+    /// Read-only restore readiness report.
+    RestoreCheck(slice8::RestoreCheckArgs),
+    /// Fleet restore.
+    CrashCart(slice8::CrashCartArgs),
+    /// Agent checkpoints.
+    Checkpoint(slice8::CheckpointArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -188,6 +199,11 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Health(args) => health_cmd::health(&args),
         Commands::Stream(args) => health_cmd::stream(&args),
         Commands::Usage(args) => health_cmd::usage(&args),
+        Commands::Snapshot(args) => slice8::snapshot(&args),
+        Commands::Restore(args) => slice8::restore(&args),
+        Commands::RestoreCheck(args) => slice8::restore_check(&args),
+        Commands::CrashCart(args) => slice8::crash_cart(&args),
+        Commands::Checkpoint(args) => slice8::checkpoint(&args),
     }
 }
 

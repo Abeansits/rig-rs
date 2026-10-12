@@ -178,17 +178,63 @@ const LINEAGE_START: &str = "
 ALTER TABLE pane_lineage ADD COLUMN started_ticks INTEGER;
 ";
 
-/// Rig tables, the queue, chat, health, then the pane lineage recorded at launch.
+const DURABILITY: &str = "
+CREATE TABLE seat_restore (
+    seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    posture TEXT NOT NULL,
+    resume_kind TEXT,
+    resume_value TEXT,
+    transcript_cursor INTEGER,
+    startup_status TEXT
+);
+CREATE TABLE seat_edges (
+    rig_id TEXT NOT NULL REFERENCES rigs(id) ON DELETE CASCADE,
+    source_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    PRIMARY KEY (rig_id, source_id, target_id, kind)
+);
+CREATE TABLE checkpoints (
+    id TEXT PRIMARY KEY NOT NULL,
+    seat_id TEXT NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    summary TEXT NOT NULL,
+    current_task TEXT,
+    next_step TEXT,
+    blocked_on TEXT,
+    key_artifacts TEXT NOT NULL,
+    confidence TEXT,
+    created_ms INTEGER NOT NULL
+);
+CREATE INDEX idx_checkpoints_seat ON checkpoints (seat_id, created_ms);
+CREATE TABLE direct_deliveries (
+    id TEXT PRIMARY KEY NOT NULL,
+    rig_id TEXT NOT NULL,
+    seat_id TEXT NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    body TEXT NOT NULL,
+    delivered_at_ms INTEGER,
+    cursor INTEGER,
+    acked INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE rig_kernel (
+    rig_id TEXT PRIMARY KEY NOT NULL REFERENCES rigs(id) ON DELETE CASCADE
+);
+";
+
+/// Rig tables, the queue, chat, then the snapshot tables main already ships,
+/// then health and the pane lineage recorded at launch.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
         M::up(QUEUE_SCHEMA),
         M::up(CHAT),
+        M::up(DURABILITY),
         M::up(HEALTH),
         M::up(LINEAGE),
         M::up(LINEAGE_START),
     ]),
-    len: 6,
+    len: 7,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

@@ -41,6 +41,23 @@ pub fn replace_book(
     Ok(())
 }
 
+/// Replace the queue tables without starting a transaction.
+///
+/// # Errors
+///
+/// Returns a SQLite or JSON error.
+pub(crate) fn overwrite_book(conn: &Connection, book: &QueueBook) -> Result<(), Error> {
+    conn.execute("DELETE FROM queue_items", [])?;
+    for item in book.items() {
+        insert_item(conn, &item)?;
+    }
+    conn.execute("DELETE FROM queue_transitions", [])?;
+    for row in book.all_transitions() {
+        insert_transition(conn, &row)?;
+    }
+    Ok(())
+}
+
 /// Load the live queue. An empty database is an empty book.
 ///
 /// # Errors

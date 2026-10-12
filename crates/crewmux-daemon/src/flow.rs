@@ -17,7 +17,15 @@ use crate::query::{attach_argv, capture, down, list_seats};
 use crate::state::App;
 
 pub(crate) async fn harness(script: Option<&str>) -> (App, Arc<FakeMux>) {
-    harness_with(script, Path::new("."), None).await
+    let home = std::env::temp_dir().join(format!(
+        "rig-flow-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos())
+    ));
+    std::fs::create_dir_all(&home).expect("flow home");
+    harness_with(script, &home, None).await
 }
 
 pub(crate) async fn harness_with(

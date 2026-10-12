@@ -36,6 +36,7 @@ pub(crate) async fn bring_up(app: &App, yaml: &str) -> Result<Value, Error> {
     crate::settle::settle(app, &mut up.seats, &mut up.events).await?;
     let rig_id = up.rig_id;
     let seats = read(&app.store, move |conn| conn.list_by_rig(&rig_id)).await?;
+    crate::direct::record_startup(app, &seats).await?;
     Ok(json!({
         "status": status_of(&seats),
         "rig": up.rig_name,
@@ -94,6 +95,7 @@ async fn relaunch_dead(
             rig_name,
             &mut events,
             SeatHints::default(),
+            crate::resume::LaunchExtra::initial(seat.name.as_str()),
         )
         .await?;
         launching.push(next);
@@ -178,7 +180,8 @@ async fn launch_seats(app: &App, up: &mut Up, specs: &[SeatSpec]) -> Result<(), 
             auto_trust: spec.auto_trust,
             budget: budget_from(spec),
         };
-        let next = launch_one(app, seat, session, &rig_name, &mut up.events, hints).await?;
+        let extra = crate::resume::LaunchExtra::initial(seat.name.as_str());
+        let next = launch_one(app, seat, session, &rig_name, &mut up.events, hints, extra).await?;
         launched.push(next);
     }
     up.seats = launched;
@@ -202,6 +205,29 @@ fn budget_from(spec: &SeatSpec) -> Option<LaunchBudget> {
     }))
 }
 
+pub(crate) async fn relaunch(
+    app: &App,
+    seat: &crewmux_core::Seat,
+    rig_name: &str,
+    extra: crate::resume::LaunchExtra,
+    events: &mut Vec<Value>,
+) -> Result<crewmux_core::Seat, Error> {
+    launch_one(
+        app,
+        seat,
+        SessionId::new(),
+        rig_name,
+        events,
+        SeatHints::default(),
+        extra,
+    )
+    .await
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "session, hints, and restore extras are separate launch inputs"
+)]
 async fn launch_one(
     app: &App,
     seat: &crewmux_core::Seat,
@@ -209,10 +235,12 @@ async fn launch_one(
     rig_name: &str,
     events: &mut Vec<Value>,
     hints: SeatHints,
+    extra: crate::resume::LaunchExtra,
 ) -> Result<crewmux_core::Seat, Error> {
     let cwd = seat_cwd(seat).await?;
     let session_name = format!("{}__{rig_name}", seat.name.as_str());
     let mut binding = binding_for(seat.id, cwd, &session_name);
+    binding.posture = extra.posture;
     binding.model.clone_from(&seat.model);
     let Some(adapter) = app.registry.get(seat.runtime) else {
         return fail_seat(
@@ -224,19 +252,29 @@ async fn launch_one(
         .await;
     };
     let mut env = BTreeMap::new();
-    if let Some(script) = stub_script(app) {
+    if let Some(script) = crate::resume::script_for(app, seat.name.as_str()) {
         env.insert("RIG_STUB_SCRIPT".to_owned(), script);
+    }
+    if extra.resume.is_some() || extra.posture != crewmux_types::LaunchPosture::Auto {
+        env.insert(
+            "RIG_STUB_POSTURE".to_owned(),
+            crewmux_durability::posture_token(extra.posture).to_owned(),
+        );
+    }
+    if let Some(path) = &extra.replay {
+        env.insert("RIG_STUB_REPLAY".to_owned(), path.display().to_string());
     }
     let seat_token = SeatId::new().to_string();
     env.insert(SEAT_ID_ENV.to_owned(), seat.id.to_string());
     env.insert(SEAT_TOKEN_ENV.to_owned(), seat_token.clone());
+    let posture = extra.posture;
     let outcome = adapter
         .launch(
             &binding,
             LaunchOpts {
                 session_name,
                 env,
-                resume: None,
+                resume: extra.resume,
                 fork: false,
                 auto_trust: hints.auto_trust,
                 budget: hints.budget,
@@ -246,7 +284,9 @@ async fn launch_one(
         .await?;
     match outcome {
         LaunchOutcome::Ok { applied, .. } => {
-            store_started(app, seat, session, applied, events, &seat_token).await
+            let updated = store_started(app, seat, session, applied, events, &seat_token).await?;
+            crate::resume::remember(app, &updated, posture).await?;
+            Ok(updated)
         }
         LaunchOutcome::Failed { error, .. } => {
             fail_seat(app, seat, &error, attention_code(&error)).await
@@ -347,13 +387,6 @@ async fn fail_seat(
     let saved = updated.clone();
     write(&app.store, move |conn| SeatRepo::upsert(conn, &saved)).await?;
     Ok(updated)
-}
-
-fn stub_script(app: &App) -> Option<String> {
-    std::env::var("RIG_STUB_SCRIPT")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .or_else(|| app.stub_script.clone())
 }
 
 pub(crate) fn attention_code(error: &str) -> &'static str {

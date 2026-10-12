@@ -22,16 +22,35 @@ use crate::stub::script::{StubScript, parse_script};
 pub fn run_stub_agent() -> Result<(), Error> {
     let raw = std::env::var("RIG_STUB_SCRIPT").unwrap_or_default();
     let script = parse_script(&raw)?;
+    let posture = std::env::var("RIG_STUB_POSTURE").ok();
+    let replay = std::env::var("RIG_STUB_REPLAY")
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok());
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .enable_io()
         .build()?;
-    runtime.block_on(drive(script))
+    runtime.block_on(drive(script, posture, replay))
 }
 
-async fn drive(script: StubScript) -> Result<(), Error> {
+async fn drive(
+    script: StubScript,
+    posture: Option<String>,
+    replay: Option<String>,
+) -> Result<(), Error> {
     let started = tokio::time::Instant::now();
     let mut stdout = tokio::io::stdout();
+    if let Some(posture) = posture {
+        stdout
+            .write_all(format!("posture: {posture}\n").as_bytes())
+            .await?;
+    }
+    if let Some(replay) = replay.filter(|text| !text.is_empty()) {
+        stdout.write_all(replay.as_bytes()).await?;
+        if !replay.ends_with('\n') {
+            stdout.write_all(b"\n").await?;
+        }
+    }
     stdout.write_all(StubScript::banner().as_bytes()).await?;
     stdout.flush().await?;
     if script.ready_after_ms > 0 {

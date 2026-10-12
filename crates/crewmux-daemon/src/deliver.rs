@@ -26,6 +26,17 @@ use crate::state::App;
 
 const REASON_REQUIRED: &str = "--dangerously-interact requires --reason explaining why the prompt is being driven. No text was sent.";
 
+async fn stopped_before_paste(
+    app: &App,
+    outbound: &Outbound,
+    address: &str,
+) -> Result<bool, Error> {
+    if !outbound.track_direct {
+        return Ok(false);
+    }
+    crate::direct::crash_before_paste(app, address, &outbound.body).await
+}
+
 struct PasteRoute {
     bracketed: bool,
     display: PasteDisplay,
@@ -40,6 +51,10 @@ struct Shown {
 }
 
 /// One `rig send` or `rig broadcast`.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "send flags are independent: broadcast, interact, verify, and direct-row tracking"
+)]
 pub(crate) struct Outbound {
     pub from: String,
     pub targets: Vec<String>,
@@ -51,6 +66,8 @@ pub(crate) struct Outbound {
     /// Retained so `rig send --verify` stays on the wire. Rendering is required
     /// for every send, whether or not the flag is set.
     pub verify: bool,
+    /// Record a direct-delivery row. Restore re-sends set this false.
+    pub track_direct: bool,
 }
 
 pub(crate) async fn deliver(app: &App, outbound: Outbound) -> Result<Value, Error> {
@@ -161,6 +178,9 @@ async fn not_ready(
     else {
         return Err(Error::Message(REASON_REQUIRED.to_owned()));
     };
+    if stopped_before_paste(app, outbound, address).await? {
+        return Ok(json!({"seat": address, "outcome": "crashed_before_paste"}));
+    }
     paste_and_check(
         app,
         outbound,
@@ -192,6 +212,9 @@ async fn guarded(
     let second = verdict(app, address, pane, Instant::now()).await?;
     if !matches!(second.0.verdict, GuardVerdict::Deliver) {
         return receipt_row(app, outbound, address, &second.0, None).await;
+    }
+    if stopped_before_paste(app, outbound, address).await? {
+        return Ok(json!({"seat": address, "outcome": "crashed_before_paste"}));
     }
     paste_and_check(
         app,
@@ -251,31 +274,90 @@ async fn paste_and_check(
         preserve_lf: true,
     };
     tracing::debug!(verify = outbound.verify, seat = address, "paste");
+    let (seat_name, rig_name) = split_address(address);
+    let cursor = transcript_len(app, rig_name, seat_name).await?;
     app.mux.paste(pane, &payload, opts).await?;
+    wait_landed(app, rig_name, seat_name, cursor, &outbound.body).await;
     let after = pasted_screen(app, pane, &before.text, &payload, range, route.display).await?;
-    let mut degraded = ComposerParser::Stub.state(&before.text, None) == ComposerState::Unknown;
-    let lines = payload.lines().count();
-    let outcome = match classify_for(route.display, &before.text, &after, &payload) {
+    let view = PasteView {
+        before: &before.text,
+        after: &after,
+        payload: &payload,
+        range,
+        route: &route,
+    };
+    let (outcome, degraded) = finish_paste(app, address, pane, view).await?;
+    stored(
+        app,
+        outbound,
+        address,
+        Landed {
+            outcome,
+            degraded,
+            reason: interact_reason,
+            cursor,
+        },
+    )
+    .await
+}
+
+fn split_address(address: &str) -> (&str, &str) {
+    address.split_once('@').unwrap_or((address, ""))
+}
+
+async fn transcript_len(app: &App, rig_name: &str, seat_name: &str) -> Result<u64, Error> {
+    if app.transcripts {
+        crate::transcripts::len_of(&app.home, rig_name, seat_name)
+            .await
+            .map_err(Error::from)
+    } else {
+        Ok(0)
+    }
+}
+
+async fn wait_landed(app: &App, rig_name: &str, seat_name: &str, cursor: u64, body: &str) {
+    if app.transcripts {
+        crate::transcripts::wait_for_paste(&app.home, rig_name, seat_name, cursor, body).await;
+    }
+}
+
+struct PasteView<'a> {
+    before: &'a str,
+    after: &'a str,
+    payload: &'a str,
+    range: CaptureRange,
+    route: &'a PasteRoute,
+}
+
+async fn finish_paste(
+    app: &App,
+    address: &str,
+    pane: &crewmux_mux::PaneRef,
+    view: PasteView<'_>,
+) -> Result<(DeliveryOutcome, bool), Error> {
+    let mut degraded = ComposerParser::Stub.state(view.before, None) == ComposerState::Unknown;
+    let lines = view.payload.lines().count();
+    let outcome = match classify_for(view.route.display, view.before, view.after, view.payload) {
         PasteHit::Clean => {
             app.mux.send_keys(pane, &[Key::Enter]).await?;
             DeliveryOutcome::Delivered
         }
         PasteHit::Contaminated => {
-            if !clear_composer(app, pane, range, lines, route.runtime).await? {
+            if !clear_composer(app, pane, view.range, lines, view.route.runtime).await? {
                 degraded = true;
             }
             raise(app, address, "contaminated").await;
             DeliveryOutcome::Contaminated
         }
         PasteHit::Missing => {
-            if !clear_composer(app, pane, range, lines, route.runtime).await? {
+            if !clear_composer(app, pane, view.range, lines, view.route.runtime).await? {
                 degraded = true;
             }
             raise(app, address, "did not render").await;
             DeliveryOutcome::Failed
         }
     };
-    stored(app, outbound, address, outcome, degraded, interact_reason).await
+    Ok((outcome, degraded))
 }
 
 async fn receipt_row(
@@ -294,30 +376,38 @@ async fn receipt_row(
         app,
         outbound,
         address,
-        outcome,
-        evaluated.guard_degraded,
-        interact_reason.unwrap_or(""),
+        Landed {
+            outcome,
+            degraded: evaluated.guard_degraded,
+            reason: interact_reason.unwrap_or(""),
+            cursor: 0,
+        },
     )
     .await
+}
+
+struct Landed<'a> {
+    outcome: DeliveryOutcome,
+    degraded: bool,
+    reason: &'a str,
+    cursor: u64,
 }
 
 async fn stored(
     app: &App,
     outbound: &Outbound,
     address: &str,
-    outcome: DeliveryOutcome,
-    guard_degraded: bool,
-    interact_reason: &str,
+    landed: Landed<'_>,
 ) -> Result<Value, Error> {
     let cursor = app.cursor.fetch_add(1, Ordering::Relaxed).saturating_add(1);
     let fingerprint = obligation_fingerprint(&outbound.from, address, &outbound.body);
     let receipt = DeliveryReceipt {
-        outcome,
-        guard_degraded,
+        outcome: landed.outcome,
+        guard_degraded: landed.degraded,
         fingerprint: fingerprint.clone(),
         cursor,
         at: now_ts(),
-        interact_reason: (!interact_reason.is_empty()).then(|| interact_reason.to_owned()),
+        interact_reason: (!landed.reason.is_empty()).then(|| landed.reason.to_owned()),
     };
     let doc = serde_json::to_string(&receipt).map_err(|err| Error::Message(err.to_string()))?;
     let store = Arc::clone(&app.store);
@@ -327,6 +417,9 @@ async fn stored(
     .await
     .map_err(crate::state::join_err)?;
     inserted.map_err(|err| Error::Message(format!("receipt: {err}")))?;
+    if outbound.track_direct && landed.outcome == DeliveryOutcome::Delivered {
+        crate::direct::note_pasted(app, address, &outbound.body, landed.cursor).await?;
+    }
     if let Ok(destination) = SessionRef::new(address) {
         crate::inbox_http::record(
             app,
@@ -343,18 +436,18 @@ async fn stored(
         app,
         DomainEvent::DeliveryRecorded {
             seat: address.to_owned(),
-            outcome: outcome_name(outcome).to_owned(),
+            outcome: outcome_name(landed.outcome).to_owned(),
             at: now_ts(),
         },
     )
     .await;
     Ok(json!({
         "seat": address,
-        "outcome": outcome_name(outcome),
-        "guard_degraded": guard_degraded,
+        "outcome": outcome_name(landed.outcome),
+        "guard_degraded": landed.degraded,
         "fingerprint": fingerprint,
         "cursor": cursor,
-        "bracketed": interact_reason.is_empty(),
+        "bracketed": landed.reason.is_empty(),
         "interact_reason": receipt.interact_reason,
     }))
 }

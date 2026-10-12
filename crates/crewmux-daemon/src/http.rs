@@ -45,6 +45,7 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/queue/update", post(crate::queue_http::update_item))
         .route("/api/queue/watch", get(crate::events::watch))
         .route("/api/terminal", get(crate::events::terminal))
+        .merge(crate::durable_http::routes())
         .route("/api/send", post(crate::send_http::send_route))
         .route("/api/broadcast", post(crate::send_http::broadcast_route))
         .route("/api/ask", post(crate::ask_http::ask))
