@@ -93,7 +93,7 @@ Repo PE-006 stays the setup/doctor exception below. It is not the blind-Enter ru
 - **Snapshot:** `tests/diff/snapshots/daemon-health.rs.snap` records that Rust side. `ExpectedDiff(PE-009)` applies only while the live Rust observation still matches it. stderr, exit, json, files, and tmux argv stay compared as ordinary fields.
 - **Why this is recorded:** a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`) shows the same `status=ok` and a longer key list on the TypeScript side. Delete this heading and the `.rs.snap` when `/healthz` carries the same top-level keys.
 - **Required test:** `daemon_health_against_product_daemon`. `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-009)` for `daemon-health`.
-- MCP `daemon_health` returns this same body. It does not add a version field. A socket that is down is `{"running": false}` rather than an error string (PE-019).
+- MCP `daemon_health` returns this same body. It does not add a version field. A socket that is down is `{"running": false}` rather than an error string (PE-020).
 
 ## PE-011: chat sender is a seat token, not `X-OpenRig-Session`
 
@@ -130,11 +130,11 @@ The design index calls this PE-003. That id is already the slice 1 help exceptio
 
 - **TS behaviour:** `packages/cli/src/mcp-server.ts` registers 18 tools. The names, sorted as `mcp-server.test.ts` lists them, are `rig_add`, `rig_agent_validate`, `rig_bind`, `rig_bundle_inspect`, `rig_capture`, `rig_chatroom_send`, `rig_chatroom_watch`, `rig_discover`, `rig_down`, `rig_ps`, `rig_restore`, `rig_rig_nodes`, `rig_rig_validate`, `rig_send`, `rig_snapshot_create`, `rig_snapshot_list`, `rig_status`, and `rig_up`. `tools/list` length is 18.
 - **Rust behaviour:** the stdio server name is `rig` and it registers exactly 15 tools: `rig_start`, `rig_stop`, `rig_list`, `agent_list`, `agent_add`, `agent_send`, `agent_read_screen`, `chat_send`, `chat_read`, `snapshot_create`, `snapshot_list`, `snapshot_restore`, `spec_validate_rig`, `spec_validate_agent`, and `daemon_health`. There are no aliases. `rig_discover`, `rig_bind`, and `rig_bundle_inspect` are not registered; calling one is the protocol error `unknown tool`. The other fifteen names were renamed as above.
-- **What this exception covers:** the tool name and the dropped tools. It does not cover a different HTTP path, request body, timeout, or flag. Those differences are PE-019.
+- **What this exception covers:** the tool name and the dropped tools. It does not cover a different HTTP path, request body, timeout, or flag. Those differences are PE-020.
 - **Lint:** `cargo xtask lint mcp-legacy-names` fails when one of the 18 legacy names appears in `docs/`, `assets/skills/`, or `crates/**/src` outside `crates/crewmux-mcp/src/names.rs`. `cargo xtask lint mcp-state-path` fails when `crewmux-mcp`'s `[dependencies]` names `crewmux-store`, `crewmux-mux`, `crewmux-adapters`, or `crewmux-durability`.
 - **Required tests:** `tools_list_is_the_fifteen_names`, `stdio_reconnect_lists_fifteen`, `bundle_inspect_is_unknown_tool`, `schemas_have_required_fields`, and `spec_validate_tools_require_yaml`.
 
-## PE-019: MCP tools call the Rust daemon routes
+## PE-020: MCP tools call the Rust daemon routes
 
 PE-016 covers the renamed tool list only. These are the route, body, and flag differences that remain after that rename. Matching the TypeScript assertions would call routes this daemon does not have, or would ignore a flag that changes what the tool does.
 
