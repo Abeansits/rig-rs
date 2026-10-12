@@ -157,17 +157,34 @@ fn on_live(state: &mut State, event: &StreamEvent, cmds: &mut Vec<Cmd>) {
         StreamKind::SeatStateChanged => apply_state_change(state, event.payload.as_ref()),
         StreamKind::SeatDied => apply_death(state, event.payload.as_ref()),
         StreamKind::Activity => apply_activity(state, event.payload.as_ref()),
+        // Queue, delivery, attention, and later kinds stay on the wire for other clients.
+        StreamKind::QueueChanged
+        | StreamKind::DeliveryRecorded
+        | StreamKind::AttentionRaised
+        | StreamKind::Other
+        | _ => {}
     }
+}
+
+fn seat_of(payload: &StreamPayload) -> Option<SeatKey> {
+    SeatKey::parse(payload.seat.as_deref()?).ok()
+}
+
+fn state_of(payload: &StreamPayload) -> Option<SeatState> {
+    let text = payload.state.as_deref()?;
+    serde_json::from_value(serde_json::Value::String(text.to_owned())).ok()
 }
 
 fn apply_state_change(state: &mut State, payload: Option<&StreamPayload>) {
     let Some(payload) = payload else {
         return;
     };
-    let Some(next) = payload.state.clone() else {
+    let Some(seat) = seat_of(payload) else {
         return;
     };
-    let seat = payload.seat.clone();
+    let Some(next) = state_of(payload) else {
+        return;
+    };
     set_seat_state(state, &seat, next);
     flash(state, RowKey::Seat(seat));
 }
@@ -176,7 +193,9 @@ fn apply_death(state: &mut State, payload: Option<&StreamPayload>) {
     let Some(payload) = payload else {
         return;
     };
-    let seat = payload.seat.clone();
+    let Some(seat) = seat_of(payload) else {
+        return;
+    };
     set_seat_state(state, &seat, SeatState::Dead);
     flash(state, RowKey::Seat(seat));
 }
@@ -188,7 +207,9 @@ fn apply_activity(state: &mut State, payload: Option<&StreamPayload>) {
     let Some(summary) = payload.summary.clone() else {
         return;
     };
-    let seat = payload.seat.clone();
+    let Some(seat) = seat_of(payload) else {
+        return;
+    };
     state.snapshot.activity.insert(
         0,
         crewmux_api::ActivityItem {

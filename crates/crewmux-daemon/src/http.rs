@@ -29,6 +29,30 @@ pub(crate) fn router(app: App) -> Router {
         .route(RigDown::PATH, post(rig_down))
         .route(crate::events::PATH, get(crate::events::events))
         .route("/shutdown", post(shutdown))
+        .route(
+            "/api/queue",
+            get(crate::queue_http::list).post(crate::queue_http::create),
+        )
+        .route("/api/queue/show", post(crate::queue_http::show))
+        .route("/api/queue/claim", post(crate::queue_http::claim))
+        .route("/api/queue/unclaim", post(crate::queue_http::unclaim))
+        .route("/api/queue/handoff", post(crate::queue_http::handoff))
+        .route(
+            "/api/queue/handoff-and-complete",
+            post(crate::queue_http::handoff_complete),
+        )
+        .route("/api/queue/fallback", post(crate::queue_http::fallback))
+        .route("/api/queue/update", post(crate::queue_http::update_item))
+        .route("/api/queue/watch", get(crate::events::watch))
+        .route("/api/terminal", get(crate::events::terminal))
+        .route("/api/send", post(crate::send_http::send_route))
+        .route("/api/broadcast", post(crate::send_http::broadcast_route))
+        .route("/api/ask", post(crate::ask_http::ask))
+        .route("/api/whoami", get(crate::ask_http::whoami))
+        .route("/api/inbox", post(crate::inbox_http::drop_inbox))
+        .route("/api/inbox/absorb", post(crate::inbox_http::absorb))
+        .route("/api/inbox/deny", post(crate::inbox_http::deny))
+        .route("/api/outbox", post(crate::inbox_http::outbox))
         .merge(crate::chat::routes())
         .layer(map_response(connection_close))
         .with_state(app)
@@ -125,7 +149,7 @@ async fn connection_close(mut response: Response) -> Response {
     response
 }
 
-fn ok(value: Value) -> Response {
+pub(crate) fn ok(value: Value) -> Response {
     (StatusCode::OK, Json(value)).into_response()
 }
 
@@ -133,7 +157,7 @@ fn ok(value: Value) -> Response {
     clippy::needless_pass_by_value,
     reason = "handlers pass Error by value and Display does not consume it"
 )]
-fn fail(err: Error) -> Response {
+pub(crate) fn fail(err: Error) -> Response {
     let message = err.to_string();
     let status = if message.contains("not found") {
         StatusCode::NOT_FOUND

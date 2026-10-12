@@ -1,0 +1,6 @@
+---
+source: crates/rig/tests/slice4_cli.rs
+assertion_line: 95
+expression: out.trim()
+---
+No transcript files for seat 'one'. The daemon writes them from pane output when transcripts are enabled.

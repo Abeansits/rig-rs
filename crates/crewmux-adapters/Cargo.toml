@@ -18,6 +18,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+rustix = { workspace = true, features = ["termios"] }
 
 [features]
 # Real tmux integration tests. Off by default so `cargo test` uses FakeMux only.

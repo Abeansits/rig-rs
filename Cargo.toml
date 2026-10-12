@@ -25,6 +25,7 @@ ulid = { version = "3.0.0", features = ["serde"] }
 # and crewmux-cli) and `getuid` / `test_kill_process` (`process`).
 # The mux crate uses `process` for the Linux SIGCHLD reap nudge.
 # Provider tests use `process` to reap leftover tmux sockets.
+# The stub agent uses `termios` so `C-u` reaches the process instead of the line discipline.
 # `cargo add -p crewmux-daemon rustix --features fs,process`
 # `cargo add -p crewmux-cli rustix --features fs`
 # `cargo add -p crewmux-provider --dev rustix --features process`
@@ -57,6 +58,9 @@ serde_json = "1.0.152"
 anyhow = "1.0.104"
 assert_cmd = "2.2.2"
 axum = { version = "0.8.9", features = ["json"] }
+# Slice 4. `cargo add -p crewmux-daemon futures-core` (crates.io, 2026-10-11).
+# The SSE body is a hand-written Stream; the daemon crate enables axum's `ws` feature.
+futures-core = "0.3.34"
 futures-util = "0.3.34"
 nix = { version = "0.31.3", features = ["term", "signal", "poll"] }
 parking_lot = "0.12.5"

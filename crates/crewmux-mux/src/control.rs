@@ -13,10 +13,11 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::argv::{backstop_command, dead_status_args, delete_buffer_args, list_panes_args};
+use crate::control_child::{ControlSlot, SpawnError};
 use crate::control_line::{Action, LineBuf, classify, pane_from_dead_buffer};
 use crate::decode::OutputDecoder;
 use crate::error::MuxError;
-use crate::exec::{TmuxExec, control_command};
+use crate::exec::TmuxExec;
 use crate::hub::{Hub, push_output};
 use crate::parse::{parse_dead_status, parse_panes};
 use crate::types::MuxEvent;
@@ -29,6 +30,7 @@ pub(crate) struct ControlCtx {
     pub(crate) hub: Arc<tokio::sync::Mutex<Hub>>,
     pub(crate) events: broadcast::Sender<MuxEvent>,
     pub(crate) cancel: CancellationToken,
+    pub(crate) child: Arc<ControlSlot>,
     pub(crate) boot_tx: Option<oneshot::Sender<Result<(), MuxError>>>,
     /// Bell window id (`@N`), published after the control client is ready.
     pub(crate) bell: watch::Receiver<Option<String>>,
@@ -61,7 +63,10 @@ struct DriveState<'a> {
     confirms: &'a mut JoinSet<()>,
 }
 
-/// Run the control client until cancelled, reconnecting after the server exits.
+/// Run the control client until cancelled.
+///
+/// A dead server is restarted only while shutdown has not cancelled `ctx`.
+/// `new-session -A` would otherwise fork a new server during teardown.
 pub(crate) async fn run_control(mut ctx: ControlCtx) {
     let mut boot = Boot {
         tx: ctx.boot_tx.take(),
@@ -111,10 +116,12 @@ fn report_boot(boot: &mut Boot, result: Result<(), MuxError>) {
 }
 
 async fn drive_client(ctx: &ControlCtx, boot: &mut Boot, reconnecting: bool) -> Drive {
-    let mut child = match control_command(&ctx.binary, &ctx.socket).spawn() {
+    let mut child = match ctx.child.spawn(&ctx.binary, &ctx.socket, &ctx.cancel).await {
         Ok(child) => child,
-        Err(err) => return Drive::Failed(err.into()),
+        Err(SpawnError::Cancelled) => return Drive::Cancelled,
+        Err(SpawnError::Io(err)) => return Drive::Failed(err.into()),
     };
+    let pid = child.id();
     let Some(mut stdin) = child.stdin.take() else {
         return Drive::Failed(MuxError::Control("control client has no stdin".into()));
     };
@@ -138,6 +145,9 @@ async fn drive_client(ctx: &ControlCtx, boot: &mut Boot, reconnecting: bool) -> 
     confirms.abort_all();
     drop(stdin);
     reap(child).await;
+    if let Some(pid) = pid {
+        ctx.child.clear(pid).await;
+    }
     outcome
 }
 

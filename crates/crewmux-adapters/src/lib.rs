@@ -63,5 +63,10 @@ mod screen_tests {
         assert_eq!(script.print_gate.as_deref(), Some("login_required"));
         assert!(!script.screen().contains("stub> "));
         assert!(script.screen().contains("stub gate: login_required"));
+        assert!(!script.contaminate);
+        assert!(!script.buffer);
+        let dirty = parse_script("contaminate=1,buffer=1").expect("flag");
+        assert!(dirty.contaminate);
+        assert!(dirty.buffer);
     }
 }

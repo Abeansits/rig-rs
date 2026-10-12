@@ -42,6 +42,41 @@ CREATE TABLE events (
 );
 ";
 
+const QUEUE_SCHEMA: &str = "
+CREATE TABLE queue_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    state TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE queue_transitions (
+    id INTEGER PRIMARY KEY NOT NULL,
+    qitem TEXT NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE queue_items_archive (
+    id TEXT PRIMARY KEY NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE queue_transitions_archive (
+    id INTEGER PRIMARY KEY NOT NULL,
+    qitem TEXT NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE inbox (
+    id TEXT PRIMARY KEY NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc TEXT NOT NULL
+);
+CREATE TABLE delivery_receipts (
+    cursor INTEGER PRIMARY KEY NOT NULL,
+    doc TEXT NOT NULL
+);
+";
+
 /// The migrations this build applies.
 pub struct MigrationSet {
     inner: Migrations<'static>,
@@ -78,10 +113,10 @@ CREATE TABLE seat_tokens (
 );
 ";
 
-/// Rig tables, then chat messages and seat tokens.
+/// Rig tables, then the queue, inbox, and receipt tables, then chat.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
-    inner: Migrations::new(vec![M::up(SCHEMA), M::up(CHAT)]),
-    len: 2,
+    inner: Migrations::new(vec![M::up(SCHEMA), M::up(QUEUE_SCHEMA), M::up(CHAT)]),
+    len: 3,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

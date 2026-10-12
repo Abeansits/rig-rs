@@ -62,6 +62,15 @@ fn tmux_shim_is_first_on_path_and_records_argv() {
     let shim_dir = home.shim_path().parent().unwrap().display().to_string();
     let child_path = home.child_env().get("PATH").unwrap();
     assert!(child_path.starts_with(&shim_dir), "{child_path}");
+    let socket = home.child_env().get("RIG_TMUX_SOCKET").unwrap();
+    assert_eq!(socket, &home.tmux_socket);
+    assert_ne!(socket, "rig-rs");
+    assert_eq!(
+        home.child_env()
+            .get("TMUX_HARNESS_SOCKET")
+            .map(String::as_str),
+        Some(socket.as_str())
+    );
     if home.can_probe_tmux() {
         assert_eq!(home.invoke_tmux(&["-V".into()]).unwrap(), 0);
         let _code = home
@@ -169,10 +178,18 @@ raise SystemExit(0)
     .unwrap();
     fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
     let bin_text = bin.display().to_string();
+    let _reap = FakeDaemons {
+        bin: bin_text.clone(),
+    };
     let (code, stdout, stderr) = run(&["diff", "--self", "--bin", &bin_text], None, &[]).unwrap();
     assert_eq!(code, 0, "{stdout}\n{stderr}");
     assert!(stdout.contains("| version | Equal |"), "{stdout}");
     assert!(stdout.contains("| daemon-health | Equal |"), "{stdout}");
+    let leaked = command_pids(&bin_text);
+    assert!(
+        leaked.is_empty(),
+        "diff --self left fake daemons running: {leaked:?}"
+    );
     assert!(
         stdout.contains("deferred until the daemon paste command exists"),
         "{stdout}"
@@ -185,6 +202,54 @@ raise SystemExit(0)
     .unwrap();
     assert_eq!(code, 2, "{stderr}");
     assert!(stderr.contains("not valid with --self"), "{stderr}");
+}
+
+/// Kills `#!/usr/bin/env python3` fakes whose argv0 is the interpreter, so a
+/// failed reap in `diff --self` does not outlive the test.
+struct FakeDaemons {
+    bin: String,
+}
+
+impl Drop for FakeDaemons {
+    fn drop(&mut self) {
+        for pid in command_pids(&self.bin) {
+            let mut command = Command::new("kill");
+            command
+                .args(["-KILL", &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            if let Ok(mut child) = command.spawn() {
+                drop(child.wait());
+            }
+        }
+    }
+}
+
+fn command_pids(needle: &str) -> Vec<u32> {
+    let mut command = Command::new("ps");
+    command
+        .args(["-ax", "-o", "pid=", "-o", "args="])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let Ok(child) = command.spawn() else {
+        return Vec::new();
+    };
+    let Ok(output) = child.wait_with_output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.contains("<defunct>") || !line.contains(needle) {
+                return None;
+            }
+            let (pid, _) = line.split_once(char::is_whitespace)?;
+            pid.parse().ok()
+        })
+        .collect()
 }
 
 #[test]

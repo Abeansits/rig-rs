@@ -42,6 +42,8 @@ workspace = true
 [dev-dependencies]
 assert_cmd.workspace = true
 crewmux-api.workspace = true
+crewmux-mux.workspace = true
+crewmux-tui.workspace = true
 crewmux-provider.workspace = true
 insta.workspace = true
 predicates.workspace = true

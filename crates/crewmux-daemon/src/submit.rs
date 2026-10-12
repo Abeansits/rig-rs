@@ -73,12 +73,13 @@ mod tests {
         registry.register(Arc::new(adapter));
         let store =
             Arc::new(crewmux_store::Store::open(std::path::Path::new(":memory:")).expect("db"));
-        let app = App::new(
+        let app = App::assemble(
             Arc::clone(&store),
             shared,
+            Arc::new(registry),
             None,
             CancellationToken::new(),
-            Arc::new(registry),
+            root.clone(),
         );
         let seat = SeatId::new();
         let rig = RigId::new();

@@ -13,6 +13,10 @@ pub struct StubScript {
     pub exit_after_ms: Option<u64>,
     /// Gate code to print instead of `stub> `.
     pub print_gate: Option<String>,
+    /// Write `EXTRA` when the first pasted line arrives, before echoing it.
+    pub contaminate: bool,
+    /// Keep a bracketed paste in a buffer. `C-u` clears one line; Enter submits.
+    pub buffer: bool,
 }
 
 impl StubScript {
@@ -37,7 +41,7 @@ impl StubScript {
     }
 }
 
-/// Parse `ready_after_ms`, `exit_after_ms`, and `print_gate`.
+/// Parse `ready_after_ms`, `exit_after_ms`, `print_gate`, `contaminate`, and `buffer`.
 ///
 /// An empty string is the default: ready immediately, no exit, no gate.
 ///
@@ -63,6 +67,8 @@ pub fn parse_script(raw: &str) -> Result<StubScript, Error> {
             "ready_after_ms" => script.ready_after_ms = parse_ms(value)?,
             "exit_after_ms" => script.exit_after_ms = Some(parse_ms(value)?),
             "print_gate" => script.print_gate = Some(value.trim().to_owned()),
+            "contaminate" => script.contaminate = parse_flag(value)?,
+            "buffer" => script.buffer = parse_flag(value)?,
             other => {
                 return Err(Error::Message(format!(
                     "unknown RIG_STUB_SCRIPT key `{other}`"
@@ -71,6 +77,14 @@ pub fn parse_script(raw: &str) -> Result<StubScript, Error> {
         }
     }
     Ok(script)
+}
+
+fn parse_flag(value: &str) -> Result<bool, Error> {
+    match value.trim() {
+        "1" | "true" => Ok(true),
+        "0" | "false" => Ok(false),
+        other => Err(Error::Message(format!("invalid boolean value `{other}`"))),
+    }
 }
 
 fn parse_ms(value: &str) -> Result<u64, Error> {

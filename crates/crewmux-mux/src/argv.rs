@@ -337,6 +337,12 @@ pub(crate) fn capture_args(target: &str, range: CaptureRange) -> Vec<String> {
     ];
     match range {
         CaptureRange::Visible => {}
+        CaptureRange::Joined => args.push("-J".to_owned()),
+        CaptureRange::JoinedHistory(lines) => {
+            args.push("-J".to_owned());
+            args.push("-S".to_owned());
+            args.push(format!("-{lines}"));
+        }
         CaptureRange::LastLines(lines) => {
             args.push("-S".to_owned());
             args.push(format!("-{lines}"));
@@ -446,6 +452,7 @@ fn key_name(key: &Key) -> Option<&str> {
         Key::Escape => Some("Escape"),
         Key::CtrlC => Some("C-c"),
         Key::CtrlU => Some("C-u"),
+        Key::CtrlG => Some("C-g"),
         Key::Up => Some("Up"),
         Key::Down => Some("Down"),
         Key::Tab => Some("Tab"),
@@ -478,7 +485,14 @@ pub(crate) fn send_keys_args(target: &str, keys: &[Key]) -> Result<Vec<Vec<Strin
                     text.clone(),
                 ]);
             }
-            Key::Enter | Key::Escape | Key::CtrlC | Key::CtrlU | Key::Up | Key::Down | Key::Tab => {
+            Key::Enter
+            | Key::Escape
+            | Key::CtrlC
+            | Key::CtrlU
+            | Key::CtrlG
+            | Key::Up
+            | Key::Down
+            | Key::Tab => {
                 if let Some(name) = key_name(key) {
                     named.push(name);
                 }
@@ -555,11 +569,11 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        armed_session_args, backstop_command, canonical_session_name, exact_session, invocation,
-        paste_buffer_args, quote_control, send_keys_args, validate_keys,
+        armed_session_args, backstop_command, canonical_session_name, capture_args, exact_session,
+        invocation, paste_buffer_args, quote_control, send_keys_args, validate_keys,
     };
     use crate::error::MuxError;
-    use crate::types::{PasteOpts, SessionSpec};
+    use crate::types::{CaptureRange, PasteOpts, SessionSpec};
     use crewmux_types::Key;
 
     #[test]
@@ -678,5 +692,31 @@ mod tests {
         assert_eq!(ok.len(), 2);
         assert_eq!(ok[0].get(1).map(String::as_str), Some("-l"));
         assert!(ok[1].iter().any(|arg| arg == "Enter"));
+    }
+
+    #[test]
+    fn joined_capture_rejoins_wrapped_rows() {
+        let args = capture_args("%1", CaptureRange::Joined);
+        assert!(args.iter().any(|arg| arg == "-J"), "{args:?}");
+        assert!(!args.iter().any(|arg| arg == "-S"), "{args:?}");
+        let visible = capture_args("%1", CaptureRange::Visible);
+        assert!(!visible.iter().any(|arg| arg == "-J"));
+        let history = capture_args("%1", CaptureRange::JoinedHistory(40));
+        assert!(history.iter().any(|arg| arg == "-J"), "{history:?}");
+        assert!(
+            history.windows(2).any(|pair| pair == ["-S", "-40"]),
+            "{history:?}"
+        );
+    }
+
+    #[test]
+    fn ctrl_u_is_sent_as_c_u() {
+        let args = send_keys_args("%1", &[Key::CtrlU]).expect("keys");
+        let batch = args.first().expect("batch");
+        assert!(batch.iter().any(|arg| arg == "C-u"), "{batch:?}");
+        assert!(
+            !batch.iter().any(|arg| arg == "Enter"),
+            "clear is C-u alone: {batch:?}"
+        );
     }
 }

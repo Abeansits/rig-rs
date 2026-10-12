@@ -1,4 +1,4 @@
-//! Slice 1 routes. Each one is an [`Endpoint`].
+//! Daemon routes the CLI calls. Each one is an [`Endpoint`].
 
 use serde::{Deserialize, Serialize};
 
@@ -105,4 +105,94 @@ pub struct DownRequest {
     /// Rig name.
     #[serde(default)]
     pub rig: Option<String>,
+}
+
+/// `GET` or `POST /api/queue`.
+#[derive(Debug)]
+pub struct QueueCollection;
+
+impl Endpoint for QueueCollection {
+    const METHOD: &'static str = "GET";
+    const PATH: &'static str = "/api/queue";
+}
+
+/// `POST /api/queue/show`.
+#[derive(Debug)]
+pub struct QueueShow;
+
+impl Endpoint for QueueShow {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/queue/show";
+}
+
+/// `POST /api/queue/claim`.
+#[derive(Debug)]
+pub struct QueueClaim;
+
+impl Endpoint for QueueClaim {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/queue/claim";
+}
+
+/// `POST /api/queue/handoff`.
+#[derive(Debug)]
+pub struct QueueHandoff;
+
+impl Endpoint for QueueHandoff {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/queue/handoff";
+}
+
+/// `POST /api/queue/fallback`.
+#[derive(Debug)]
+pub struct QueueFallback;
+
+impl Endpoint for QueueFallback {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/queue/fallback";
+}
+
+/// `POST /api/queue/unclaim`.
+#[derive(Debug)]
+pub struct UnclaimItem;
+
+impl Endpoint for UnclaimItem {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/queue/unclaim";
+}
+
+/// `POST /api/send`.
+#[derive(Debug)]
+pub struct SendMessage;
+
+impl Endpoint for SendMessage {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/send";
+}
+
+/// `POST /api/broadcast`.
+#[derive(Debug)]
+pub struct BroadcastSend;
+
+impl Endpoint for BroadcastSend {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/broadcast";
+}
+
+/// `POST /api/ask`.
+#[derive(Debug)]
+pub struct AskSeat;
+
+impl Endpoint for AskSeat {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/ask";
+}
+
+/// `GET /api/whoami`.
+#[derive(Debug)]
+pub struct Whoami;
+
+impl Endpoint for Whoami {
+    const METHOD: &'static str = "GET";
+    const PATH: &'static str = "/api/whoami";
 }
