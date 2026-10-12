@@ -574,6 +574,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
@@ -599,6 +600,12 @@ name = "crewmux-health"
 version = "0.0.0"
 dependencies = [
  "crewmux-core",
+ "crewmux-messaging",
+ "crewmux-types",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -685,6 +692,7 @@ name = "crewmux-store"
 version = "0.0.0"
 dependencies = [
  "crewmux-core",
+ "crewmux-health",
  "crewmux-messaging",
  "crewmux-types",
  "proptest",
@@ -695,6 +703,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "ulid",
 ]
 
 [[package]]

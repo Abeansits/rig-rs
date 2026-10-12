@@ -6,7 +6,7 @@ use crewmux_mux::PaneRef;
 use crewmux_types::{LaunchPosture, LoginKind, ReadinessCode, SeatId};
 use serde_json::Value;
 
-/// What a runtime can do. The stub reports every flag false.
+/// What a runtime can do. The stub leaves every flag false.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[expect(
     clippy::struct_excessive_bools,

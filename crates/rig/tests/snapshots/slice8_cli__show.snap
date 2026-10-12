@@ -8,7 +8,7 @@ expression: "serde_json::to_string_pretty(&shown).unwrap()"
   "in_flight": [],
   "rig": "<ulid>",
   "rig_name": "pair",
-  "schema_version": 4,
+  "schema_version": 7,
   "seats": [
     {
       "name": "one",

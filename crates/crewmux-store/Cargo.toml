@@ -17,6 +17,8 @@ rusqlite_migration.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+crewmux-health.workspace = true
+ulid.workspace = true
 
 [dev-dependencies]
 crewmux-core.workspace = true

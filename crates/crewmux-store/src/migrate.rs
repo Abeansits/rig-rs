@@ -113,6 +113,71 @@ CREATE TABLE seat_tokens (
 );
 ";
 
+const HEALTH: &str = "
+CREATE TABLE classifier_leases (
+    id TEXT PRIMARY KEY NOT NULL,
+    holder TEXT NOT NULL,
+    acquired_at_ms INTEGER NOT NULL,
+    expires_at_ms INTEGER NOT NULL,
+    last_heartbeat_ms INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('active', 'expired', 'reclaimed'))
+);
+CREATE UNIQUE INDEX idx_classifier_leases_active_singleton
+    ON classifier_leases(state) WHERE state = 'active';
+CREATE TABLE stream_items (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    body TEXT NOT NULL,
+    labels TEXT NOT NULL DEFAULT '{}',
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    source TEXT NOT NULL DEFAULT '',
+    emitted_at_ms INTEGER NOT NULL
+);
+CREATE TABLE classification_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stream_id TEXT NOT NULL,
+    lease_id TEXT NOT NULL,
+    holder TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE TABLE health_policy (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    document TEXT NOT NULL
+);
+CREATE TABLE health_checkpoints (
+    id TEXT PRIMARY KEY NOT NULL,
+    body TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE TABLE health_diagnosis (
+    id TEXT PRIMARY KEY NOT NULL,
+    body TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE TABLE context_usage (
+    seat TEXT PRIMARY KEY NOT NULL,
+    used_tokens INTEGER,
+    token_limit INTEGER CHECK (token_limit IS NULL OR token_limit > 0),
+    sampled_at_ms INTEGER NOT NULL
+);
+";
+
+const LINEAGE: &str = "
+CREATE TABLE pane_lineage (
+    seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    pid INTEGER NOT NULL,
+    command TEXT NOT NULL,
+    session_id TEXT,
+    runtime TEXT NOT NULL
+);
+";
+
+const LINEAGE_START: &str = "
+ALTER TABLE pane_lineage ADD COLUMN started_ticks INTEGER;
+";
+
 const DURABILITY: &str = "
 CREATE TABLE seat_restore (
     seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
@@ -157,15 +222,19 @@ CREATE TABLE rig_kernel (
 );
 ";
 
-/// Rig tables, queue tables, chat, then snapshot/restore tables.
+/// Rig tables, the queue, chat, then the snapshot tables main already ships,
+/// then health and the pane lineage recorded at launch.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
         M::up(QUEUE_SCHEMA),
         M::up(CHAT),
         M::up(DURABILITY),
+        M::up(HEALTH),
+        M::up(LINEAGE),
+        M::up(LINEAGE_START),
     ]),
-    len: 4,
+    len: 7,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

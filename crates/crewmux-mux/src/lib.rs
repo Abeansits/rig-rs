@@ -15,6 +15,7 @@ mod decode;
 mod error;
 mod exec;
 mod fake;
+mod fake_screen;
 mod fake_script;
 mod guard;
 mod hashutil;
@@ -27,6 +28,7 @@ mod tap;
 mod tmux_mux;
 mod types;
 
+pub use born::process_start_ticks;
 pub use crewmux_types::Key;
 pub use crewmux_types::tmux_version::{self, Version, parse_version};
 pub use error::MuxError;

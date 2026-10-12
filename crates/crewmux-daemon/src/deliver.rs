@@ -144,6 +144,9 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
     let seat = crate::query::find_address(app, target).await?;
     let address = address_of(app, &seat).await?;
     let pane = pane_of(&seat)?;
+    // Check-then-paste matches the TypeScript sender: the process can still
+    // change after this returns and before the paste.
+    crate::lineage::ensure(app, &seat, &pane).await?;
     let runtime = seat.runtime;
     let shown = Shown {
         display: PasteDisplay::for_runtime(runtime),
@@ -261,6 +264,9 @@ async fn paste_and_check(
     interact_reason: &str,
     route: PasteRoute,
 ) -> Result<Value, Error> {
+    // Launch startup, direct send, and restore re-send all paste through here.
+    let seat = crate::query::find_address(app, address).await?;
+    crate::lineage::ensure(app, &seat, pane).await?;
     let payload = wrap_pane(&outbound.from, address, &outbound.body);
     // History, joined. The composer region of this capture is the draft at
     // verdict time; rows above the prompt are not part of the comparison.

@@ -1,0 +1,19 @@
+total 0
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 0 -> /dev/pts/3
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 1 -> /dev/pts/3
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 10 -> anon_inode:[eventpoll]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 11 -> anon_inode:[eventfd]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 12 -> socket:[615918]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 13 -> socket:[614794]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 14 -> socket:[614796]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 15 -> socket:[615921]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 16 -> socket:[615923]
+lr-x------ 1 ubuntu ubuntu 64 Oct 12 19:00 17 -> anon_inode:inotify
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 2 -> /dev/pts/3
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 3 -> anon_inode:[eventpoll]
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 4 -> anon_inode:[eventfd]
+lr-x------ 1 ubuntu ubuntu 64 Oct 12 19:00 5 -> /dev/urandom
+lr-x------ 1 ubuntu ubuntu 64 Oct 12 19:00 6 -> /proc/249150/statm
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 7 -> /dev/pts/3
+lr-x------ 1 ubuntu ubuntu 64 Oct 12 19:00 8 -> /dev/pts/3
+lrwx------ 1 ubuntu ubuntu 64 Oct 12 19:00 9 -> /dev/pts/3

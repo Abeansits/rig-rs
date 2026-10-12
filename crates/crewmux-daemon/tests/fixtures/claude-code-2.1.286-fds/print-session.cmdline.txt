@@ -1,0 +1,1 @@
+/tmp/claude-pin/package/bin/claude.exe -p ping --session-id 33333333-3333-4333-8333-333333333333 
