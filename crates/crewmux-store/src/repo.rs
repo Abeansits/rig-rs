@@ -4,7 +4,9 @@ use crewmux_core::{
     DomainEvent, Error as CoreError, EventLog, Rig, RigRepo, Seat, SeatRepo, SeatState, Seq,
     SessionRepo, Timestamp,
 };
-use crewmux_types::{ReadinessCode, RigId, RigName, RuntimeKind, SeatId, SeatName, SessionId};
+use crewmux_types::{
+    LoginKind, ReadinessCode, RigId, RigName, RuntimeKind, SeatId, SeatName, SessionId,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 
 /// Borrowed connection the core ports are implemented for.
@@ -294,7 +296,7 @@ fn map_seat(row: &rusqlite::Row<'_>) -> rusqlite::Result<Seat> {
         runtime: parse_runtime(&runtime)?,
         cwd: cwd.map(std::path::PathBuf::from),
         model,
-        state: decode_state(&state, code.as_deref()).map_err(sql_err)?,
+        state: decode_state(&state, code.as_deref(), reason.as_deref()).map_err(sql_err)?,
         reason,
         tmux_session,
         pane_id,
@@ -325,6 +327,7 @@ fn parse_runtime(text: &str) -> rusqlite::Result<RuntimeKind> {
 fn encode_state(state: &SeatState) -> (&'static str, Option<String>) {
     match state {
         SeatState::Attention(code) => ("attention", Some(code.as_str().to_owned())),
+        SeatState::LoginRequired { kind, .. } => ("login_required", Some(kind.as_str().to_owned())),
         SeatState::Planned
         | SeatState::Launching
         | SeatState::Ready
@@ -333,7 +336,11 @@ fn encode_state(state: &SeatState) -> (&'static str, Option<String>) {
     }
 }
 
-fn decode_state(state: &str, code: Option<&str>) -> Result<SeatState, String> {
+fn decode_state(
+    state: &str,
+    code: Option<&str>,
+    reason: Option<&str>,
+) -> Result<SeatState, String> {
     match state {
         "planned" => Ok(SeatState::Planned),
         "launching" => Ok(SeatState::Launching),
@@ -343,6 +350,10 @@ fn decode_state(state: &str, code: Option<&str>) -> Result<SeatState, String> {
         "attention" => Ok(SeatState::Attention(ReadinessCode::parse(
             code.unwrap_or("unrecognised_screen"),
         ))),
+        "login_required" => Ok(SeatState::LoginRequired {
+            kind: LoginKind::parse(code.unwrap_or("menu")),
+            evidence: reason.unwrap_or("").to_owned(),
+        }),
         other => Err(format!("unknown seat state {other}")),
     }
 }

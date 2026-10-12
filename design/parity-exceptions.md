@@ -36,8 +36,8 @@ Repo PE-006 stays the setup/doctor exception below. It is not the blind-Enter ru
   - `HardFailure(CodexHomeMissing)` for the CODEX_HOME error, which is not retried.
   - **Pre-flight before launch:** `codex login status` (exit code / output) runs under the seat's CODEX_HOME. If it reports not logged in, the launch is short-circuited to `LoginRequired` without starting the TUI. The screen matcher is the second line of defence.
   - **Inconclusive budget:** an `Inconclusive` verdict that persists for `inconclusive_budget` (default 15 s, configurable) while the screen is *stable* (same hash across 3 captures) escalates to `AttentionRequired(UnrecognisedScreen)` and attaches the capture as evidence. It does not wait for the full launch timeout. This applies to all runtimes.
-- **Required tests:** `codex_gates.rs::login_screens_are_login_required` (cx-1, cx-2, cx-3 give `LoginRequired`; cx-0 gives `HardFailure`); `codex_launch.rs::not_logged_in_preflight_short_circuits` (stub `codex` binary on PATH printing not-logged-in; asserts no tmux session is created and the seat state is `attention_required/login_required`); `readiness.rs::stable_inconclusive_escalates_before_timeout` (FakeMux plus a fake Clock).
-- **Pending:** confirm the current `codex login status` output and exit codes against a real logged-in and logged-out codex. The fixtures come from codex-cli 0.162.1.
+- **Required tests:** `codex_login.rs::all_live_logged_out_screens_are_login_required` (live captures are `LoginRequired(kind)`; dead panes are `ReturnedToShell` or `HardFailure`); `codex_login.rs::preflight_exit1_short_circuits` (stub `codex` printing "Not logged in" on exit 1 creates no tmux session); `codex_login.rs::codex_home_missing_is_hard_failure`; `readiness.rs::stable_inconclusive_escalates_before_timeout` (FakeMux plus a fake Clock).
+- **Logged-out corpus:** exit 1 with "Not logged in" is `SeatState::LoginRequired { kind: PreflightNotLoggedIn }`. A missing Codex home is `HardFailure(CodexHomeMissing)`. A not-logged-in pre-flight is never `Ready`, even when a composer is on screen. "control socket is already in use" is `AttentionRequired(StaleCodexServer)`. The seat is not driven: no Enter, `q`, Ctrl-C, or digits.
 
 ## PE-003: slice 1 `rig` help and version are a subset of v0.6.9
 
@@ -114,6 +114,14 @@ The design index calls this PE-006. That id is already the setup/doctor exceptio
 - **Rust behaviour:** `crewmux_adapters::dialog::DialogDriver::drive` is the only dialog Enter. Each adapter supplies a recognised-dialog table (`CLAUDE_DIALOGS`, `CODEX_DIALOGS`). The driver captures, recognises, and plans, then moves one `NavKey` at a time and re-captures. `PaneIo::enter` takes a `VerifiedCursor`. Only the driver module can construct that proof, and only when the selected label is the planned label and is not on the deny list (`Update now`, `Always allow`, `No, exit`, `Run without daemon`, `Cancel`, `Allow`). A mismatch escalates and sends no Enter. Trust is answered only when `auto_trust` is true and the folder is the seat cwd, which is not `$HOME`. Bypass consent and a new MCP server escalate. The fullscreen renderer is answered "Not now". Codex update is answered "Skip", never "Update now".
 - **Lint:** `cargo xtask lint-blind-enter` scans `crates/crewmux-adapters/src`. `Key::Enter`, `"C-m"`, `"Enter"`, and carriage-return literals (`\r`, `\n`, `\x0d`, `\u{d}`, `.into()`, `concat!`, a const holding one of those) are allowed only in `dialog/driver.rs`, `claude/submit.rs`, and `codex/submit.rs`. `Key::CtrlC`, `Key::Escape`, and `Key::Literal` starting with `q`, `y`, `n`, or a digit are forbidden everywhere, including those files. `SubmitMode::Enter` is not a key.
 - **Required test:** `never_enter_on_default_no_exit`, `trust_not_answered_without_opt_in`, `codex_update_answers_skip_never_update`, `bypass_always_escalates`, `unknown_menu_escalates`, `cursor_verification_failure_escalates`, `no_quit_keys_on_login_menu`, and `fullscreen_answers_not_now`. `xtask/tests/lint_enter.rs` plants the key forms above.
+
+## PE-014: retired, superseded by PE-013
+
+## PE-015: Codex thread id comes from the rollout file
+
+- **TS behaviour:** `codex-thread-id.ts` and `launchHarness` scrape the live child process, a nested wrapper, the process home, or the versioned logs database, and pick a thread while title generation is the newest log activity.
+- **Rust behaviour:** the id is `session_meta.payload.id` in `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Candidates are the before-snapshot difference, the per-cwd launch lock, and first-message correlation. A tie is `ThreadIdError::Ambiguous`. The id is never guessed from a process or a log row.
+- **Required tests:** `back_to_back_launches_get_distinct_ids`, `outside_rollout_is_correlated_by_the_first_message`, `unresolvable_tie_is_ambiguous`, and `snapshot_excludes_rollouts_from_before_launch`.
 
 ## Status of real-login testing
 

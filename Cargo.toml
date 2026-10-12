@@ -81,7 +81,7 @@ predicates = "3.1.4"
 # signal-hook lets `rig chatroom watch` exit 0 on SIGINT without an unsafe handler.
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 signal-hook = "0.4.5"
-# Slice 2. Versions come from `cargo add` (crates.io, 2026-10-12), then hoisted.
+# Slice 2 and slice 3. Versions come from `cargo add` (crates.io, 2026-10-12), then hoisted.
 # uuid: Claude `--session-id` values are UUID v4.
 # sha2: ADR-0009 delivery fingerprints.
 # unicode-normalization: ADR-0009 common NFC step.

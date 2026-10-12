@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Real tmux integration tests. Off by default so `cargo test` uses FakeMux only.
+tmux-it = []
+
 [dependencies]
 crewmux-mux.workspace = true
 crewmux-provider.workspace = true
@@ -20,12 +24,9 @@ tokio.workspace = true
 uuid.workspace = true
 rustix = { workspace = true, features = ["termios"] }
 
-[features]
-# Real tmux integration tests. Off by default so `cargo test` uses FakeMux only.
-tmux-it = []
-
 [dev-dependencies]
 proptest.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 
 [lints]

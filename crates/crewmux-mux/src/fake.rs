@@ -40,6 +40,7 @@ struct FakeInner {
     in_mode: bool,
     scripted: Option<GuardInputs>,
     fail_paste: bool,
+    after_paste: Option<Capture>,
     next_id: u32,
     guard_reads: u32,
     hooks: ScriptHooks,
@@ -96,6 +97,7 @@ impl FakeMux {
                 in_mode: false,
                 scripted: None,
                 fail_paste: false,
+                after_paste: None,
                 next_id: 1,
                 guard_reads: 0,
                 hooks: ScriptHooks {
@@ -179,6 +181,11 @@ impl FakeMux {
     /// Argv recorded so far, including `tmux -L <socket> -f /dev/null`.
     pub async fn recorded(&self) -> Vec<Vec<String>> {
         self.inner.lock().await.calls.clone()
+    }
+
+    /// The next paste replaces the screen with `capture` instead of splicing.
+    pub async fn set_capture_after_paste(&self, capture: Capture) {
+        self.inner.lock().await.after_paste = Some(capture);
     }
 
     /// Next `paste` fails after `load-buffer` and must `delete-buffer`.
@@ -406,7 +413,13 @@ impl Multiplexer for FakeMux {
         {
             let mut guard = self.inner.lock().await;
             guard.fail_paste = false;
-            if guard.replay.is_empty() {
+            if let Some(next) = guard.after_paste.take() {
+                let session = canonical_session_name(&pane.session);
+                if guard.screens.contains_key(&session) {
+                    guard.screens.insert(session, next.clone());
+                }
+                guard.capture = next;
+            } else if guard.replay.is_empty() {
                 place_pasted_text(&mut guard, pane, text);
             }
         }
@@ -537,6 +550,12 @@ fn place_pasted_text(guard: &mut FakeInner, pane: &PaneRef, text: &str) {
 }
 
 fn land_or_append(screen: Capture, text: &str) -> Capture {
+    if screen.text.contains('›') {
+        let spliced = spliced_composer(&screen.text, text);
+        if spliced != screen.text {
+            return Capture::new(spliced, screen.cursor);
+        }
+    }
     let landed = land_paste(&screen, text);
     if landed.text != screen.text {
         return landed;
@@ -644,11 +663,53 @@ fn fill_prompt(line: &str, flat: &str) -> String {
     }
     let pre = line.get(..start).unwrap_or("");
     let post = line.get(end..).unwrap_or("");
-    if flat.is_empty() {
-        format!("{pre}│ > {post}")
+    let inside = line.get(start.saturating_add(1)..end).unwrap_or("");
+    let marker = if inside.contains('❯') {
+        "❯"
+    } else if inside.contains('›') {
+        "›"
     } else {
-        format!("{pre}│ > {flat} {post}")
+        ">"
+    };
+    if flat.is_empty() {
+        format!("{pre}│ {marker} {post}")
+    } else {
+        format!("{pre}│ {marker} {flat} {post}")
     }
+}
+
+/// Insert `pasted` after the last `›`, keeping a closing box bar on the last line.
+fn spliced_composer(capture: &str, pasted: &str) -> String {
+    let Some(cursor) = capture.rfind('›') else {
+        return capture.to_owned();
+    };
+    let Some(mark) = capture.get(cursor..).and_then(|rest| rest.chars().next()) else {
+        return capture.to_owned();
+    };
+    let prefix_end = cursor.saturating_add(mark.len_utf8());
+    let line_start = capture
+        .get(..cursor)
+        .and_then(|head| head.rfind('\n'))
+        .map_or(0, |index| index.saturating_add(1));
+    let line_end = capture
+        .get(cursor..)
+        .and_then(|rest| rest.find('\n'))
+        .map_or(capture.len(), |index| cursor.saturating_add(index));
+    let Some(prefix) = capture.get(line_start..prefix_end) else {
+        return capture.to_owned();
+    };
+    let trailing = capture
+        .get(prefix_end..line_end)
+        .is_some_and(|tail| tail.trim_end().ends_with(['│', '┃']));
+    let suffix = if trailing { " │" } else { "" };
+    let mut rebuilt = String::new();
+    rebuilt.push_str(capture.get(..line_start).unwrap_or(""));
+    rebuilt.push_str(prefix);
+    rebuilt.push(' ');
+    rebuilt.push_str(pasted);
+    rebuilt.push_str(suffix);
+    rebuilt.push_str(capture.get(line_end..).unwrap_or(""));
+    rebuilt
 }
 
 fn rewrite_marker(line: &str, flat: &str) -> String {

@@ -398,6 +398,7 @@ fn reason_text(readiness: &Readiness) -> String {
         Readiness::Gate(code) => code.as_str().to_owned(),
         Readiness::Inconclusive => ReadinessCode::UnrecognisedScreen.as_str().to_owned(),
         Readiness::HardFailure(text) => text.clone(),
+        Readiness::Login { evidence, .. } => evidence.clone(),
     }
 }
 

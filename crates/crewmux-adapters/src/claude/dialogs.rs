@@ -7,7 +7,7 @@ use crewmux_types::DialogId;
 use crate::dialog::{Answer, DialogParams, DialogSpec, Gate, TitleMatch};
 
 /// Trust, bypass, a new MCP server, and the fullscreen renderer.
-pub(super) static CLAUDE_DIALOGS: &[DialogSpec] = &[
+pub(crate) static CLAUDE_DIALOGS: &[DialogSpec] = &[
     DialogSpec {
         id: DialogId::ClaudeTrust,
         title: TitleMatch::Contains("Accessing workspace"),

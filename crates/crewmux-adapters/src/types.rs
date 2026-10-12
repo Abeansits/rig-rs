@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crewmux_mux::PaneRef;
-use crewmux_types::{LaunchPosture, ReadinessCode, SeatId};
+use crewmux_types::{LaunchPosture, LoginKind, ReadinessCode, SeatId};
 use serde_json::Value;
 
 /// What a runtime can do. The stub reports every flag false.
@@ -168,6 +168,13 @@ pub enum LaunchOutcome {
         /// Screen or path evidence.
         evidence: Option<String>,
     },
+    /// `codex login status` said not logged in. No tmux session was created.
+    LoginRequired {
+        /// Pre-flight or screen kind.
+        kind: LoginKind,
+        /// Evidence, including the remedy to run `codex login`.
+        evidence: String,
+    },
 }
 
 /// Screen classification shared by the stub, and later by Claude and Codex.
@@ -183,4 +190,11 @@ pub enum Readiness {
     Inconclusive,
     /// The runtime cannot become ready.
     HardFailure(String),
+    /// A Codex login screen or a not-logged-in pre-flight. Not attention and not ready.
+    Login {
+        /// Which login this is.
+        kind: LoginKind,
+        /// Evidence for `rig ps` and doctor.
+        evidence: String,
+    },
 }

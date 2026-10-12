@@ -11,6 +11,7 @@ mod staged;
 mod submit;
 
 pub use adapter::ClaudeAdapter;
+pub(crate) use dialogs::CLAUDE_DIALOGS;
 pub use screen::{
     ClassifiedDialog, ClaudeScreen, LoginKind, classify, classify_text, readiness, strict_mcp_drift,
 };
