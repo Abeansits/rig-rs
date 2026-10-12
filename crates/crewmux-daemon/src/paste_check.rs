@@ -88,9 +88,9 @@ pub(crate) fn exact_append(before: &str, after: &str, payload: &str) -> bool {
 /// Recapture until the composer text matches across two captures.
 ///
 /// An exact append is the in-memory multiplexer and is returned immediately.
-/// A clean stable screen is returned as soon as the two captures match. A
-/// contaminated screen is final only after 150ms, so a frame torn mid-paste
-/// is not the verdict. A missing payload keeps polling until the deadline.
+/// A clean or contaminated screen is final only after 150ms, so a frame torn
+/// mid-paste is not the verdict and Enter arrives after the stub's pause.
+/// A missing payload keeps polling until the deadline.
 pub(crate) async fn pasted_screen(
     app: &App,
     pane: &PaneRef,
@@ -120,12 +120,15 @@ pub(crate) async fn pasted_screen(
     }
 }
 
-/// Clean is final as soon as the composer stops changing. Contamination needs
-/// the 150ms floor. Missing means the paste may still be landing.
+/// The stub treats a newline as Enter only after a 40ms gap. Returning sooner
+/// delivers the key while the paste is still one burst, and the prompt is not
+/// redrawn. Missing means the paste may still be landing.
 fn settled(elapsed: Duration, before: &str, after: &str, payload: &str) -> bool {
+    if elapsed < Duration::from_millis(150) {
+        return false;
+    }
     match classify_paste(before, after, payload) {
-        PasteHit::Clean => true,
-        PasteHit::Contaminated => elapsed >= Duration::from_millis(150),
+        PasteHit::Clean | PasteHit::Contaminated => true,
         PasteHit::Missing => false,
     }
 }
