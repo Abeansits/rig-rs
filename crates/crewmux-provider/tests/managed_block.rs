@@ -142,7 +142,10 @@ fn sweep_ac10(bin: &std::path::Path) {
         let Some(rest) = name.strip_prefix("rigrs-ac10-") else {
             continue;
         };
-        if rest != me.to_string() {
+        let Ok(pid) = rest.parse::<u32>() else {
+            continue;
+        };
+        if pid != me {
             continue;
         }
         kill_ac10(bin, name);
@@ -150,8 +153,8 @@ fn sweep_ac10(bin: &std::path::Path) {
 }
 
 fn kill_ac10(bin: &std::path::Path, name: &str) {
-    let mine = format!("rigrs-ac10-{}", std::process::id());
-    if name != mine {
+    let own = format!("rigrs-ac10-{}", std::process::id());
+    if name != own {
         return;
     }
     drop(run(bin, &["-L", name, "-f", "/dev/null", "kill-server"]));

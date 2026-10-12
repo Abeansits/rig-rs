@@ -1,6 +1,6 @@
 //! Submit requires a ready composer and a byte-exact rollout user item.
 
-#[path = "common/mod.rs"]
+#[path = "codex_support.rs"]
 mod support;
 
 use std::fs;

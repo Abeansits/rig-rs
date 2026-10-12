@@ -1,5 +1,0 @@
-Update available! 0.162.0 → 0.162.1
-
-› 1. Update now (runs brew upgrade --cask codex)
-  2. Skip
-  3. Skip until next version

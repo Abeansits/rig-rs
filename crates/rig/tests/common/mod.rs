@@ -53,6 +53,8 @@ impl Env {
 
 impl Drop for Env {
     fn drop(&mut self) {
+        // `root` owns the temp directory until this Drop runs.
+        let _kept = self.root.path();
         let socket = crewmux_api::daemon_socket(&self.rig_home);
         let client = crewmux_api::Client::over_uds(socket).with_timeout(Duration::from_secs(2));
         drop(client.request("POST", "/shutdown", Some(b"{}")));

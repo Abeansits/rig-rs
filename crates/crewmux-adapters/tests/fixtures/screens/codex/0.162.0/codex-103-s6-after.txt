@@ -1,0 +1,40 @@
+  /permissions - choose what Codex is allowed to do
+  /model - choose what model and reasoning effort to use
+  /review - review any changes and find issues
+
+/mcp
+
+🔌  MCP Tools
+
+  • code-review: disabled (0 tools)
+  • codex_app: disabled (0 tools)
+  • codex_apps: connected (484 tools)
+  • codex_worktrees: connected (3 tools)
+  • cua_repl: connected (3 tools)
+  • node_repl: connected (4 tools)
+  • rig: connected (18 tools)
+
+  Use /mcp verbose for tools and resources.
+
+
+› S628f7ae Use the rig MCP server. First say how many tools it exposes. Then call its seat_send tool with seat="cc",
+  prio="high", opts=[{"key":"a","value":1}] and quote the tool output verbatim.
+
+
+• The rig MCP server exposes 18 tools. I’ll call seat_send with the parameters you provided.
+
+• Failed rig.seat_send
+  └ Error: MCP tool call requires approval, but approval policy is never
+    + Show details
+
+• The rig MCP server exposes 18 tools. The seat_send call returned:
+
+  MCP tool call requires approval, but approval policy is never
+
+  Worked for 12s • 1:32 PM
+
+
+› Ask Codex to do anything
+
+  GPT-6-Astra low · ~/openrig-spikes-scratch/proj/codex-f1
+  ? for shortcuts                                                                              ⚠ 1 warning · f2 to view

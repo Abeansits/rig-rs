@@ -1,6 +1,6 @@
 //! Login pre-flight and the logged-out screen corpus.
 
-#[path = "common/mod.rs"]
+#[path = "codex_support.rs"]
 mod support;
 
 use std::fs;
@@ -19,16 +19,31 @@ use support::{
 
 #[test]
 fn all_live_logged_out_screens_are_login_required() {
-    let dir = fixtures().join("screens/codex/0.162.1-logged-out");
+    let dir = fixtures().join("0.162.1-logged-out");
     let index: Vec<Value> =
         serde_json::from_str(&fs::read_to_string(dir.join("index.json")).expect("index"))
             .expect("rows");
     assert!(index.len() >= 54, "corpus {}", index.len());
+    let labels = fs::read_to_string(dir.join("labels.jsonl")).expect("sha list");
+    let mut sha_rows = std::collections::BTreeMap::new();
+    for line in labels.lines() {
+        let row: Value = serde_json::from_str(line).expect("sha row");
+        sha_rows.insert(
+            row["file"].as_str().expect("file").to_owned(),
+            row["sha256"].as_str().expect("sha").to_owned(),
+        );
+    }
     for row in index {
         let file = row["file"].as_str().expect("file").to_owned();
         let expect = row["expect"].as_str().expect("expect");
         let live = row["live"].as_bool().expect("live");
         let text = fs::read_to_string(dir.join(&file)).expect(&file);
+        let sha = crewmux_transcript::fingerprint_raw(&text);
+        assert_eq!(
+            sha_rows.get(&file).map(String::as_str),
+            Some(sha.as_str()),
+            "{file} sha"
+        );
         let screen = classify(&text);
         assert_not_waiting(&file, &screen);
         if live {
@@ -202,8 +217,13 @@ async fn hanging_login_status_times_out_without_a_session() {
 
 #[tokio::test]
 async fn stale_server_text_is_attention() {
-    let text = fs::read_to_string(fixtures().join("screens/codex/0.162.0/codex-stale.txt"))
-        .expect("stale");
+    let text = "\
+╭──╮
+│ ›  │
+╰──╯
+control socket is already in use
+"
+    .to_owned();
     assert!(matches!(classify(&text), CodexScreen::StaleServer));
     let home = home_with(support::LOGGED_IN);
     let mux = Arc::new(FakeMux::new());
@@ -221,7 +241,7 @@ async fn stale_server_text_is_attention() {
 
 #[test]
 fn captured_login_status_text_is_exit_1() {
-    let dir = fixtures().join("screens/codex/0.162.1-logged-out");
+    let dir = fixtures().join("0.162.1-logged-out");
     let text = fs::read_dir(&dir)
         .expect("dir")
         .filter_map(Result::ok)

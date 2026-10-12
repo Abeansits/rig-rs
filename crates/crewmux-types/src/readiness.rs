@@ -47,6 +47,10 @@ pub enum ReadinessCode {
     NotVerified,
     /// The background-server menu. It is never auto-answered.
     CodexBackgroundServer,
+    /// Claude's fullscreen-renderer popup.
+    FullscreenRenderer,
+    /// The composer already holds text. Fail closed: do not paste or send Enter.
+    PromptDraft,
     /// A caller-supplied code, such as an invalid working directory.
     Other(String),
 }
@@ -75,6 +79,8 @@ impl ReadinessCode {
             Self::CodexHomeMissing => "codex_home_missing",
             Self::NotVerified => "not_verified",
             Self::CodexBackgroundServer => "codex_background_server",
+            Self::FullscreenRenderer => "fullscreen_renderer",
+            Self::PromptDraft => "prompt_draft",
             Self::Other(text) => text.as_str(),
         }
     }
@@ -111,6 +117,8 @@ impl ReadinessCode {
             "codex_home_missing" => Self::CodexHomeMissing,
             "not_verified" => Self::NotVerified,
             "codex_background_server" => Self::CodexBackgroundServer,
+            "fullscreen_renderer" => Self::FullscreenRenderer,
+            "prompt_draft" => Self::PromptDraft,
             other => Self::Other(other.to_owned()),
         }
     }

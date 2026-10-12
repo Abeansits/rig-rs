@@ -1,12 +1,13 @@
 //! `rig up`: plan, launch stub seats, and wait until each one settles.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
-use crewmux_adapters::{LaunchOpts, LaunchOutcome, binding_for};
+use crewmux_adapters::{BudgetOverrides, LaunchBudget, LaunchOpts, LaunchOutcome, binding_for};
 use crewmux_core::{
     LaunchApply, LifecycleService, PlanIds, RigRepo, SeatRepo, SeatState, Timestamp,
 };
-use crewmux_spec::RigSpec;
+use crewmux_spec::{RigSpec, SeatSpec};
 use crewmux_store::{clear_rig, put_seat_token};
 use crewmux_types::{ReadinessCode, RigId, SEAT_ID_ENV, SEAT_TOKEN_ENV, SeatId, SessionId};
 use serde_json::{Value, json};
@@ -31,7 +32,7 @@ pub(crate) async fn bring_up(app: &App, yaml: &str) -> Result<Value, Error> {
         return Ok(body);
     }
     let mut up = insert_plan(app, &spec).await?;
-    launch_seats(app, &mut up).await?;
+    launch_seats(app, &mut up, &spec.seats).await?;
     crate::settle::settle(app, &mut up.seats, &mut up.events).await?;
     let rig_id = up.rig_id;
     let seats = read(&app.store, move |conn| conn.list_by_rig(&rig_id)).await?;
@@ -86,7 +87,15 @@ async fn relaunch_dead(
     let mut launching = Vec::new();
     for seat in seats.iter().filter(|seat| seat.state == SeatState::Dead) {
         clear_leftover_session(app, rig_name, seat.name.as_str()).await?;
-        let next = launch_one(app, seat, SessionId::new(), rig_name, &mut events).await?;
+        let next = launch_one(
+            app,
+            seat,
+            SessionId::new(),
+            rig_name,
+            &mut events,
+            SeatHints::default(),
+        )
+        .await?;
         launching.push(next);
     }
     crate::settle::settle(app, &mut launching, &mut events).await?;
@@ -156,15 +165,41 @@ async fn insert_plan(app: &App, spec: &RigSpec) -> Result<Up, Error> {
     })
 }
 
-async fn launch_seats(app: &App, up: &mut Up) -> Result<(), Error> {
+async fn launch_seats(app: &App, up: &mut Up, specs: &[SeatSpec]) -> Result<(), Error> {
     let rig_name = up.rig_name.clone();
     let mut launched = Vec::with_capacity(up.seats.len());
-    for (seat, session) in up.seats.iter().zip(up.sessions.iter().copied()) {
-        let next = launch_one(app, seat, session, &rig_name, &mut up.events).await?;
+    for ((seat, session), spec) in up
+        .seats
+        .iter()
+        .zip(up.sessions.iter().copied())
+        .zip(specs.iter())
+    {
+        let hints = SeatHints {
+            auto_trust: spec.auto_trust,
+            budget: budget_from(spec),
+        };
+        let next = launch_one(app, seat, session, &rig_name, &mut up.events, hints).await?;
         launched.push(next);
     }
     up.seats = launched;
     Ok(())
+}
+
+#[derive(Default)]
+struct SeatHints {
+    auto_trust: bool,
+    budget: Option<LaunchBudget>,
+}
+
+fn budget_from(spec: &SeatSpec) -> Option<LaunchBudget> {
+    let launch = spec.launch.as_ref()?;
+    Some(LaunchBudget::with_overrides(BudgetOverrides {
+        first_screen: launch.first_screen.map(Duration::from_millis),
+        ready_after_last_gate: launch.ready_after_last_gate.map(Duration::from_millis),
+        inconclusive_stable: launch.inconclusive_stable.map(Duration::from_millis),
+        overall: launch.overall.map(Duration::from_millis),
+        poll: launch.poll.map(Duration::from_millis),
+    }))
 }
 
 async fn launch_one(
@@ -173,6 +208,7 @@ async fn launch_one(
     session: SessionId,
     rig_name: &str,
     events: &mut Vec<Value>,
+    hints: SeatHints,
 ) -> Result<crewmux_core::Seat, Error> {
     let cwd = seat_cwd(seat).await?;
     let session_name = format!("{}__{rig_name}", seat.name.as_str());
@@ -202,6 +238,9 @@ async fn launch_one(
                 env,
                 resume: None,
                 fork: false,
+                auto_trust: hints.auto_trust,
+                budget: hints.budget,
+                claude_bin: None,
             },
         )
         .await?;

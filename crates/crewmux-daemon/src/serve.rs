@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crewmux_adapters::{AdapterRegistry, CodexAdapter, StubAdapter};
+use crewmux_adapters::{AdapterRegistry, ClaudeAdapter, CodexAdapter, StubAdapter};
 use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
 use crewmux_store::Store;
 use tokio_util::sync::CancellationToken;
@@ -35,8 +35,9 @@ pub fn run() -> Result<(), Error> {
 }
 
 async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error> {
+    let cancel = CancellationToken::new();
     let socket_name = socket_name_from_env();
-    let mux = build_mux(&socket_name).await?;
+    let mux = build_mux(&socket_name, cancel.clone()).await?;
     let stub_bin = stub_binary();
     let mut registry = AdapterRegistry::new();
     registry.register(Arc::new(StubAdapter::new(
@@ -44,14 +45,34 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
         stub_bin.clone(),
     )));
     registry.register(Arc::new(CodexAdapter::new(Arc::clone(&mux))));
-    let cancel = CancellationToken::new();
-    let app = App::new(
+    registry.register(Arc::new(ClaudeAdapter::new(
+        Arc::clone(&mux),
+        home.join("seats"),
+        user_home(&home),
+    )));
+    let loaded = {
+        let store = Arc::clone(&store);
+        tokio::task::spawn_blocking(move || store.read(crewmux_store::load_book))
+            .await
+            .map_err(crate::state::join_err)??
+    };
+    let app = App::assemble(
         store,
         mux,
+        Arc::new(registry),
         stub_script_from_env(),
         cancel.clone(),
-        Arc::new(registry),
+        home.clone(),
     );
+    *app.queue.lock().await = loaded;
+    let max_cursor = {
+        let reading = Arc::clone(&app.store);
+        tokio::task::spawn_blocking(move || reading.read(crewmux_store::max_receipt_cursor))
+            .await
+            .map_err(crate::state::join_err)??
+    };
+    app.seed_cursor(max_cursor);
+    app.launch_workers().await;
     reconcile(&app).await?;
     let sock = crewmux_api::daemon_socket(&home);
     let pid = home.join("run/daemon.pid");
@@ -76,11 +97,14 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     tracker.spawn(supervise(app.clone()));
     tracker.spawn(reap(app.clone()));
     tracker.spawn(on_terminate(cancel.clone()));
+    let tasks = app.tasks.clone();
     axum::serve(listener, router(app))
         .with_graceful_shutdown(async move { cancel.cancelled().await })
         .await?;
     tracker.close();
     tracker.wait().await;
+    tasks.close();
+    tasks.wait().await;
     let sock_cleanup = sock.clone();
     let pid_cleanup = pid.clone();
     tokio::task::spawn_blocking(move || remove_runtime_files(&sock_cleanup, &pid_cleanup))
@@ -89,7 +113,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     Ok(())
 }
 
-async fn build_mux(socket: &str) -> Result<Arc<dyn Multiplexer>, Error> {
+async fn build_mux(socket: &str, cancel: CancellationToken) -> Result<Arc<dyn Multiplexer>, Error> {
     if fake_mux_requested() {
         let fake = Arc::new(crewmux_mux::FakeMux::with_socket(socket));
         fake.enable_stub_scripts().await;
@@ -99,7 +123,7 @@ async fn build_mux(socket: &str) -> Result<Arc<dyn Multiplexer>, Error> {
         socket: socket.to_owned(),
         ..TmuxConfig::default()
     };
-    let mux = TmuxMux::connect(config).await?;
+    let mux = TmuxMux::connect_until(config, cancel).await?;
     Ok(Arc::new(mux))
 }
 
@@ -135,6 +159,10 @@ fn remove_if_present(path: &Path) -> Result<(), Error> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+fn user_home(rig_home: &Path) -> std::path::PathBuf {
+    std::env::var_os("HOME").map_or_else(|| rig_home.to_path_buf(), std::path::PathBuf::from)
 }
 
 async fn reap(app: App) {

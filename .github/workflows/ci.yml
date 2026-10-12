@@ -28,7 +28,7 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: test
         run: cargo test --workspace --locked
       - name: Release 20-seat render budget
@@ -157,6 +157,8 @@ jobs:
         run: cargo run -p xtask --locked -- ledger check
       - name: lint-mux (crewmux-mux human-client / shell ban)
         run: cargo run -p xtask --locked -- lint-mux
+      - name: lint-blind-enter (no blind Enter outside submit and the dialog driver)
+        run: cargo run -p xtask --locked -- lint-blind-enter
 
   coverage:
     name: coverage (informational)

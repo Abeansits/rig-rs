@@ -9,7 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use crewmux_api::{
     AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
-    Healthz, ListSeats, RigDown,
+    Healthz, ListSeats, RigDown, SubmitRequest, SubmitSeat,
 };
 use serde_json::{Value, json};
 
@@ -24,10 +24,35 @@ pub(crate) fn router(app: App) -> Router {
         .route(CreateRigUp::PATH, post(up))
         .route(ListSeats::PATH, get(ps))
         .route(CaptureSeat::PATH, post(capture_seat))
+        .route(SubmitSeat::PATH, post(submit_seat))
         .route(AttachInfo::PATH, post(attach))
         .route(RigDown::PATH, post(rig_down))
         .route(crate::events::PATH, get(crate::events::events))
         .route("/shutdown", post(shutdown))
+        .route(
+            "/api/queue",
+            get(crate::queue_http::list).post(crate::queue_http::create),
+        )
+        .route("/api/queue/show", post(crate::queue_http::show))
+        .route("/api/queue/claim", post(crate::queue_http::claim))
+        .route("/api/queue/unclaim", post(crate::queue_http::unclaim))
+        .route("/api/queue/handoff", post(crate::queue_http::handoff))
+        .route(
+            "/api/queue/handoff-and-complete",
+            post(crate::queue_http::handoff_complete),
+        )
+        .route("/api/queue/fallback", post(crate::queue_http::fallback))
+        .route("/api/queue/update", post(crate::queue_http::update_item))
+        .route("/api/queue/watch", get(crate::events::watch))
+        .route("/api/terminal", get(crate::events::terminal))
+        .route("/api/send", post(crate::send_http::send_route))
+        .route("/api/broadcast", post(crate::send_http::broadcast_route))
+        .route("/api/ask", post(crate::ask_http::ask))
+        .route("/api/whoami", get(crate::ask_http::whoami))
+        .route("/api/inbox", post(crate::inbox_http::drop_inbox))
+        .route("/api/inbox/absorb", post(crate::inbox_http::absorb))
+        .route("/api/inbox/deny", post(crate::inbox_http::deny))
+        .route("/api/outbox", post(crate::inbox_http::outbox))
         .merge(crate::chat::routes())
         .layer(map_response(connection_close))
         .with_state(app)
@@ -65,6 +90,18 @@ async fn capture_seat(State(app): State<App>, body: Bytes) -> Response {
         Err(err) => return fail(Error::Message(err.to_string())),
     };
     match capture(&app, &request.seat, request.lines).await {
+        Ok(value) => ok(value),
+        Err(err) => fail(err),
+    }
+}
+
+async fn submit_seat(State(app): State<App>, body: Bytes) -> Response {
+    app.touch();
+    let request: SubmitRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(err) => return fail(Error::Message(err.to_string())),
+    };
+    match crate::submit::submit_text(&app, &request.seat, &request.text).await {
         Ok(value) => ok(value),
         Err(err) => fail(err),
     }
@@ -112,7 +149,7 @@ async fn connection_close(mut response: Response) -> Response {
     response
 }
 
-fn ok(value: Value) -> Response {
+pub(crate) fn ok(value: Value) -> Response {
     (StatusCode::OK, Json(value)).into_response()
 }
 
@@ -120,7 +157,7 @@ fn ok(value: Value) -> Response {
     clippy::needless_pass_by_value,
     reason = "handlers pass Error by value and Display does not consume it"
 )]
-fn fail(err: Error) -> Response {
+pub(crate) fn fail(err: Error) -> Response {
     let message = err.to_string();
     let status = if message.contains("not found") {
         StatusCode::NOT_FOUND

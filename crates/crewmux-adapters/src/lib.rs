@@ -1,6 +1,8 @@
 //! Agent runtime adapters. Slice 1 ships the trait and the stub runtime.
 
 mod adapter;
+mod budget;
+pub mod claude;
 pub mod codex;
 pub mod dialog;
 mod error;
@@ -10,7 +12,10 @@ mod stub;
 mod types;
 
 pub use adapter::{AgentAdapter, SeatIo};
-pub use codex::CodexAdapter;
+pub use budget::{BudgetOverrides, LaunchBudget};
+pub use claude::ClaudeAdapter;
+pub use codex::{CODEX_DIALOGS, CodexAdapter};
+pub use dialog::{AnswerPolicy, DialogDriver, DriveOutcome, EscalateReason, MuxPane, SeatContext};
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};
 pub use registry::AdapterRegistry;
@@ -58,5 +63,10 @@ mod screen_tests {
         assert_eq!(script.print_gate.as_deref(), Some("login_required"));
         assert!(!script.screen().contains("stub> "));
         assert!(script.screen().contains("stub gate: login_required"));
+        assert!(!script.contaminate);
+        assert!(!script.buffer);
+        let dirty = parse_script("contaminate=1,buffer=1").expect("flag");
+        assert!(dirty.contaminate);
+        assert!(dirty.buffer);
     }
 }

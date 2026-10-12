@@ -10,12 +10,10 @@ use std::time::{Duration, SystemTime};
 
 const TIMESTAMP_SKEW: Duration = Duration::from_secs(2);
 
-use serde_json::Value;
-
+use crewmux_transcript::{
+    CodexRollout, Error as TranscriptError, TranscriptCursor, TranscriptSource, read_session_meta,
+};
 use crewmux_types::{RuntimeKind, ThreadId};
-
-use crate::codex::normalize::same_delivery;
-use crate::codex::timeutil::parse_rfc3339;
 
 /// Why a rollout id could not be chosen.
 #[derive(Debug, thiserror::Error)]
@@ -160,23 +158,32 @@ impl RolloutLocator {
 /// Returns [`ThreadIdError::Malformed`] when a complete line is not UTF-8 JSON.
 /// A partial last line, including one cut mid-character, is skipped.
 pub fn user_turn_texts(path: &Path) -> Result<Vec<String>, ThreadIdError> {
-    Ok(read_rollout(path)?.users)
+    user_turns_after(path, 0)
 }
 
 /// User texts whose jsonl line starts at or after `baseline`.
 ///
 /// # Errors
 ///
-/// Same as [`user_turn_texts`].
+/// Same as [`user_turn_texts`]. A file with no complete line is [`ThreadIdError::NotYet`].
 pub fn user_turns_after(path: &Path, baseline: u64) -> Result<Vec<String>, ThreadIdError> {
-    let file = read_rollout(path)?;
-    Ok(file
-        .users
-        .into_iter()
-        .zip(file.user_at)
-        .filter(|(_, at)| *at >= baseline)
-        .map(|(text, _)| text)
-        .collect())
+    let rollout = CodexRollout::open(path.to_path_buf());
+    match rollout.user_turns_after(TranscriptCursor(baseline)) {
+        Ok(turns) => {
+            if turns.is_empty() && incomplete_only(path) {
+                return Err(ThreadIdError::NotYet);
+            }
+            Ok(turns.into_iter().map(|turn| turn.text).collect())
+        }
+        Err(err) => Err(map_transcript(path, &err)),
+    }
+}
+
+fn incomplete_only(path: &Path) -> bool {
+    matches!(
+        read_session_meta(path),
+        Err(TranscriptError::Incomplete { .. })
+    )
 }
 
 struct RolloutFile {
@@ -185,7 +192,6 @@ struct RolloutFile {
     cwd: PathBuf,
     at: SystemTime,
     users: Vec<String>,
-    user_at: Vec<u64>,
 }
 
 fn pick(found: Vec<RolloutFile>, submitted: Option<&str>) -> Result<ThreadId, ThreadIdError> {
@@ -208,7 +214,9 @@ fn correlate(found: Vec<RolloutFile>, submitted: Option<&str>) -> Result<ThreadI
         let Some(first) = file.users.first() else {
             continue;
         };
-        if same_delivery(RuntimeKind::Codex, body, first) {
+        if crewmux_transcript::match_turn(RuntimeKind::Codex, body, first)
+            == crewmux_transcript::TurnMatch::Equal
+        {
             hits.push(file);
         }
     }
@@ -235,126 +243,24 @@ fn one_file(matches: Vec<RolloutFile>) -> Result<RolloutFile, ThreadIdError> {
 }
 
 fn read_rollout(path: &Path) -> Result<RolloutFile, ThreadIdError> {
-    let bytes = fs::read(path).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let kept = complete_prefix(&bytes).ok_or_else(|| {
-        if bytes.is_empty() {
-            ThreadIdError::Malformed(path.to_path_buf())
-        } else {
-            ThreadIdError::NotYet
-        }
-    })?;
-    let text =
-        std::str::from_utf8(kept).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
-    parse_rollout(path, text)
-}
-
-fn complete_prefix(bytes: &[u8]) -> Option<&[u8]> {
-    if bytes.is_empty() {
-        return None;
-    }
-    if bytes.last() == Some(&b'\n') {
-        return Some(bytes);
-    }
-    let index = bytes.iter().rposition(|byte| *byte == b'\n')?;
-    bytes.get(..=index)
-}
-
-fn parse_rollout(path: &Path, text: &str) -> Result<RolloutFile, ThreadIdError> {
-    let mut meta = None;
-    let mut users = Vec::new();
-    let mut user_at = Vec::new();
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let start = offset;
-        offset = offset.saturating_add(line.len());
-        let line = line.strip_suffix('\n').unwrap_or(line);
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value = serde_json::from_str::<Value>(line)
-            .map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
-        if meta.is_none() {
-            meta = session_meta(&value, path)?;
-        }
-        if let Some(turn) = user_text(&value) {
-            let at =
-                u64::try_from(start).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
-            users.push(turn);
-            user_at.push(at);
-        }
-    }
-    let Some((id, cwd, at)) = meta else {
-        return Err(ThreadIdError::Malformed(path.to_path_buf()));
-    };
+    let meta = read_session_meta(path).map_err(|err| map_transcript(path, &err))?;
+    let id = ThreadId::new(&meta.id).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
+    let users = user_turn_texts(path)?;
     Ok(RolloutFile {
         path: path.to_path_buf(),
         id,
-        cwd,
-        at,
+        cwd: meta.cwd,
+        at: meta.timestamp,
         users,
-        user_at,
     })
 }
 
-fn session_meta(
-    value: &Value,
-    path: &Path,
-) -> Result<Option<(ThreadId, PathBuf, SystemTime)>, ThreadIdError> {
-    if value.get("type").and_then(Value::as_str) != Some("session_meta") {
-        return Ok(None);
-    }
-    let payload = value
-        .get("payload")
-        .ok_or_else(|| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let id_text = payload
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    if !name.contains(id_text) {
-        return Err(ThreadIdError::Malformed(path.to_path_buf()));
-    }
-    let cwd = payload
-        .get("cwd")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let stamp = payload
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .or_else(|| value.get("timestamp").and_then(Value::as_str))
-        .ok_or_else(|| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let at = parse_rfc3339(stamp).ok_or_else(|| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let id = ThreadId::new(id_text).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
-    Ok(Some((id, PathBuf::from(cwd), at)))
-}
-
-fn user_text(value: &Value) -> Option<String> {
-    let payload = value.get("payload").unwrap_or(value);
-    let role = payload.get("role").and_then(Value::as_str);
-    let kind = payload.get("type").and_then(Value::as_str);
-    if role != Some("user") && kind != Some("user_message") {
-        return None;
-    }
-    if let Some(text) = payload.get("text").and_then(Value::as_str) {
-        return Some(text.to_owned());
-    }
-    if let Some(message) = payload.get("message").and_then(Value::as_str) {
-        return Some(message.to_owned());
-    }
-    let content = payload.get("content")?.as_array()?;
-    let mut combined = String::new();
-    for item in content {
-        if let Some(text) = item.get("text").and_then(Value::as_str) {
-            combined.push_str(text);
+fn map_transcript(path: &Path, err: &TranscriptError) -> ThreadIdError {
+    match err {
+        TranscriptError::Incomplete { .. } => ThreadIdError::NotYet,
+        TranscriptError::Io(_) | TranscriptError::Parse { .. } | TranscriptError::SessionId => {
+            ThreadIdError::Malformed(path.to_path_buf())
         }
-    }
-    if combined.is_empty() {
-        None
-    } else {
-        Some(combined)
     }
 }
 

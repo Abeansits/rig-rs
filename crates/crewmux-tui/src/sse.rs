@@ -356,6 +356,69 @@ fn byte_stream(
     ))
 }
 
+/// Read up to `limit` events with the TUI's Unix SSE client.
+///
+/// `last_event_id` is sent as `Last-Event-ID` and `last_event_id`, the same pair a reconnect sends.
+/// The wait returns the events gathered so far when `limit` is reached or `timeout` elapses.
+///
+/// # Errors
+///
+/// Returns [`crate::Error::Socket`] when the stream does not open.
+pub async fn read_events(
+    socket: &std::path::Path,
+    last_event_id: Option<u64>,
+    limit: usize,
+    timeout: Duration,
+) -> Result<Vec<StreamEvent>, crate::Error> {
+    let opened = tokio::time::timeout(timeout, open_unix(socket, last_event_id))
+        .await
+        .map_err(|_| crate::Error::socket("event stream timed out"))?;
+    let Opened::Chunks(stream) = opened else {
+        return Err(crate::Error::socket("event stream did not open"));
+    };
+    let (tx, mut rx) = mpsc::channel(32);
+    let cancel = CancellationToken::new();
+    let mut reading = Box::pin(read_stream(stream, &cancel, &tx));
+    let mut events = Vec::new();
+    let sleep = tokio::time::sleep(timeout);
+    tokio::pin!(sleep);
+    loop {
+        if events.len() >= limit {
+            cancel.cancel();
+            break;
+        }
+        tokio::select! {
+            () = &mut sleep => {
+                drain(&mut rx, &mut events, limit);
+                break;
+            }
+            done = &mut reading => {
+                drain(&mut rx, &mut events, limit);
+                let _ = done;
+                break;
+            }
+            value = rx.recv() => {
+                let Some(value) = value else { break };
+                push_event(&mut events, value);
+            }
+        }
+    }
+    Ok(events)
+}
+
+fn drain(rx: &mut mpsc::Receiver<serde_json::Value>, events: &mut Vec<StreamEvent>, limit: usize) {
+    while events.len() < limit {
+        let Ok(value) = rx.try_recv() else { break };
+        push_event(events, value);
+    }
+}
+
+fn push_event(events: &mut Vec<StreamEvent>, value: serde_json::Value) {
+    if let Ok(event) = serde_json::from_value::<StreamEvent>(value) {
+        events.push(event);
+    }
+}
+
 fn id_field(line: &str) -> Option<u64> {
     let value = line.strip_prefix("id:")?;
     value.trim().parse().ok()

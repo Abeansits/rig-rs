@@ -1,14 +1,16 @@
-//! Cursor-verified answers for known provider dialogs.
+//! One dialog driver. Each adapter supplies a recognised-dialog table.
 //!
-//! Enter is sent only after a re-capture shows the cursor on the chosen line.
-//! Login screens, the background-server menu, and unknown menus are not answered.
+//! Enter is sent only from [`driver::DialogDriver::drive`], and only with a
+//! [`driver::VerifiedCursor`] built in that module.
 
 mod driver;
-mod known;
-mod options;
+mod menu;
 mod policy;
+mod recognise;
+mod table;
 
-pub use driver::{DialogDriver, DriveResult, PaneIo};
-pub use known::{DialogChoice, KnownDialog};
-pub use options::{MenuOption, menu_options};
-pub use policy::{AnswerPolicy, TrustSeat, planned_choice, trust_folder};
+pub use driver::{DialogDriver, DriveOutcome, MuxPane, NavKey, PaneIo, VerifiedCursor};
+pub use menu::{MenuOption, is_option_menu, parse_menu};
+pub use policy::{AnswerPolicy, EscalateReason, Plan, SeatContext, plan, same_dir};
+pub use recognise::{Recognised, recognise};
+pub use table::{Answer, DialogParams, DialogSpec, DialogTable, Gate, TitleMatch};

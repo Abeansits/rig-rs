@@ -6,8 +6,9 @@ use crewmux_types::RuntimeKind;
 
 use crate::error::Error;
 use crate::types::{
-    Capabilities, InstalledResource, LaunchOpts, LaunchOutcome, NodeBinding, ProjectionPlan,
-    ProjectionResult, Readiness, ResolvedStartupFile, ResumeToken, StartupDeliveryResult,
+    Capabilities, DeliveryReceipt, InstalledResource, LaunchOpts, LaunchOutcome, NodeBinding,
+    ProjectionPlan, ProjectionResult, Readiness, ResolvedStartupFile, ResumeToken,
+    StartupDeliveryResult,
 };
 
 /// How text reaches an agent. Claude and Codex use the pane; the stub does not submit.
@@ -98,6 +99,17 @@ pub trait AgentAdapter: Send + Sync + 'static {
     /// The stub keeps the shared default. Codex uses its shorter overall budget.
     fn launch_timeout(&self) -> std::time::Duration {
         crate::readiness::default_launch_timeout()
+    }
+
+    /// Submit one turn through the seat pane.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when this runtime has no submit path, or the pane rejects it.
+    async fn submit(&self, _binding: &NodeBinding, _text: &str) -> Result<DeliveryReceipt, Error> {
+        Err(Error::Message(
+            "this runtime does not submit turns".to_owned(),
+        ))
     }
 
     /// Provider resume token, when one is on disk.

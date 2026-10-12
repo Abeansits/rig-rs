@@ -1,41 +1,36 @@
 //! Known Codex dialogs: answer Skip, escalate the rest.
-#![expect(
-    clippy::wildcard_enum_match_arm,
-    reason = "the test asserts one screen and fails on every other variant"
-)]
 
-#[path = "common/mod.rs"]
+#[path = "codex_support.rs"]
 mod support;
 
 use std::fs;
 use std::sync::Arc;
 
 use crewmux_adapters::codex::{CodexScreen, classify, is_rig_tool};
-use crewmux_adapters::dialog::{AnswerPolicy, DialogChoice, KnownDialog, planned_choice};
-use crewmux_adapters::{AgentAdapter, Readiness};
+use crewmux_adapters::dialog::{AnswerPolicy, Plan, SeatContext, plan, recognise};
+use crewmux_adapters::{AgentAdapter, CODEX_DIALOGS, Readiness};
 use crewmux_mux::{Capture, FakeMux};
-use crewmux_types::ReadinessCode;
+use crewmux_types::{DialogId, ReadinessCode};
 
-use support::{
-    LOGGED_IN, Motion, adapter, binding, calls_include, drive_menu, fixtures, home_with, opts,
-};
+use support::{LOGGED_IN, adapter, binding, calls_include, fixtures, home_with, opts};
 
 #[tokio::test]
 async fn background_server_menu_is_attention() {
-    let text = fs::read_to_string(fixtures().join("screens/codex/0.162.0/codex-000-firstrun.txt"))
-        .expect("menu");
+    let text = fs::read_to_string(fixtures().join("0.162.0/codex-000-firstrun.txt")).expect("menu");
     assert!(matches!(
         classify(&text),
-        CodexScreen::Dialog(KnownDialog::CodexBackgroundServer)
+        CodexScreen::Dialog(DialogId::CodexBackgroundServer)
     ));
-    assert!(
-        planned_choice(
-            &KnownDialog::CodexBackgroundServer,
-            AnswerPolicy::default(),
-            None
-        )
-        .is_none()
-    );
+    let found = recognise(CODEX_DIALOGS, &text).expect("background");
+    let cwd = home_cwd();
+    let seat = SeatContext {
+        cwd: &cwd,
+        home: &cwd,
+    };
+    assert!(matches!(
+        plan(&found, approve_policy(true), &seat),
+        Plan::Escalate(_)
+    ));
     let verdict = show(&text).await;
     assert_eq!(
         verdict.0,
@@ -47,16 +42,15 @@ async fn background_server_menu_is_attention() {
 #[tokio::test]
 async fn mcp_tool_approval_is_attention() {
     let text =
-        fs::read_to_string(fixtures().join("screens/codex/0.162.0/codex-106-s6-approval.txt"))
-            .expect("approval");
-    match classify(&text) {
-        CodexScreen::Dialog(KnownDialog::CodexMcpToolApproval { server, tool }) => {
-            assert_eq!(server, "rig");
-            assert_eq!(tool, "seat_send");
-            assert!(!is_rig_tool(&tool));
-        }
-        other => panic!("{other:?}"),
-    }
+        fs::read_to_string(fixtures().join("0.162.0/codex-106-s6-approval.txt")).expect("approval");
+    assert!(matches!(
+        classify(&text),
+        CodexScreen::Dialog(DialogId::CodexMcpToolApproval)
+    ));
+    let found = recognise(CODEX_DIALOGS, &text).expect("mcp");
+    assert_eq!(found.params.server.as_deref(), Some("rig"));
+    assert_eq!(found.params.tool.as_deref(), Some("seat_send"));
+    assert!(!is_rig_tool("seat_send"));
     let verdict = show(&text).await;
     assert_eq!(verdict.0, Readiness::Gate(ReadinessCode::McpToolApproval));
     assert!(!verdict.1);
@@ -64,73 +58,45 @@ async fn mcp_tool_approval_is_attention() {
 
 #[test]
 fn agent_send_is_allow_for_this_session() {
-    let dialog = KnownDialog::CodexMcpToolApproval {
-        server: "rig".to_owned(),
-        tool: "agent_send".to_owned(),
+    let screen = "\
+Allow the rig MCP server to run tool agent_send?
+
+› 1. Allow
+  2. Allow for this session
+  3. Always allow
+  4. Cancel
+";
+    let found = recognise(CODEX_DIALOGS, screen).expect("mcp");
+    let cwd = home_cwd();
+    let seat = SeatContext {
+        cwd: &cwd,
+        home: &cwd,
     };
     assert_eq!(
-        planned_choice(&dialog, AnswerPolicy::default(), None),
-        Some(DialogChoice::AllowForSession)
+        plan(&found, approve_policy(true), &seat),
+        Plan::Answer("Allow for this session")
     );
-    let spike = KnownDialog::CodexMcpToolApproval {
-        server: "rig".to_owned(),
-        tool: "seat_send".to_owned(),
-    };
-    assert!(planned_choice(&spike, AnswerPolicy::default(), None).is_none());
-    let off = AnswerPolicy {
+    let spike = screen.replace("agent_send", "seat_send");
+    let spike = recognise(CODEX_DIALOGS, &spike).expect("spike");
+    assert!(matches!(
+        plan(&spike, approve_policy(true), &seat),
+        Plan::Escalate(_)
+    ));
+    assert!(matches!(
+        plan(&found, approve_policy(false), &seat),
+        Plan::Escalate(_)
+    ));
+}
+
+fn approve_policy(auto_approve_rig_tools: bool) -> AnswerPolicy {
+    AnswerPolicy {
         auto_trust: false,
-        auto_approve_rig_tools: false,
-    };
-    assert!(planned_choice(&dialog, off, None).is_none());
-}
-
-#[tokio::test]
-async fn update_answers_skip_never_update() {
-    let report = drive_menu(
-        "Update available! 0.162.0 → 0.162.1",
-        &[
-            "Update now (runs brew upgrade --cask codex)",
-            "Skip",
-            "Skip until next version",
-        ],
-        DialogChoice::Skip,
-        Motion::Follow,
-    )
-    .await;
-    assert_eq!(
-        report.result,
-        crewmux_adapters::dialog::DriveResult::Answered
-    );
-    assert_eq!(report.keys.first().map(KeyName::of), Some("down"));
-    assert_eq!(report.keys.last().map(KeyName::of), Some("enter"));
-    let before = report.before_enter.expect("enter");
-    let selected = crewmux_adapters::dialog::menu_options(&before)
-        .into_iter()
-        .find(|opt| opt.selected)
-        .expect("cursor");
-    assert_eq!(selected.label, "Skip");
-    assert!(
-        report
-            .keys
-            .iter()
-            .all(|key| matches!(KeyName::of(key), "up" | "down" | "enter"))
-    );
-}
-
-struct KeyName;
-
-impl KeyName {
-    fn of(key: &crewmux_mux::Key) -> &'static str {
-        match key {
-            crewmux_mux::Key::Up => "up",
-            crewmux_mux::Key::Down => "down",
-            crewmux_mux::Key::Enter => "enter",
-            crewmux_mux::Key::Escape => "escape",
-            crewmux_mux::Key::CtrlC => "ctrl-c",
-            crewmux_mux::Key::Tab => "tab",
-            crewmux_mux::Key::Literal(_) => "literal",
-        }
+        auto_approve_rig_tools,
     }
+}
+
+fn home_cwd() -> std::path::PathBuf {
+    std::env::temp_dir()
 }
 
 #[expect(

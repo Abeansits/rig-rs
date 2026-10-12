@@ -9,13 +9,15 @@
     reason = "a capture must be the labelled screen and nothing else"
 )]
 
-#[path = "common/mod.rs"]
+#[path = "codex_support.rs"]
 mod support;
 
 use std::fs;
 
+use crewmux_adapters::CODEX_DIALOGS;
 use crewmux_adapters::codex::{CodexScreen, classify};
-use crewmux_adapters::dialog::KnownDialog;
+use crewmux_adapters::dialog::recognise;
+use crewmux_types::DialogId;
 use proptest::prelude::*;
 use serde_json::Value;
 
@@ -23,38 +25,59 @@ use support::fixtures;
 
 #[test]
 fn every_labelled_capture_matches() {
-    let dir = fixtures().join("screens/codex/0.162.0");
-    let labels: Vec<Value> =
-        serde_json::from_str(&fs::read_to_string(dir.join("labels.json")).expect("labels"))
-            .expect("json");
-    let mut labelled = Vec::new();
-    for label in &labels {
-        let file = label["file"].as_str().expect("file");
-        labelled.push(file.to_owned());
-        let text = fs::read_to_string(dir.join(file)).expect(file);
-        assert_screen(label["screen"].as_str().expect("screen"), &text, label);
-    }
+    let dir = fixtures().join("0.162.0");
+    let labels = load_labels(&dir);
+    let mut files = Vec::new();
     for entry in fs::read_dir(&dir).expect("dir") {
-        let name = entry.expect("entry").file_name();
-        let name = name.to_string_lossy().to_string();
-        if std::path::Path::new(&name)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
-        {
-            assert!(
-                labelled.iter().any(|file| file == &name),
-                "unlabelled {name}"
-            );
+        let path = entry.expect("entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
+            files.push(path);
         }
+    }
+    assert_eq!(files.len(), labels.len(), "every capture needs a sha row");
+    for path in files {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("name");
+        let label = labels
+            .get(name)
+            .unwrap_or_else(|| panic!("unlabelled {name}"));
+        let text = fs::read_to_string(&path).expect(name);
+        let sha = crewmux_transcript::fingerprint_raw(&text);
+        assert_eq!(
+            label.get("sha256").and_then(Value::as_str),
+            Some(sha.as_str()),
+            "{name} sha"
+        );
+        assert_screen(label["screen"].as_str().expect("screen"), &text, label);
     }
 }
 
 #[test]
 fn midturn_is_busy_not_ready() {
-    let text = fs::read_to_string(fixtures().join("screens/codex/0.162.0/codex-040-midturn.txt"))
-        .expect("midturn");
+    let text =
+        fs::read_to_string(fixtures().join("0.162.0/codex-040-midturn.txt")).expect("midturn");
     assert!(matches!(classify(&text), CodexScreen::Busy));
+    assert!(text.contains("esc to interrupt"));
+    assert!(text.contains('◦'));
     assert!(text.contains("? for shortcuts"));
+}
+
+#[test]
+fn finished_turn_reads_idle() {
+    let text = fs::read_to_string(fixtures().join("0.162.0/codex-069-midturn.txt")).expect("done");
+    assert!(text.contains("Worked for"));
+    assert!(matches!(classify(&text), CodexScreen::Ready(_)));
+}
+
+#[test]
+fn continuation_under_an_empty_prompt_is_a_draft() {
+    let text = "› Ask Codex to do anything\nstill typing\n  GPT-6\n  ? for shortcuts\n";
+    match classify(text) {
+        CodexScreen::Draft { visible } => assert_eq!(visible, "still typing"),
+        other => panic!("draft was {other:?}"),
+    }
 }
 
 #[test]
@@ -203,13 +226,13 @@ fn dialog_title_after_the_composer_stays_a_dialog() {
 ╰──╯
   ? for shortcuts
 Update available! 0.162.0 → 0.162.1
-› 1. Update now (runs brew upgrade --cask codex)
+› 1. Update now (runs `brew upgrade --cask codex`)
   2. Skip
   3. Skip until next version
 ";
     assert!(matches!(
         classify(text),
-        CodexScreen::Dialog(KnownDialog::CodexUpdate { .. })
+        CodexScreen::Dialog(DialogId::CodexUpdate)
     ));
 }
 
@@ -221,10 +244,10 @@ fn numbered_menu_is_not_ready() {
 
 #[test]
 fn trust_prompt_is_not_ready() {
-    let text = "Accessing workspace\n/tmp/work\n› 1. Yes, I trust this folder\n  2. No, exit\n";
+    let text = "Accessing workspace\n/tmp/work\n› 1. No, exit\n  2. Yes, I trust this folder\n";
     assert!(matches!(
         classify(text),
-        CodexScreen::Dialog(KnownDialog::ClaudeTrust { .. })
+        CodexScreen::Dialog(DialogId::ClaudeTrust)
     ));
 }
 
@@ -244,29 +267,59 @@ proptest::proptest! {
     }
 }
 
+fn load_labels(dir: &std::path::Path) -> std::collections::BTreeMap<String, Value> {
+    let mut labels = std::collections::BTreeMap::new();
+    let text = fs::read_to_string(dir.join("labels.jsonl")).expect("labels");
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_str(line).expect("row");
+        let file = value
+            .get("file")
+            .and_then(Value::as_str)
+            .expect("file")
+            .to_owned();
+        labels.insert(file, value);
+    }
+    labels
+}
+
+fn label_str<'a>(label: &'a Value, key: &str) -> Option<&'a str> {
+    label.get(key).and_then(Value::as_str)
+}
+
 fn assert_screen(kind: &str, text: &str, label: &Value) {
     match kind {
         "ready" => assert!(matches!(classify(text), CodexScreen::Ready(_))),
         "busy" => assert!(matches!(classify(text), CodexScreen::Busy)),
+        "inconclusive" => assert!(matches!(classify(text), CodexScreen::Inconclusive)),
+        "draft" => assert!(matches!(classify(text), CodexScreen::Draft { .. })),
         "stale" => assert!(matches!(classify(text), CodexScreen::StaleServer)),
-        "background" => assert!(matches!(
-            classify(text),
-            CodexScreen::Dialog(KnownDialog::CodexBackgroundServer)
-        )),
-        "update" => match classify(text) {
-            CodexScreen::Dialog(KnownDialog::CodexUpdate { from, to }) => {
-                assert_eq!(from, label["from"].as_str().expect("from"));
-                assert_eq!(to, label["to"].as_str().expect("to"));
-            }
-            other => panic!("update was {other:?}"),
-        },
-        "mcp" => match classify(text) {
-            CodexScreen::Dialog(KnownDialog::CodexMcpToolApproval { server, tool }) => {
-                assert_eq!(server, label["server"].as_str().expect("server"));
-                assert_eq!(tool, label["tool"].as_str().expect("tool"));
-            }
-            other => panic!("mcp was {other:?}"),
-        },
+        "background" => assert_dialog(text, DialogId::CodexBackgroundServer),
+        "update" => assert_update(text, label),
+        "mcp" => assert_mcp(text, label),
         other => panic!("unknown label {other}"),
     }
+}
+
+fn assert_dialog(text: &str, id: DialogId) {
+    match classify(text) {
+        CodexScreen::Dialog(found) if found == id => {}
+        other => panic!("{id:?} was {other:?}"),
+    }
+}
+
+fn assert_update(text: &str, label: &Value) {
+    assert_dialog(text, DialogId::CodexUpdate);
+    let found = recognise(CODEX_DIALOGS, text).expect("update");
+    assert_eq!(found.params.from.as_deref(), label_str(label, "from"));
+    assert_eq!(found.params.to.as_deref(), label_str(label, "to"));
+}
+
+fn assert_mcp(text: &str, label: &Value) {
+    assert_dialog(text, DialogId::CodexMcpToolApproval);
+    let found = recognise(CODEX_DIALOGS, text).expect("mcp");
+    assert_eq!(found.params.server.as_deref(), label_str(label, "server"));
+    assert_eq!(found.params.tool.as_deref(), label_str(label, "tool"));
 }

@@ -1,0 +1,40 @@
+│ See full release notes:                         │
+│ https://github.com/openai/codex/releases/latest │
+╰─────────────────────────────────────────────────╯
+
+
+  >_ OpenAI Codex (v0.162.0)
+     ~/openrig-spikes-scratch/proj/codex-f1
+
+  To get started, describe a task or try one of these commands:
+
+  /init - create an AGENTS.md file with instructions for Codex
+  /status - show current session configuration
+  /permissions - choose what Codex is allowed to do
+  /model - choose what model and reasoning effort to use
+  /review - review any changes and find issues
+
+
+› S6b8934d8 Call the rig MCP server's seat_send tool with seat="cc", prio="high", opts=[{"key":"a","value":1}] and
+  quote its output verbatim.
+
+
+• I’ll locate the rig tool and call it with those arguments.
+
+• Calling rig.seat_send
+    + Show details
+
+
+  Field 1/1
+  Allow the rig MCP server to run tool "seat_send"?
+
+  opts: [{"key": "a", "value": 1}]
+  prio: high
+  seat: cc
+
+  › 1. Allow                   Run the tool and continue
+    2. Allow for this session  Run the tool and remember this choice for this session
+    3. Always allow            Run the tool and remember this choice for future tool calls
+    4. Cancel                  Cancel this tool call
+  enter to submit | esc to cancel
+

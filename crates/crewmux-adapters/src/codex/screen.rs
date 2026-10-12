@@ -1,15 +1,15 @@
 //! Positive-match Codex screen classifier.
 //!
-//! Ready requires an empty composer and `? for shortcuts`, with no interrupt
-//! hint and no option menu. Any non-empty text inside the composer box is a
-//! draft, not only the last cursor line. Login, a stale server, and a missing
-//! Codex home match the current screen (from the last box), not earlier
-//! scrollback. Dialog titles match only as their own line.
+//! Ready requires an empty composer and `? for shortcuts`. Any non-empty
+//! continuation inside the composer is a draft. A finished `Worked for` line
+//! is idle. A live `esc to interrupt` or `◦ Working` row is busy. Login, a
+//! stale server, and a missing Codex home match the current screen.
 
-use crewmux_types::LoginKind;
+use crewmux_types::{DialogId, LoginKind};
 
-use crate::codex::timeutil::semvers;
-use crate::dialog::{KnownDialog, menu_options, trust_folder};
+use crate::claude::CLAUDE_DIALOGS;
+use crate::codex::dialogs::CODEX_DIALOGS;
+use crate::dialog::{is_option_menu, parse_menu, recognise};
 
 /// Composer evidence on a ready screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,10 +28,10 @@ pub enum CodexScreen {
         /// Non-empty text inside the box. A prefix of the pasted body is enough.
         visible: String,
     },
-    /// A turn is in progress (`esc to interrupt`).
+    /// A turn is in progress.
     Busy,
-    /// A known dialog, including ones that must not be answered.
-    Dialog(KnownDialog),
+    /// A recognised dialog.
+    Dialog(DialogId),
     /// A login flow. No key is sent.
     Login(LoginKind),
     /// The app-server control socket is already in use.
@@ -52,7 +52,7 @@ pub enum CodexScreen {
     Inconclusive,
 }
 
-/// Classify `text`. Login and hard failures on the current screen win over a composer.
+/// Classify `text`.
 #[must_use]
 pub fn classify(text: &str) -> CodexScreen {
     let live = live_screen(text);
@@ -74,10 +74,10 @@ pub fn classify(text: &str) -> CodexScreen {
     if let Some(screen) = composer_screen(text) {
         return screen;
     }
-    if let Some(dialog) = known_dialog(text) {
-        return CodexScreen::Dialog(dialog);
+    if let Some(screen) = recognised(text) {
+        return screen;
     }
-    if !menu_options(text).is_empty() {
+    if is_option_menu(&parse_menu(text)) {
         return CodexScreen::UnknownMenu {
             evidence: clip(text),
         };
@@ -101,22 +101,62 @@ struct BoxRegion {
 }
 
 fn composer_screen(text: &str) -> Option<CodexScreen> {
-    let region = last_box(text)?;
-    let after = text.get(region.end..).unwrap_or("");
-    if let Some(dialog) = known_dialog(after) {
-        return Some(CodexScreen::Dialog(dialog));
+    if let Some(region) = cursor_box(text) {
+        let after = text.get(region.end..).unwrap_or("");
+        if let Some(dialog) = recognised(after) {
+            return Some(dialog);
+        }
+        if is_option_menu(&parse_menu(after)) {
+            return Some(CodexScreen::UnknownMenu {
+                evidence: clip(after),
+            });
+        }
+        return draft_or_ready(region.draft, text, region.end);
     }
-    if !menu_options(after).is_empty() {
-        return Some(CodexScreen::UnknownMenu {
-            evidence: clip(after),
-        });
+    let search = after_last_box(text);
+    if let Some(prompt) = composer_prompt(search) {
+        if let Some(dialog) = recognised(search) {
+            return Some(dialog);
+        }
+        return Some(prompt_screen(search, prompt));
     }
-    match region.draft {
+    plain_box_draft(text)
+}
+
+fn draft_or_ready(draft: Result<String, ()>, text: &str, end: usize) -> Option<CodexScreen> {
+    match draft {
         Err(()) => None,
-        Ok(visible) if visible.is_empty() => footer_after(text, region.end)
-            .map(|footer| CodexScreen::Ready(ComposerState { footer })),
+        Ok(visible) if prompt_is_empty(&visible) => {
+            footer_after(text, end).map(|footer| CodexScreen::Ready(ComposerState { footer }))
+        }
         Ok(visible) => Some(CodexScreen::Draft { visible }),
     }
+}
+
+fn prompt_screen(search: &str, prompt: String) -> CodexScreen {
+    let footer = footer_after(search, 0).unwrap_or_default();
+    if prompt_is_empty(&prompt) && !has_continuation(search) {
+        CodexScreen::Ready(ComposerState { footer })
+    } else {
+        CodexScreen::Draft {
+            visible: if prompt_is_empty(&prompt) {
+                continuation_text(search)
+            } else {
+                prompt
+            },
+        }
+    }
+}
+
+fn cursor_box(text: &str) -> Option<BoxRegion> {
+    let region = last_box(text)?;
+    let inside = text.get(..region.end).unwrap_or("");
+    let start = inside.rfind('╭')?;
+    let body = inside.get(start..).unwrap_or("");
+    if !body.contains('›') && !body.contains('❯') {
+        return None;
+    }
+    Some(region)
 }
 
 fn last_box(text: &str) -> Option<BoxRegion> {
@@ -142,10 +182,32 @@ fn last_box(text: &str) -> Option<BoxRegion> {
     })
 }
 
-fn live_screen(text: &str) -> &str {
-    text.rfind('╭')
-        .and_then(|start| text.get(start..))
-        .unwrap_or(text)
+fn after_last_box(text: &str) -> &str {
+    let Some(start) = text.rfind('╭') else {
+        return text;
+    };
+    let tail = text.get(start..).unwrap_or(text);
+    let Some(rel) = tail.find('╰') else {
+        return text;
+    };
+    let close = start.saturating_add(rel);
+    text.get(close..)
+        .and_then(|rest| rest.find('\n').map(|index| index.saturating_add(1)))
+        .and_then(|index| text.get(close.saturating_add(index)..))
+        .unwrap_or("")
+}
+
+fn plain_box_draft(text: &str) -> Option<CodexScreen> {
+    let region = last_box(text)?;
+    match region.draft {
+        Ok(visible) if !visible.is_empty() => Some(CodexScreen::Draft { visible }),
+        Ok(_) | Err(()) => None,
+    }
+}
+
+fn recognised(text: &str) -> Option<CodexScreen> {
+    let found = recognise(CODEX_DIALOGS, text).or_else(|| recognise(CLAUDE_DIALOGS, text))?;
+    Some(CodexScreen::Dialog(found.spec.id))
 }
 
 fn composer_draft(inside: &str) -> Result<String, ()> {
@@ -154,7 +216,7 @@ fn composer_draft(inside: &str) -> Result<String, ()> {
     for line in inside.lines() {
         if let Some(draft) = cursor_draft(line) {
             saw_cursor = true;
-            if !draft.is_empty() {
+            if !prompt_is_empty(&draft) {
                 parts.push(draft);
             }
             continue;
@@ -188,8 +250,64 @@ fn plain_box_line(line: &str) -> Option<String> {
 fn cursor_draft(line: &str) -> Option<String> {
     let rest = line.trim().trim_start_matches(['│', '┃', ' ']);
     let after = rest.strip_prefix('›').or_else(|| rest.strip_prefix('❯'))?;
+    if after
+        .trim_start()
+        .starts_with(|ch: char| ch.is_ascii_digit())
+        && after.contains('.')
+    {
+        return None;
+    }
     let after = after.strip_prefix(' ').unwrap_or(after);
     Some(after.trim_end_matches(['│', '┃', ' ']).to_owned())
+}
+
+fn composer_prompt(text: &str) -> Option<String> {
+    let mut found = None;
+    for line in text.lines() {
+        if let Some(draft) = cursor_draft(line) {
+            found = Some(draft);
+        }
+    }
+    found
+}
+
+fn prompt_is_empty(visible: &str) -> bool {
+    let trimmed = visible.trim();
+    trimmed.is_empty() || trimmed == "Ask Codex to do anything"
+}
+
+fn has_continuation(text: &str) -> bool {
+    !continuation_text(text).is_empty()
+}
+
+fn continuation_text(text: &str) -> String {
+    let mut after_prompt = false;
+    let mut parts = Vec::new();
+    for line in text.lines() {
+        if cursor_draft(line).is_some() {
+            after_prompt = true;
+            parts.clear();
+            continue;
+        }
+        if !after_prompt || is_status_line(line) {
+            continue;
+        }
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_owned());
+        }
+    }
+    parts.join("\n")
+}
+
+fn is_status_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.contains("? for shortcuts")
+        || trimmed.starts_with("GPT-")
+        || trimmed.starts_with("OpenAI Codex")
+        || trimmed.starts_with(">_")
+        || trimmed.starts_with('•')
+        || trimmed.starts_with('◦')
 }
 
 fn footer_after(text: &str, end: usize) -> Option<String> {
@@ -197,6 +315,12 @@ fn footer_after(text: &str, end: usize) -> Option<String> {
         .lines()
         .find(|line| line.contains("? for shortcuts"))
         .map(|line| line.trim().to_owned())
+}
+
+fn live_screen(text: &str) -> &str {
+    text.rfind('╭')
+        .and_then(|start| text.get(start..))
+        .unwrap_or(text)
 }
 
 fn hard_failure(text: &str) -> Option<CodexScreen> {
@@ -246,109 +370,14 @@ fn login_kind(text: &str) -> Option<LoginKind> {
     None
 }
 
-fn known_dialog(text: &str) -> Option<KnownDialog> {
-    update_dialog(text)
-        .or_else(|| background_dialog(text))
-        .or_else(|| mcp_dialog(text))
-        .or_else(|| trust_dialog(text))
-}
-
-fn has_title(text: &str, title: &str) -> bool {
-    text.lines().any(|line| {
-        let rest = line
-            .trim()
-            .trim_start_matches(|ch: char| !ch.is_ascii_alphanumeric());
-        rest.starts_with(title)
-    })
-}
-
-fn update_dialog(text: &str) -> Option<KnownDialog> {
-    if !has_title(text, "Update available") {
-        return None;
-    }
-    let options = menu_options(text);
-    let has = |label: &str| options.iter().any(|opt| opt.label == label);
-    let has_update = options.iter().any(|opt| opt.label.contains("Update now"));
-    if !has_update || !has("Skip") || !has("Skip until next version") {
-        return None;
-    }
-    let versions = semvers(text);
-    Some(KnownDialog::CodexUpdate {
-        from: versions.first()?.clone(),
-        to: versions.get(1)?.clone(),
-    })
-}
-
-fn background_dialog(text: &str) -> Option<KnownDialog> {
-    if !has_title(text, "Cannot use the background server") {
-        return None;
-    }
-    let options = menu_options(text);
-    let run = options
-        .iter()
-        .any(|opt| opt.label.contains("Run without daemon"));
-    let cancel = options.iter().any(|opt| opt.label == "Cancel");
-    if run && cancel {
-        Some(KnownDialog::CodexBackgroundServer)
-    } else {
-        None
-    }
-}
-
-fn mcp_dialog(text: &str) -> Option<KnownDialog> {
-    let (server, tool) = mcp_names(text)?;
-    let options = menu_options(text);
-    let required = ["Allow", "Allow for this session", "Always allow", "Cancel"];
-    if required
-        .iter()
-        .all(|label| options.iter().any(|opt| opt.label == *label))
-    {
-        Some(KnownDialog::CodexMcpToolApproval { server, tool })
-    } else {
-        None
-    }
-}
-
-fn trust_dialog(text: &str) -> Option<KnownDialog> {
-    if !has_title(text, "Accessing workspace") {
-        return None;
-    }
-    let options = menu_options(text);
-    let yes = options
-        .iter()
-        .any(|opt| opt.label.contains("Yes, I trust this folder"));
-    let no = options.iter().any(|opt| opt.label.contains("No, exit"));
-    if yes && no {
-        Some(KnownDialog::ClaudeTrust {
-            folder: trust_folder(text),
-        })
-    } else {
-        None
-    }
-}
-
-fn mcp_names(text: &str) -> Option<(String, String)> {
-    for line in text.lines() {
-        let trimmed = line
-            .trim()
-            .trim_start_matches(['│', '┃', '›', '❯', ' '])
-            .trim();
-        let Some(rest) = trimmed.strip_prefix("Allow the ") else {
-            continue;
-        };
-        let Some((server, after)) = rest.split_once(" MCP server to run tool ") else {
-            continue;
-        };
-        let tool = after.trim().trim_end_matches(['?', '.']);
-        if !server.is_empty() && !tool.is_empty() {
-            return Some((server.to_owned(), tool.to_owned()));
-        }
-    }
-    None
-}
-
 fn busy(text: &str) -> bool {
-    text.to_ascii_lowercase().contains("esc to interrupt")
+    text.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("worked for") {
+            return false;
+        }
+        lower.contains("esc to interrupt") || line.contains('◦')
+    })
 }
 
 fn last_line(text: &str) -> Option<&str> {

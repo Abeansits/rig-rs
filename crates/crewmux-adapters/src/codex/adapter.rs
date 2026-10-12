@@ -7,17 +7,18 @@ use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
 use crewmux_mux::{CaptureRange, Multiplexer, PaneRef, SessionSpec};
-use crewmux_types::{Key, ReadinessCode, RuntimeKind, SeatId, ThreadId};
+use crewmux_types::{DialogId, ReadinessCode, RuntimeKind, SeatId, ThreadId};
 use tokio::sync::{Mutex, OwnedSemaphorePermit};
 
 use crate::adapter::{AgentAdapter, SeatIo};
 use crate::codex::argv::{CodexLaunchPlan, codex_launch_argv};
 use crate::codex::budget::LaunchBudget;
+use crate::codex::dialogs::CODEX_DIALOGS;
 use crate::codex::lock::CodexLaunchLock;
 use crate::codex::preflight::{Preflight, codex_preflight_bin};
 use crate::codex::rollout::{RolloutLocator, RolloutSet, ThreadIdError};
 use crate::codex::screen::{CodexScreen, apply_preflight, classify};
-use crate::dialog::{AnswerPolicy, DialogDriver, DriveResult, PaneIo, TrustSeat, planned_choice};
+use crate::dialog::{AnswerPolicy, DialogDriver, DriveOutcome, MuxPane, SeatContext};
 use crate::error::Error;
 use crate::types::{
     AppliedLaunch, Capabilities, InstalledResource, LaunchOpts, LaunchOutcome, NodeBinding,
@@ -54,24 +55,6 @@ enum IdState {
     Pending,
     Resolved(ThreadId),
     Failed(ReadinessCode),
-}
-
-struct MuxPane {
-    mux: Arc<dyn Multiplexer>,
-    pane: PaneRef,
-}
-
-#[async_trait]
-impl PaneIo for MuxPane {
-    async fn capture_text(&self) -> Result<String, Error> {
-        let capture = self.mux.capture(&self.pane, CaptureRange::Visible).await?;
-        Ok(capture.text)
-    }
-
-    async fn send_keys(&self, keys: &[Key]) -> Result<(), Error> {
-        self.mux.send_keys(&self.pane, keys).await?;
-        Ok(())
-    }
 }
 
 impl CodexAdapter {
@@ -225,6 +208,14 @@ impl AgentAdapter for CodexAdapter {
         Ok(to_readiness(screen))
     }
 
+    async fn submit(
+        &self,
+        binding: &NodeBinding,
+        text: &str,
+    ) -> Result<crate::types::DeliveryReceipt, Error> {
+        Self::submit(self, binding, text, crate::types::SubmitMode::Enter).await
+    }
+
     async fn discover_resume_token(
         &self,
         binding: &NodeBinding,
@@ -259,35 +250,45 @@ impl CodexAdapter {
         binding: &NodeBinding,
         screen: CodexScreen,
     ) -> Result<CodexScreen, Error> {
-        let CodexScreen::Dialog(dialog) = &screen else {
+        let CodexScreen::Dialog(id) = screen else {
             return Ok(screen);
-        };
-        let policy = self.policy_for(binding.seat).await;
-        let paths = self.trust_paths(binding.seat).await;
-        let trust = paths.as_ref().map(|(cwd, home)| TrustSeat { cwd, home });
-        let Some(choice) = planned_choice(dialog, policy, trust) else {
-            return Ok(screen);
-        };
-        let io = MuxPane {
-            mux: Arc::clone(&self.mux),
-            pane: binding.pane.clone(),
         };
         if !matches!(
-            DialogDriver::answer(&io, choice).await?,
-            DriveResult::Answered
+            id,
+            DialogId::CodexUpdate
+                | DialogId::CodexMcpToolApproval
+                | DialogId::CodexBackgroundServer
         ) {
-            return Ok(screen);
+            return Ok(CodexScreen::Dialog(id));
+        }
+        let policy = self.policy_for(binding.seat).await;
+        let Some((cwd, home)) = self.trust_paths(binding.seat).await else {
+            return Ok(CodexScreen::Dialog(id));
+        };
+        let seat = SeatContext {
+            cwd: &cwd,
+            home: &home,
+        };
+        let io = MuxPane::new(Arc::clone(&self.mux), binding.pane.clone());
+        if !matches!(
+            DialogDriver::default()
+                .drive(&io, CODEX_DIALOGS, policy, &seat)
+                .await?,
+            DriveOutcome::Answered { .. }
+        ) {
+            return Ok(CodexScreen::Dialog(id));
         }
         Ok(classify(&self.capture(binding).await?))
     }
 
     async fn policy_for(&self, seat: SeatId) -> AnswerPolicy {
-        self.seats
-            .lock()
-            .await
-            .get(&seat)
-            .map(|track| track.policy)
-            .unwrap_or_default()
+        self.seats.lock().await.get(&seat).map_or(
+            AnswerPolicy {
+                auto_trust: false,
+                auto_approve_rig_tools: false,
+            },
+            |track| track.policy,
+        )
     }
 
     async fn trust_paths(&self, seat: SeatId) -> Option<(PathBuf, PathBuf)> {
@@ -369,7 +370,10 @@ impl CodexAdapter {
             before: RolloutSet::default(),
             permit: None,
             id: IdState::Pending,
-            policy: AnswerPolicy::default(),
+            policy: AnswerPolicy {
+                auto_trust: false,
+                auto_approve_rig_tools: true,
+            },
             note,
         };
         self.seats.lock().await.insert(binding.seat, track);
@@ -654,18 +658,19 @@ fn to_readiness(screen: CodexScreen) -> Readiness {
         CodexScreen::UnknownMenu { .. } => Readiness::Gate(ReadinessCode::UnknownMenu),
         CodexScreen::ReturnedToShell => Readiness::HardFailure("returned_to_shell".to_owned()),
         CodexScreen::HardFailure { reason } => Readiness::HardFailure(reason),
-        CodexScreen::Dialog(dialog) => Readiness::Gate(dialog_code(&dialog)),
+        CodexScreen::Dialog(id) => Readiness::Gate(dialog_code(id)),
     }
 }
 
-fn dialog_code(dialog: &crate::dialog::KnownDialog) -> ReadinessCode {
-    use crate::dialog::KnownDialog;
-    match dialog {
-        KnownDialog::CodexUpdate { .. } => ReadinessCode::UpdateGate,
-        KnownDialog::CodexMcpToolApproval { .. } => ReadinessCode::McpToolApproval,
-        KnownDialog::CodexBackgroundServer => ReadinessCode::CodexBackgroundServer,
-        KnownDialog::ClaudeTrust { .. } => ReadinessCode::TrustGate,
-        KnownDialog::ClaudeBypass => ReadinessCode::BypassConsentGate,
+fn dialog_code(id: DialogId) -> ReadinessCode {
+    match id {
+        DialogId::CodexUpdate => ReadinessCode::UpdateGate,
+        DialogId::CodexMcpToolApproval => ReadinessCode::McpToolApproval,
+        DialogId::CodexBackgroundServer => ReadinessCode::CodexBackgroundServer,
+        DialogId::ClaudeTrust => ReadinessCode::TrustGate,
+        DialogId::ClaudeBypassConsent => ReadinessCode::BypassConsentGate,
+        DialogId::ClaudeNewMcpServer => ReadinessCode::McpGate,
+        DialogId::ClaudeFullscreenRenderer => ReadinessCode::FullscreenRenderer,
     }
 }
 

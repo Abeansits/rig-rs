@@ -1,6 +1,6 @@
 //! Thread ids from rollout metadata, including the per-cwd launch lock.
 
-#[path = "common/mod.rs"]
+#[path = "codex_support.rs"]
 mod support;
 
 use std::fs;

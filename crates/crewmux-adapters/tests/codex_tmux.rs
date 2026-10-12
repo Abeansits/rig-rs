@@ -67,5 +67,5 @@ mod tmux_it {
 }
 
 #[cfg(feature = "tmux-it")]
-#[path = "common/mod.rs"]
+#[path = "codex_support.rs"]
 mod support;

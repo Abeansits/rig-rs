@@ -18,6 +18,7 @@ use crate::argv::{
 };
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::control::{ControlCtx, run_control};
+use crate::control_child::ControlSlot;
 use crate::error::{MuxError, ensure_supported};
 use crate::exec::{ProcessExec, TmuxExec, is_absence, resolve_tmux_binary};
 use crate::hub::Hub;
@@ -63,21 +64,49 @@ pub struct TmuxMux {
     events: broadcast::Sender<MuxEvent>,
     own_write: watch::Sender<Option<Instant>>,
     cancel: CancellationToken,
+    child: Arc<ControlSlot>,
     tracker: TaskTracker,
     control: JoinHandle<()>,
+    /// True when this client's `new-session -A` forked the server.
+    ///
+    /// Drop reaps that server, including sessions added to it later. A server
+    /// that is older than the client was attached to and is left alone.
+    created_server: bool,
 }
 
 impl Drop for TmuxMux {
     fn drop(&mut self) {
         self.cancel.cancel();
-        // Only a socket this process named may be torn down. The shared
-        // `rig-rs` server, and any server a parent process created, stay up.
-        if socket_owned_by(&self.socket, std::process::id()) {
-            let binary = self.binary.clone();
-            let socket = self.socket.clone();
-            let killer = std::thread::spawn(move || kill_owned_server(&binary, &socket));
-            drop(killer.join());
-        }
+        let child = Arc::clone(&self.child);
+        let binary = self.binary.clone();
+        let socket = self.socket.clone();
+        let created = self.created_server;
+        let reaper = std::thread::spawn(move || {
+            child.kill_and_wait();
+            // The server is forked from the control client and reparented to
+            // init, so killing the client leaves it running.
+            //
+            // Reap only a server this mux created. The check is the server's
+            // start time against this control client, taken after
+            // `new-session -A`, so a server that appeared between the probe
+            // and `-A` is not killed. An attached server stays up, including
+            // the shared `rig-rs` a developer already had open.
+            //
+            // A server this mux created is still reaped when a parent chose
+            // the name (`rig-rs-<their pid>-…`). That is the whole server:
+            // sessions someone added later go down with it.
+            // [`socket_owned_by`] is the sweep rule and is not a license to
+            // kill a server we only attached to. The bare name `rig-rs` is
+            // never owned, so a sweep will not kill it.
+            //
+            // `kill -9` of the daemon skips this Drop. That server stays up.
+            // The next daemon attaches with `new-session -A` and leaves it,
+            // because the server is older than the new client.
+            if created {
+                kill_server(&binary, &socket);
+            }
+        });
+        drop(reaper.join());
         self.control.abort();
         self.tracker.close();
     }
@@ -98,10 +127,15 @@ pub fn socket_owned_by(socket: &str, pid: u32) -> bool {
     }
 }
 
-fn kill_owned_server(binary: &str, socket: &str) {
-    if !socket_owned_by(socket, std::process::id()) {
-        return;
-    }
+/// Default tmux socket file for `-L name`.
+///
+/// Commands clear `TMUX_TMPDIR`, so the server uses `/tmp/tmux-<uid>/<name>`.
+#[must_use]
+pub fn socket_path(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("/tmp/tmux-{}", rustix::process::getuid().as_raw())).join(name)
+}
+
+fn kill_server(binary: &str, socket: &str) {
     let mut command = std::process::Command::new(binary);
     command
         .args(["-L", socket, "-f", "/dev/null", "kill-server"])
@@ -111,6 +145,8 @@ fn kill_owned_server(binary: &str, socket: &str) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     drop(command.status());
+    // A server that has already exited leaves the socket file behind.
+    drop(std::fs::remove_file(socket_path(socket)));
 }
 
 impl TmuxMux {
@@ -118,6 +154,17 @@ impl TmuxMux {
     ///
     /// A version older than 3.3 returns [`MuxError::TmuxTooOld`] and does not spawn.
     pub async fn connect(config: TmuxConfig) -> Result<Self, MuxError> {
+        Self::connect_until(config, CancellationToken::new()).await
+    }
+
+    /// [`connect`](Self::connect), stopping the control client when `cancel` fires.
+    ///
+    /// The daemon passes its shutdown token so a dying server is not replaced
+    /// with `new-session -A` while the process is exiting.
+    pub async fn connect_until(
+        config: TmuxConfig,
+        cancel: CancellationToken,
+    ) -> Result<Self, MuxError> {
         let binary = resolve_tmux_binary(&config.binary).await;
         let exec: Arc<dyn TmuxExec> =
             Arc::new(ProcessExec::new(binary.clone(), config.socket.clone()));
@@ -126,7 +173,7 @@ impl TmuxMux {
             socket: config.socket,
             pause_after: config.pause_after,
         };
-        Self::connect_with_exec(config, exec).await
+        Self::connect_with_exec(config, exec, cancel).await
     }
 
     /// Same as [`connect`](Self::connect), with a caller-supplied exec implementation.
@@ -136,34 +183,47 @@ impl TmuxMux {
     pub async fn connect_with_exec(
         config: TmuxConfig,
         exec: Arc<dyn TmuxExec>,
+        cancel: CancellationToken,
     ) -> Result<Self, MuxError> {
         ensure_version(exec.as_ref()).await?;
+        // A server that answers here is older than the client we are about
+        // to start. `new-session -A` attaches, and Drop must not kill it.
+        let probed_absent = !server_already_running(exec.as_ref()).await?;
         let binary = config
             .binary
             .to_str()
             .ok_or_else(|| MuxError::Control("tmux path is not utf-8".into()))?;
         let binary = binary.to_owned();
-        let cancel = CancellationToken::new();
-        let tracker = TaskTracker::new();
-        let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
-        let (events, _) = broadcast::channel(2048);
-        let (own_write, _) = watch::channel(None);
-        let (bell_tx, bell_rx) = watch::channel(None);
-        let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
-        let ctx = ControlCtx {
-            binary: config.binary.clone(),
-            socket: config.socket.clone(),
-            pause_after: config.pause_after,
-            exec: Arc::clone(&exec),
-            hub: Arc::clone(&hub),
-            events: events.clone(),
-            cancel: cancel.clone(),
-            boot_tx: Some(boot_tx),
-            bell: bell_rx,
+        let Started {
+            tracker,
+            boot_rx,
+            events,
+            own_write,
+            bell_tx,
+            hub,
+            child,
+            control,
+            nudge_rx,
+        } = start_control(&config, &exec, &cancel);
+        let ready = wait_ready(boot_rx).await;
+        let proved = if probed_absent {
+            client_started_server(exec.as_ref(), &child).await
+        } else {
+            Some(false)
         };
-        let nudge_rx = events.subscribe();
-        let control = tracker.spawn(run_control(ctx));
-        wait_ready(&cancel, &control, boot_rx).await?;
+        let created_server = created_after_probe(probed_absent, proved, ready.is_err());
+        let live = LiveConnect {
+            cancel: &cancel,
+            child: &child,
+            control: &control,
+            binary: &binary,
+            socket: &config.socket,
+            created_server,
+        };
+        if let Err(err) = ready {
+            stop(&live).await;
+            return Err(err);
+        }
         tracker.spawn(crate::reap::nudge(
             Arc::clone(&exec),
             config.socket.clone(),
@@ -173,8 +233,7 @@ impl TmuxMux {
         let bell = match open_bell(exec.as_ref()).await {
             Ok(bell) => bell,
             Err(err) => {
-                cancel.cancel();
-                control.abort();
+                stop(&live).await;
                 return Err(err);
             }
         };
@@ -182,8 +241,7 @@ impl TmuxMux {
         let socket_path = match read_socket_path(exec.as_ref()).await {
             Ok(path) => path,
             Err(err) => {
-                cancel.cancel();
-                control.abort();
+                stop(&live).await;
                 return Err(err);
             }
         };
@@ -197,8 +255,10 @@ impl TmuxMux {
             events,
             own_write,
             cancel,
+            child,
             tracker,
             control,
+            created_server,
         })
     }
 
@@ -237,32 +297,161 @@ async fn ensure_version(exec: &dyn TmuxExec) -> Result<(), MuxError> {
     ensure_supported(&found)
 }
 
-async fn wait_ready(
+struct LiveConnect<'a> {
+    cancel: &'a CancellationToken,
+    child: &'a Arc<ControlSlot>,
+    control: &'a JoinHandle<()>,
+    binary: &'a str,
+    socket: &'a str,
+    created_server: bool,
+}
+
+async fn stop(live: &LiveConnect<'_>) {
+    fail_connect(
+        live.cancel,
+        live.child,
+        live.control,
+        live.binary,
+        live.socket,
+        live.created_server,
+    )
+    .await;
+}
+
+struct Started {
+    tracker: TaskTracker,
+    boot_rx: tokio::sync::oneshot::Receiver<Result<(), MuxError>>,
+    events: broadcast::Sender<MuxEvent>,
+    own_write: watch::Sender<Option<Instant>>,
+    bell_tx: watch::Sender<Option<String>>,
+    hub: Arc<tokio::sync::Mutex<Hub>>,
+    child: Arc<ControlSlot>,
+    control: JoinHandle<()>,
+    nudge_rx: broadcast::Receiver<MuxEvent>,
+}
+
+fn start_control(
+    config: &TmuxConfig,
+    exec: &Arc<dyn TmuxExec>,
     cancel: &CancellationToken,
+) -> Started {
+    let tracker = TaskTracker::new();
+    let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
+    let (events, _) = broadcast::channel(2048);
+    let (own_write, _) = watch::channel(None::<Instant>);
+    let (bell_tx, bell_rx) = watch::channel(None::<String>);
+    let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
+    let child = Arc::new(ControlSlot::new());
+    let nudge_rx = events.subscribe();
+    let ctx = ControlCtx {
+        binary: config.binary.clone(),
+        socket: config.socket.clone(),
+        pause_after: config.pause_after,
+        exec: Arc::clone(exec),
+        hub: Arc::clone(&hub),
+        events: events.clone(),
+        cancel: cancel.clone(),
+        child: Arc::clone(&child),
+        boot_tx: Some(boot_tx),
+        bell: bell_rx,
+    };
+    let control = tracker.spawn(run_control(ctx));
+    Started {
+        tracker,
+        boot_rx,
+        events,
+        own_write,
+        bell_tx,
+        hub,
+        child,
+        control,
+        nudge_rx,
+    }
+}
+
+async fn server_already_running(exec: &dyn TmuxExec) -> Result<bool, MuxError> {
+    match exec.run(&["list-sessions".to_owned()]).await {
+        // `NotFound` is "can't find session": the server answered.
+        Ok(_) | Err(MuxError::NotFound(_)) => Ok(true),
+        Err(MuxError::Exec { stderr, .. }) if server_missing(&stderr) => Ok(false),
+        // A live server with nothing in it says "no sessions".
+        Err(MuxError::Exec { stderr, .. }) if stderr.contains("no sessions") => Ok(true),
+        Err(err) => Err(err),
+    }
+}
+
+fn server_missing(stderr: &str) -> bool {
+    stderr.contains("no server running") || stderr.contains("error connecting to")
+}
+
+/// Kill only when the probe saw no server and this client forked the one that
+/// answered. A failed boot whose client pid is already gone still reaps.
+/// A live session whose start time could not be read is left alone.
+fn created_after_probe(probed_absent: bool, proved: Option<bool>, ready_failed: bool) -> bool {
+    if !probed_absent {
+        return false;
+    }
+    proved.unwrap_or(ready_failed)
+}
+
+async fn client_started_server(exec: &dyn TmuxExec, child: &ControlSlot) -> Option<bool> {
+    let client = child.id().await?;
+    let server = server_pid(exec).await?;
+    tokio::task::spawn_blocking(move || crate::born::server_not_older(server, client))
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn server_pid(exec: &dyn TmuxExec) -> Option<u32> {
+    let out = exec
+        .run(&[
+            "display-message".to_owned(),
+            "-p".to_owned(),
+            "#{pid}".to_owned(),
+        ])
+        .await
+        .ok()?;
+    let pid = out.stdout.trim().parse::<u32>().ok()?;
+    if pid == 0 { None } else { Some(pid) }
+}
+
+async fn fail_connect(
+    cancel: &CancellationToken,
+    child: &Arc<ControlSlot>,
     control: &JoinHandle<()>,
+    binary: &str,
+    socket: &str,
+    created_server: bool,
+) {
+    cancel.cancel();
+    let slot = Arc::clone(child);
+    let binary = binary.to_owned();
+    let socket = socket.to_owned();
+    drop(
+        tokio::task::spawn_blocking(move || {
+            slot.kill_and_wait();
+            if created_server {
+                kill_server(&binary, &socket);
+            }
+        })
+        .await,
+    );
+    control.abort();
+}
+
+async fn wait_ready(
     boot_rx: tokio::sync::oneshot::Receiver<Result<(), MuxError>>,
 ) -> Result<(), MuxError> {
     match tokio::time::timeout(Duration::from_secs(8), boot_rx).await {
         Ok(Ok(Ok(()))) => Ok(()),
-        Ok(Ok(Err(err))) => {
-            cancel.cancel();
-            control.abort();
-            Err(err)
-        }
-        Ok(Err(_closed)) => {
-            cancel.cancel();
-            control.abort();
-            Err(MuxError::Control(
-                "control task ended before it was ready".into(),
-            ))
-        }
-        Err(_elapsed) => {
-            cancel.cancel();
-            control.abort();
-            Err(MuxError::Control(
-                "timed out starting the control client".into(),
-            ))
-        }
+        Ok(Ok(Err(err))) => Err(err),
+        Ok(Err(_closed)) => Err(MuxError::Control(
+            "control task ended before it was ready".into(),
+        )),
+        Err(_elapsed) => Err(MuxError::Control(
+            "timed out starting the control client".into(),
+        )),
     }
 }
 
@@ -425,6 +614,8 @@ mod tests {
 
     use async_trait::async_trait;
 
+    use tokio_util::sync::CancellationToken;
+
     use super::{TmuxConfig, TmuxMux};
     use crate::error::MuxError;
     use crate::exec::{ExecOutput, TmuxExec};
@@ -454,8 +645,12 @@ mod tests {
             stdout: "tmux 3.2a\n".into(),
             calls: AtomicUsize::new(0),
         });
-        let connected =
-            TmuxMux::connect_with_exec(TmuxConfig::default(), erase(Arc::clone(&probe))).await;
+        let connected = TmuxMux::connect_with_exec(
+            TmuxConfig::default(),
+            erase(Arc::clone(&probe)),
+            CancellationToken::new(),
+        )
+        .await;
         let Err(err) = connected else {
             panic!("old tmux was accepted");
         };
@@ -478,5 +673,28 @@ mod tests {
         assert!(!super::socket_owned_by("rig-rs-420-1", 42));
         assert!(!super::socket_owned_by("rig-rs-7", 42));
         assert!(!super::socket_owned_by("other-42", 42));
+    }
+
+    #[test]
+    fn a_missing_server_is_not_an_attach() {
+        assert!(super::server_missing(
+            "error connecting to /tmp/tmux-1/rig-rs (No such file or directory)"
+        ));
+        assert!(super::server_missing(
+            "no server running on /tmp/tmux-1/rig-rs"
+        ));
+        assert!(!super::server_missing("no sessions"));
+        assert!(!super::server_missing("can't find session: decoy"));
+    }
+
+    #[test]
+    fn drop_kills_only_a_server_this_client_started() {
+        assert!(!super::created_after_probe(false, Some(true), true));
+        assert!(!super::created_after_probe(false, None, true));
+        assert!(!super::created_after_probe(true, Some(false), false));
+        assert!(!super::created_after_probe(true, Some(false), true));
+        assert!(super::created_after_probe(true, Some(true), false));
+        assert!(super::created_after_probe(true, None, true));
+        assert!(!super::created_after_probe(true, None, false));
     }
 }

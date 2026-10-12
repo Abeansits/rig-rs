@@ -680,5 +680,100 @@ mod suite {
             tmux_ok(&server.socket, &["send-keys", "-t", &id, "-X", "cancel"]).await;
             assert!(!server.mux.pane_in_mode(&pane).await.expect("left copy"));
         }
+
+        #[tokio::test]
+        async fn drop_leaves_a_preexisting_server() {
+            reap_stale_sockets().await;
+            let socket = next_socket();
+            let _cleanup = OwnedSocket(socket.clone());
+            let started = Command::new("tmux")
+                .args([
+                    "-L",
+                    &socket,
+                    "-f",
+                    "/dev/null",
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "decoy",
+                    "sleep",
+                    "30",
+                ])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
+                .status()
+                .await
+                .expect("decoy");
+            assert!(started.success());
+            let mux = TmuxMux::connect(TmuxConfig {
+                binary: PathBuf::from("tmux"),
+                socket: socket.clone(),
+                pause_after: false,
+            })
+            .await
+            .expect("attach");
+            drop(mux);
+            let listed = tmux_text(&socket, &["has-session", "-t", "=decoy"]).await;
+            assert!(
+                !listed.contains("no server") && !listed.contains("error connecting"),
+                "attached server was killed: {listed}"
+            );
+        }
+
+        #[tokio::test]
+        async fn drop_reaps_a_server_this_mux_created_on_a_parent_socket() {
+            let socket = format!("rig-rs-0-{}-made", std::process::id());
+            assert!(
+                !socket_owned_by(&socket, std::process::id()),
+                "{socket} must not look owned by this pid"
+            );
+            let _cleanup = NamedSocket(socket.clone());
+            let mux = TmuxMux::connect(TmuxConfig {
+                binary: PathBuf::from("tmux"),
+                socket: socket.clone(),
+                pause_after: false,
+            })
+            .await
+            .expect("create");
+            drop(mux);
+            let listed = tmux_text(&socket, &["list-sessions"]).await;
+            assert!(
+                listed.contains("no server") || listed.contains("error connecting"),
+                "created server still running: {listed}"
+            );
+        }
+
+        struct OwnedSocket(String);
+
+        impl Drop for OwnedSocket {
+            fn drop(&mut self) {
+                if !socket_owned_by(&self.0, std::process::id()) {
+                    return;
+                }
+                finish_socket(&self.0);
+            }
+        }
+
+        /// Cleanup for a socket this test created under a name it does not own.
+        struct NamedSocket(String);
+
+        impl Drop for NamedSocket {
+            fn drop(&mut self) {
+                finish_socket(&self.0);
+            }
+        }
+
+        fn finish_socket(socket: &str) {
+            drop(
+                std::process::Command::new("tmux")
+                    .args(["-L", socket, "-f", "/dev/null", "kill-server"])
+                    .env_remove("TMUX")
+                    .env_remove("TMUX_TMPDIR")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status(),
+            );
+            drop(std::fs::remove_file(socket_file(socket)));
+        }
     }
 }

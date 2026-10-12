@@ -1,8 +1,8 @@
 //! Terminal UI backed by the daemon API client.
 //!
 //! The live stream is consumed as [`crewmux_api::StreamEvent`] over `GET /api/events`.
-//! This crate does not depend on the daemon. Slice 4 owns that route and can replace
-//! the temporary fan-out without a TUI change, as long as the client event names stay.
+//! This crate does not depend on the daemon. [`read_events`] is that same client, used
+//! to resume the canonical stream.
 
 mod action;
 mod app;
@@ -33,6 +33,7 @@ pub use msg::{
     AttachOutcome, AttachTarget, Cmd, ControlCmd, ControlReplyId, KeyEvent, KeyKind, MouseEvent,
     Msg,
 };
+pub use sse::read_events;
 pub use state::{
     ConnState, FLASH_WINDOW, IDLE_TICK, LoadState, RowFlash, RowKey, Section, SessionEnv, Size,
     State, explorer_right, idle_wait,

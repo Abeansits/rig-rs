@@ -1,10 +1,10 @@
 // Derived from openrig packages/daemon/src/domain/rigspec-schema.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 
-//! The slice 1 `RigSpec`: a name and a list of seats.
+//! The `RigSpec`: a name and a list of seats.
 //!
-//! Unknown fields are rejected. Only `name`, `runtime`, `cwd`, and `model`
-//! are accepted on a seat. Runtimes outside [`RuntimeKind`] (including `pi`)
-//! fail at parse time.
+//! Unknown fields are rejected. A seat accepts `name`, `runtime`, `cwd`,
+//! `model`, `auto_trust`, and `launch`. Runtimes outside [`RuntimeKind`]
+//! (including `pi`) fail at parse time.
 
 use std::path::PathBuf;
 
@@ -35,4 +35,29 @@ pub struct SeatSpec {
     /// Optional model pin.
     #[serde(default)]
     pub model: Option<String>,
+    /// Answer the Claude trust dialog. Absent means false.
+    #[serde(default)]
+    pub auto_trust: bool,
+    /// Millisecond overrides for the Claude launch budget.
+    #[serde(default)]
+    pub launch: Option<LaunchBudgetSpec>,
+}
+
+/// Optional Claude launch timeouts, in milliseconds.
+///
+/// Absent fields keep the Claude adapter defaults. The daemon converts these
+/// numbers; this crate does not depend on the adapter.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LaunchBudgetSpec {
+    /// Blank-screen budget, in milliseconds.
+    pub first_screen: Option<u64>,
+    /// Composer budget after the last answered dialog, in milliseconds.
+    pub ready_after_last_gate: Option<u64>,
+    /// Stable inconclusive screen budget, in milliseconds.
+    pub inconclusive_stable: Option<u64>,
+    /// Hard stop for the whole launch, in milliseconds.
+    pub overall: Option<u64>,
+    /// Gap between captures, in milliseconds.
+    pub poll: Option<u64>,
 }

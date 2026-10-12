@@ -1,5 +1,6 @@
 //! Stub runtime: screen classification, the env script, and the fixture process.
 
+mod buffer;
 mod run;
 mod screen;
 mod script;

@@ -1,119 +1,218 @@
-//! Move the cursor, re-capture, then Enter.
+//! Move one step, re-capture, and Enter only with a [`VerifiedCursor`].
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use crewmux_types::Key;
+use crewmux_mux::{CaptureRange, Key, Multiplexer, PaneRef};
+use crewmux_types::DialogId;
 
-use crate::dialog::known::DialogChoice;
-use crate::dialog::options::menu_options;
+use crate::dialog::policy::{AnswerPolicy, EscalateReason, Plan, SeatContext, never_choose, plan};
+use crate::dialog::recognise::{Recognised, recognise};
+use crate::dialog::table::DialogSpec;
 use crate::error::Error;
 
-/// A pane the driver can read and send keys to.
+/// The only keys the driver uses to move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavKey {
+    /// Up arrow.
+    Up,
+    /// Down arrow.
+    Down,
+}
+
+/// Proof that the latest capture has the cursor on `label`.
+///
+/// Only [`DialogDriver::drive`] can construct this. [`PaneIo::enter`] requires it.
+#[expect(
+    clippy::manual_non_exhaustive,
+    reason = "a private field keeps construction inside this module; non_exhaustive would allow other modules in the crate"
+)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifiedCursor {
+    /// Line index of the selected choice.
+    pub line: usize,
+    /// Label the cursor was on.
+    pub label: String,
+    _priv: (),
+}
+
+/// Pane operations the driver is allowed to perform.
 #[async_trait]
 pub trait PaneIo: Send + Sync {
     /// Visible text.
     async fn capture_text(&self) -> Result<String, Error>;
 
-    /// Deliver keys. The driver only sends Up, Down, and Enter.
-    async fn send_keys(&self, keys: &[Key]) -> Result<(), Error>;
+    /// Move the cursor one row.
+    async fn nav(&self, key: NavKey) -> Result<(), Error>;
+
+    /// Send Enter. Impossible without a [`VerifiedCursor`].
+    async fn enter(&self, proof: VerifiedCursor) -> Result<(), Error>;
 }
 
-/// Outcome of one answer attempt.
+/// [`PaneIo`] over a [`Multiplexer`].
+pub struct MuxPane {
+    mux: Arc<dyn Multiplexer>,
+    pane: PaneRef,
+}
+
+impl MuxPane {
+    /// `pane` receives the keys.
+    #[must_use]
+    pub fn new(mux: Arc<dyn Multiplexer>, pane: PaneRef) -> Self {
+        Self { mux, pane }
+    }
+}
+
+#[async_trait]
+impl PaneIo for MuxPane {
+    async fn capture_text(&self) -> Result<String, Error> {
+        Ok(self
+            .mux
+            .capture(&self.pane, CaptureRange::Visible)
+            .await?
+            .text)
+    }
+
+    async fn nav(&self, key: NavKey) -> Result<(), Error> {
+        let key = match key {
+            NavKey::Up => Key::Up,
+            NavKey::Down => Key::Down,
+        };
+        self.mux.send_keys(&self.pane, &[key]).await?;
+        Ok(())
+    }
+
+    async fn enter(&self, proof: VerifiedCursor) -> Result<(), Error> {
+        if never_choose(&proof.label) {
+            return Err(Error::Message(
+                "refusing Enter on a deny-listed choice".to_owned(),
+            ));
+        }
+        self.mux.send_keys(&self.pane, &[Key::Enter]).await?;
+        Ok(())
+    }
+}
+
+/// How many navigation steps [`DialogDriver::drive`] will take.
+pub struct DialogDriver {
+    /// Step budget. The default is 8.
+    pub max_steps: u8,
+}
+
+impl Default for DialogDriver {
+    fn default() -> Self {
+        Self { max_steps: 8 }
+    }
+}
+
+/// Result of one drive.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DriveResult {
-    /// The dialog left the screen after a verified Enter.
-    Answered,
-    /// The driver stopped. Enter was not sent unless the dialog failed to close.
-    Escalated {
-        /// Why the answer stopped.
-        reason: String,
+pub enum DriveOutcome {
+    /// Enter landed and the dialog left the screen.
+    Answered {
+        /// Dialog that was answered.
+        id: DialogId,
+        /// Label that was verified.
+        label: &'static str,
     },
+    /// No Enter was sent, or Enter did not dismiss the dialog.
+    Escalated {
+        /// Dialog id when one had been recognised.
+        id: Option<DialogId>,
+        /// Why the driver stopped.
+        reason: EscalateReason,
+    },
+    /// The capture matched no row.
+    NotADialog,
 }
-
-/// Cursor-verified dialog answers.
-#[derive(Debug, Default)]
-pub struct DialogDriver;
 
 impl DialogDriver {
-    /// Move onto `choice` and press Enter only after the cursor is on that label.
+    /// Capture, recognise, plan, then step until the cursor is verified.
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] when capture or `send_keys` fails.
-    pub async fn answer(io: &dyn PaneIo, choice: DialogChoice) -> Result<DriveResult, Error> {
-        let target = choice.label();
-        if forbidden(target) {
-            return Ok(stop("refusing a destructive option"));
-        }
-        let mut steps = 0u32;
-        loop {
-            let text = io.capture_text().await?;
-            let options = menu_options(&text);
-            if steps > u32::try_from(options.len()).unwrap_or(8) {
-                return Ok(stop("cursor did not reach the option"));
+    /// Returns [`Error`] when capture or a key send fails.
+    pub async fn drive(
+        &self,
+        io: &dyn PaneIo,
+        table: &'static [DialogSpec],
+        policy: AnswerPolicy,
+        seat: &SeatContext<'_>,
+    ) -> Result<DriveOutcome, Error> {
+        let text = io.capture_text().await?;
+        let Some(found) = recognise(table, &text) else {
+            return Ok(DriveOutcome::NotADialog);
+        };
+        let id = found.spec.id;
+        let label = match plan(&found, policy, seat) {
+            Plan::Answer(label) => label,
+            Plan::Escalate(reason) => {
+                return Ok(DriveOutcome::Escalated {
+                    id: Some(id),
+                    reason,
+                });
             }
-            let Some(step) = next_step(&options, target) else {
-                return Ok(stop("dialog options changed"));
-            };
-            match step {
-                Step::Confirm => return confirm(io, target).await,
-                Step::Move(key) => {
-                    io.send_keys(&[key]).await?;
-                    steps = steps.saturating_add(1);
+        };
+        let mut current = found;
+        for _ in 0..self.max_steps {
+            if let Some(proof) = verified(&current, label) {
+                io.enter(proof).await?;
+                let after = io.capture_text().await?;
+                if recognise(table, &after).is_some_and(|again| again.spec.id == id) {
+                    return Ok(DriveOutcome::Escalated {
+                        id: Some(id),
+                        reason: EscalateReason::DialogRemained,
+                    });
                 }
-                Step::Stop(reason) => return Ok(stop(reason)),
+                return Ok(DriveOutcome::Answered { id, label });
             }
+            let Some(key) = step_toward(&current, label) else {
+                return Ok(DriveOutcome::Escalated {
+                    id: Some(id),
+                    reason: EscalateReason::CursorMismatch,
+                });
+            };
+            io.nav(key).await?;
+            let next = io.capture_text().await?;
+            let Some(again) = recognise(table, &next) else {
+                return Ok(DriveOutcome::Escalated {
+                    id: Some(id),
+                    reason: EscalateReason::Unrecognised,
+                });
+            };
+            if again.spec.id != id {
+                return Ok(DriveOutcome::Escalated {
+                    id: Some(id),
+                    reason: EscalateReason::Unrecognised,
+                });
+            }
+            current = again;
         }
+        Ok(DriveOutcome::Escalated {
+            id: Some(id),
+            reason: EscalateReason::StepLimit,
+        })
     }
 }
 
-enum Step {
-    Move(Key),
-    Confirm,
-    Stop(&'static str),
+fn verified(found: &Recognised, label: &str) -> Option<VerifiedCursor> {
+    let option = found.menu.iter().find(|option| option.selected)?;
+    if option.label != label || never_choose(&option.label) {
+        return None;
+    }
+    Some(VerifiedCursor {
+        line: option.line,
+        label: option.label.clone(),
+        _priv: (),
+    })
 }
 
-fn next_step(options: &[crate::dialog::options::MenuOption], target: &str) -> Option<Step> {
-    let current = options.iter().find(|opt| opt.selected)?;
-    if current.label == target {
-        return Some(Step::Confirm);
+fn step_toward(found: &Recognised, label: &str) -> Option<NavKey> {
+    let cursor = found.menu.iter().position(|option| option.selected)?;
+    let target = found.menu.iter().position(|option| option.label == label)?;
+    match target.cmp(&cursor) {
+        std::cmp::Ordering::Greater => Some(NavKey::Down),
+        std::cmp::Ordering::Less => Some(NavKey::Up),
+        std::cmp::Ordering::Equal => None,
     }
-    let want = options.iter().position(|opt| opt.label == target)?;
-    let have = options.iter().position(|opt| opt.selected)?;
-    if have == want {
-        return Some(Step::Stop("cursor label does not match the target"));
-    }
-    let key = if have < want { Key::Down } else { Key::Up };
-    Some(Step::Move(key))
-}
-
-async fn confirm(io: &dyn PaneIo, target: &str) -> Result<DriveResult, Error> {
-    let text = io.capture_text().await?;
-    let options = menu_options(&text);
-    let Some(current) = options.iter().find(|opt| opt.selected) else {
-        return Ok(stop("cursor missing before enter"));
-    };
-    if current.label != target || forbidden(&current.label) {
-        return Ok(stop("cursor is not on the verified option"));
-    }
-    io.send_keys(&[Key::Enter]).await?;
-    let after = io.capture_text().await?;
-    if menu_options(&after).iter().any(|opt| opt.label == target) {
-        return Ok(stop("dialog still open after enter"));
-    }
-    Ok(DriveResult::Answered)
-}
-
-fn stop(reason: &str) -> DriveResult {
-    DriveResult::Escalated {
-        reason: reason.to_owned(),
-    }
-}
-
-fn forbidden(label: &str) -> bool {
-    label.contains("Update now")
-        || label == "Allow"
-        || label.contains("Always allow")
-        || label == "Cancel"
-        || label.contains("No, exit")
-        || label.contains("Run without daemon")
 }

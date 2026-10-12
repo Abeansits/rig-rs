@@ -11,6 +11,7 @@ mod endpoint;
 mod error;
 mod model;
 mod read;
+mod stream;
 
 pub use chat::{
     CHAT_MESSAGE_TYPE, ChatClear, ChatHistory, ChatSend, ChatTopic, ChatWatch, ChatWatchEvent,
@@ -27,11 +28,10 @@ pub use crewmux_types::{
 };
 pub use dirs::{create_private, open_private};
 pub use endpoint::{
-    AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
-    Healthz, ListSeats, RigDown,
+    AskSeat, AttachInfo, AttachRequest, BroadcastSend, CaptureRequest, CaptureSeat, CreateRigUp,
+    DownRequest, Endpoint, Healthz, ListSeats, QueueClaim, QueueCollection, QueueFallback,
+    QueueHandoff, QueueShow, RigDown, SendMessage, SubmitRequest, SubmitSeat, UnclaimItem, Whoami,
 };
 pub use error::Error;
-pub use model::{
-    ActivityItem, HealthItem, HealthSummary, LauncherConfig, SeatView, Snapshot, StreamEvent,
-    StreamKind, StreamPayload,
-};
+pub use model::{ActivityItem, HealthItem, HealthSummary, LauncherConfig, SeatView, Snapshot};
+pub use stream::{EventStream, StreamEvent, StreamKind, StreamPayload};

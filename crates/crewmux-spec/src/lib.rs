@@ -7,7 +7,7 @@ mod model;
 pub mod yaml;
 
 pub use error::SpecError;
-pub use model::{RigSpec, SeatSpec};
+pub use model::{LaunchBudgetSpec, RigSpec, SeatSpec};
 
 use std::collections::BTreeSet;
 use std::path::Path;

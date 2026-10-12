@@ -359,13 +359,7 @@ fn decode_state(
 }
 
 fn event_at(event: &DomainEvent) -> Timestamp {
-    match event {
-        DomainEvent::RigCreated { at, .. }
-        | DomainEvent::SeatLaunched { at, .. }
-        | DomainEvent::SeatReady { at, .. }
-        | DomainEvent::SeatStopped { at, .. }
-        | DomainEvent::SeatDied { at, .. } => *at,
-    }
+    event.at()
 }
 
 #[expect(

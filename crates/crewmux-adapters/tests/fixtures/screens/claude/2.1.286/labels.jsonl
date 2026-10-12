@@ -1,0 +1,67 @@
+{"screen": "login", "login": "theme", "file": "claude-000-firstrun.txt", "sha256": "88ffb26f3f43d39a9183bf8a4c642fe321883c5003e9891f2b315613da788a20"}
+{"screen": "login", "login": "theme", "file": "claude-001-firstrun.txt", "sha256": "88ffb26f3f43d39a9183bf8a4c642fe321883c5003e9891f2b315613da788a20"}
+{"screen": "login", "login": "theme", "file": "claude-002-firstrun.txt", "sha256": "88ffb26f3f43d39a9183bf8a4c642fe321883c5003e9891f2b315613da788a20"}
+{"screen": "login", "login": "theme", "file": "claude-003-firstrun.txt", "sha256": "88ffb26f3f43d39a9183bf8a4c642fe321883c5003e9891f2b315613da788a20"}
+{"screen": "inconclusive", "file": "claude-004-startup.txt", "sha256": "230e71cf46470f5324e1fa293c66192e1f53171058af80ab97a3426be76e8a44"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-005-startup.txt", "sha256": "fdc4db4f87d9e9385ae8d347cd4b673141344b7b9a99f15e9254e564f536e605"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-006-trust.txt", "sha256": "fdc4db4f87d9e9385ae8d347cd4b673141344b7b9a99f15e9254e564f536e605"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-007-startup.txt", "sha256": "2035bb554e31457e6829ed5b5bf4f4db325501a181571c22399dc1fc0298aada"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-008-stable-unclassified.txt", "sha256": "2035bb554e31457e6829ed5b5bf4f4db325501a181571c22399dc1fc0298aada"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-009-resize80x24.txt", "sha256": "64b97f2ee0859f421a33c84c81d206c985b094428b489dcc1b3f5673fcddb865"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-010-resize200x50.txt", "sha256": "5f7fd4ec902ae09179991bd58587b3757395648ac513085dc9ca18af40d37890"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-011-resize60x20.txt", "sha256": "00187e22cb11ac70d6b288e31ef8db0efcb236dfd8d9e0e1437f8c3ef60e772b"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-012-resize120x40.txt", "sha256": "2035bb554e31457e6829ed5b5bf4f4db325501a181571c22399dc1fc0298aada"}
+{"screen": "dialog", "dialog": "fullscreen", "cursor": "Yes, try it", "file": "claude-013-midturn.txt", "sha256": "2035bb554e31457e6829ed5b5bf4f4db325501a181571c22399dc1fc0298aada"}
+{"screen": "ready", "file": "claude-014-midturn.txt", "sha256": "153ecf6173f272f41ff6fbf0ff99e81d7b5d98ee18fb830cdaa2d99abfead143"}
+{"screen": "ready", "file": "claude-015-after-turn.txt", "sha256": "d76513bd0359938f837670f48393dbd3ef3e5bd0d3578243b46971c5e4d23f79"}
+{"screen": "inconclusive", "file": "claude-016-startup.txt", "sha256": "230e71cf46470f5324e1fa293c66192e1f53171058af80ab97a3426be76e8a44"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-017-startup.txt", "sha256": "9c9f9540e8c8146aa2c10cbec6e90d3829405ca9f66c42e20b1fea3b98a5df45"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-018-trust.txt", "sha256": "9c9f9540e8c8146aa2c10cbec6e90d3829405ca9f66c42e20b1fea3b98a5df45"}
+{"screen": "ready", "file": "claude-019-startup.txt", "sha256": "482a49274d3b74a9726d9100ae18bd8a408a441cb6ba78c5fe3d53134b471635"}
+{"screen": "ready", "file": "claude-020-ready.txt", "sha256": "482a49274d3b74a9726d9100ae18bd8a408a441cb6ba78c5fe3d53134b471635"}
+{"screen": "ready", "file": "claude-021-resize80x24.txt", "sha256": "6b0bd21555655e37d7d3c2cd79d3c1fb118134162703260533f33c7cb135de02"}
+{"screen": "ready", "file": "claude-022-resize200x50.txt", "sha256": "022fd64370195cfb41e96d08ad343fa9d0064a3528c521b9ce5a980c125272d9"}
+{"screen": "ready", "file": "claude-023-resize60x20.txt", "sha256": "8d5cbf72c71bf1e24f19ffa7594178cf610b5efcc1448ca031d3eec78f91fc58"}
+{"screen": "ready", "file": "claude-024-resize120x40.txt", "sha256": "482a49274d3b74a9726d9100ae18bd8a408a441cb6ba78c5fe3d53134b471635"}
+{"screen": "busy", "file": "claude-025-midturn.txt", "sha256": "5f620d2cb6f24a2dcfcb25e3c032343fb9f05382286d9a98cbda9120d9855d5b"}
+{"screen": "ready", "file": "claude-026-midturn.txt", "sha256": "bd010deabf40587db429c09f2aa93ee1f600b05348916493a6cb87263e232883"}
+{"screen": "ready", "file": "claude-027-after-turn.txt", "sha256": "98cb17e8a543c2d7a67dfcee4eafd1a7db054a04be1c915add40147b9304c168"}
+{"screen": "inconclusive", "file": "claude-028-startup.txt", "sha256": "230e71cf46470f5324e1fa293c66192e1f53171058af80ab97a3426be76e8a44"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-029-startup.txt", "sha256": "21bb2df117fa23664e5761a31e727c6496ada113ef4160a5287721b9759880ba"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-030-trust.txt", "sha256": "21bb2df117fa23664e5761a31e727c6496ada113ef4160a5287721b9759880ba"}
+{"screen": "ready", "file": "claude-031-startup.txt", "sha256": "0d12bb312fe814f7f32e7cf2548d926fb1c0fdad22e432cfd2422759f883cc13"}
+{"screen": "ready", "file": "claude-032-ready.txt", "sha256": "0d12bb312fe814f7f32e7cf2548d926fb1c0fdad22e432cfd2422759f883cc13"}
+{"screen": "ready", "file": "claude-033-resize80x24.txt", "sha256": "d956c36e5597e10a41e1be97d40723f3dbfe6a5b86f542e6d5a46c8c5d7fc554"}
+{"screen": "ready", "file": "claude-034-resize200x50.txt", "sha256": "1a19fff2628a83a48ca2dd333e278584e77fc6422349f9ef518f4e9a858cf591"}
+{"screen": "ready", "file": "claude-035-resize60x20.txt", "sha256": "e3c06cdea6b4842e62f3d7436b64bcef46e1dce0beee4480638e4df80bcdae39"}
+{"screen": "ready", "file": "claude-036-resize120x40.txt", "sha256": "0d12bb312fe814f7f32e7cf2548d926fb1c0fdad22e432cfd2422759f883cc13"}
+{"screen": "inconclusive", "file": "claude-037-startup.txt", "sha256": "230e71cf46470f5324e1fa293c66192e1f53171058af80ab97a3426be76e8a44"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-038-startup.txt", "sha256": "c354cee112dccda0056f6a525863fe1b9c9bcb120ad8e830e19dd63adb8a0352"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-039-trust.txt", "sha256": "c354cee112dccda0056f6a525863fe1b9c9bcb120ad8e830e19dd63adb8a0352"}
+{"screen": "ready", "file": "claude-040-startup.txt", "sha256": "36e0f4afcedbe819eecee72a6d50cf8faf80e607f9347e88404bc57f85fe2b26"}
+{"screen": "ready", "file": "claude-041-ready.txt", "sha256": "36e0f4afcedbe819eecee72a6d50cf8faf80e607f9347e88404bc57f85fe2b26"}
+{"screen": "ready", "file": "claude-042-resize80x24.txt", "sha256": "e4339d9ac9efc644de2ed0f4b61f2c2cdbfc69dad3d6909aa45c9b26ba14ad98"}
+{"screen": "ready", "file": "claude-043-resize200x50.txt", "sha256": "9a4be15ddede86da529596960f4ba6842be6a31a779249030f6f9d9b4ba7a97d"}
+{"screen": "ready", "file": "claude-044-resize60x20.txt", "sha256": "f836b5ded7f9889d621a9022753fcd00186a7d953a4b91fbfbdbcca1638cf7ec"}
+{"screen": "ready", "file": "claude-045-resize120x40.txt", "sha256": "36e0f4afcedbe819eecee72a6d50cf8faf80e607f9347e88404bc57f85fe2b26"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-046-bypass.txt", "sha256": "60e3a564e88994892baf24da8066bd0e4710b4166418e6c97a547cbb96e896d7"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-047-bypass.txt", "sha256": "60e3a564e88994892baf24da8066bd0e4710b4166418e6c97a547cbb96e896d7"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-048-bypass.txt", "sha256": "60e3a564e88994892baf24da8066bd0e4710b4166418e6c97a547cbb96e896d7"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-049-bypass.txt", "sha256": "60e3a564e88994892baf24da8066bd0e4710b4166418e6c97a547cbb96e896d7"}
+{"screen": "dialog", "dialog": "bypass", "cursor": "No, exit", "file": "claude-050-bypass-after-trust.txt", "sha256": "dfb46f2065a55b5f510609b0116d7695358c3bc054031804d311415896161afc"}
+{"screen": "dialog", "dialog": "bypass", "cursor": "No, exit", "file": "claude-051-bypass-after-trust.txt", "sha256": "dfb46f2065a55b5f510609b0116d7695358c3bc054031804d311415896161afc"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-052-mcpgate.txt", "sha256": "c272a183fe00fc11f17453b7c6a983094ed44948e66269bc531ac52686904cdb"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-053-mcpgate.txt", "sha256": "c272a183fe00fc11f17453b7c6a983094ed44948e66269bc531ac52686904cdb"}
+{"screen": "dialog", "dialog": "trust", "cursor": "No, exit", "file": "claude-054-mcpgate.txt", "sha256": "c272a183fe00fc11f17453b7c6a983094ed44948e66269bc531ac52686904cdb"}
+{"screen": "dialog", "dialog": "mcp", "mcp": "dummy", "cursor": "Continue without using this MCP server", "file": "claude-055-mcpgate-after-trust.txt", "sha256": "d78479037557c7d50331b5b7e74c18b851a626b8b271bbc08995eecf24c66efb"}
+{"screen": "dialog", "dialog": "mcp", "mcp": "dummy", "cursor": "Continue without using this MCP server", "file": "claude-056-mcpgate-after-trust.txt", "sha256": "d78479037557c7d50331b5b7e74c18b851a626b8b271bbc08995eecf24c66efb"}
+{"screen": "ready", "file": "claude-057-seat-ready.txt", "sha256": "b4d2bec997cbba65ca67bbafe131c00ada245e716a735cc25b38048d9c0a1cc5"}
+{"screen": "ready", "file": "claude-058-s1-end.txt", "sha256": "6a9167ce48ef6eaa24fc5eae7deca470ec883755b817f3972a3a9ab9490a9d39"}
+{"screen": "ready", "file": "claude-059-seat-ready.txt", "sha256": "9a95502b9840ef15db81b15e46f6d1aca71e58bf3f59cc98f11c76146b1eae9c"}
+{"screen": "ready", "file": "claude-060-s1-end.txt", "sha256": "dffeb8c49f4bccb6720ba7e98f50c8f1546fd7b0bc004cf75c7bc0a0dfd244ae"}
+{"screen": "ready", "file": "claude-061-seat-ready.txt", "sha256": "7796646fff53b2a3451031541693ae28c27774be4b31c34519d7ecbe82786eae"}
+{"screen": "ready", "file": "claude-062-s5-after.txt", "sha256": "f57772fcf014c9cfc29c7c744723e67e607bf62756c0f3881ad54da88b1bac44"}
+{"screen": "ready", "file": "claude-063-seat-ready.txt", "sha256": "6b84317b4d8d7ba82af4503664682a0593abff750c7f84336da076c8ee54b1a8"}
+{"screen": "unknown_menu", "file": "claude-064-s6-mcp-list.txt", "sha256": "1d272b3f2999a26561033a90294359f7ba919808b714f28644cba380d674d97f"}
+{"screen": "ready", "file": "claude-065-s6-after-esc.txt", "sha256": "beeaa0dced7c367524932f0a3bca07528809019bf9a1b143eaf6caab0e070604"}
+{"screen": "ready", "file": "claude-066-s6-after.txt", "sha256": "47f69f709644c25dceefdb3651305ecdb4dde01895c64300bd532d7a6deb1870"}

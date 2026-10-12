@@ -11,7 +11,7 @@ use xtask::diff::{
     workspace_root,
 };
 use xtask::ledger::{check_case_titles, parse_csv, parse_test_list, report, seed_csv, validate};
-use xtask::{Error, err, io_err, lint_mux_at, lint_workspace_root, out};
+use xtask::{Error, err, io_err, lint_blind_enter, lint_mux_at, lint_workspace_root, out};
 
 const HELP: &str = "\
 xtask diff [--self] [--update] [--case ID] [--bin PATH]
@@ -19,6 +19,7 @@ xtask ledger seed [--openrig DIR]
 xtask ledger check   # with OPENRIG_DIR, case names must exist in that checkout
 xtask ledger report
 xtask lint-mux
+xtask lint-blind-enter
 xtask lint claude-json
 xtask lint window-size
 xtask lint blind-enter
@@ -59,12 +60,26 @@ fn cmd_lint_mux() -> i32 {
     }
 }
 
+fn cmd_lint_blind_enter() -> i32 {
+    match lint_blind_enter(&lint_workspace_root()) {
+        Ok(()) => {
+            out("lint-blind-enter ok");
+            0
+        }
+        Err(error) => {
+            err(&error.to_string());
+            1
+        }
+    }
+}
+
 fn dispatch() -> Result<i32, Error> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("diff") => cmd_diff(&mut args),
         Some("ledger") => cmd_ledger(&mut args),
         Some("lint-mux") => Ok(cmd_lint_mux()),
+        Some("lint-blind-enter") => Ok(cmd_lint_blind_enter()),
         Some("lint") => cmd_lint(&mut args),
         Some("record-tui") => cmd_record_tui(&mut args),
         Some("--help" | "-h") | None => {

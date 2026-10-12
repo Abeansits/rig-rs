@@ -7,8 +7,12 @@ use std::time::Instant;
 use crewmux_mux::PasteOpts;
 use crewmux_types::{Key, ReadinessCode, SeatId, ThreadId};
 
+use crewmux_transcript::{
+    CodexRollout, Delivery as TurnDelivery, TranscriptCursor, verify_delivery,
+};
+
 use crate::codex::adapter::{CodexAdapter, IdQuery, blocking};
-use crate::codex::rollout::{ThreadIdError, user_turns_after};
+use crate::codex::rollout::ThreadIdError;
 use crate::codex::screen::CodexScreen;
 use crate::error::Error;
 use crate::types::{DeliveryReceipt, NodeBinding, SubmitMode};
@@ -153,20 +157,35 @@ async fn exact_user_item(
     let matched = blocking(move || match locator.verify_resume(&wanted, &cwd) {
         Ok(path) => {
             let offset = lengths.get(&path).copied().unwrap_or(0);
-            user_turns_after(&path, offset).map(|turns| turns.iter().any(|turn| turn == &exact))
+            let rollout = CodexRollout::open(path);
+            verify_delivery(&rollout, TranscriptCursor(offset), &exact)
+                .map_err(|err| ThreadIdError::Malformed(rollout_path(&err)))
         }
-        Err(ThreadIdError::NotYet) => Ok(false),
+        Err(ThreadIdError::NotYet) => Ok(TurnDelivery::Missing),
         Err(err) => Err(err),
     })
     .await?;
     match matched {
-        Ok(true) => {
+        Ok(TurnDelivery::Landed) => {
             adapter.store_resolved(seat, id).await;
             Ok(Delivery::Landed)
         }
-        Ok(false) | Err(ThreadIdError::NotYet) => Ok(Delivery::Waiting),
+        Ok(TurnDelivery::Missing) | Err(ThreadIdError::NotYet) => Ok(Delivery::Waiting),
+        Ok(TurnDelivery::Composite | TurnDelivery::Duplicate(_)) => Err(Error::Message(
+            "rollout did not record a single submit".to_owned(),
+        )),
         Err(ThreadIdError::Ambiguous(_)) => Ok(Delivery::Ambiguous),
         Err(ThreadIdError::Malformed(path)) => Err(malformed(&path)),
+    }
+}
+
+fn rollout_path(err: &crewmux_transcript::Error) -> std::path::PathBuf {
+    match err {
+        crewmux_transcript::Error::Parse { path, .. }
+        | crewmux_transcript::Error::Incomplete { path } => path.clone(),
+        crewmux_transcript::Error::Io(_) | crewmux_transcript::Error::SessionId => {
+            std::path::PathBuf::from("rollout")
+        }
     }
 }
 
