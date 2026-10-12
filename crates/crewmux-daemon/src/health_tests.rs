@@ -82,23 +82,43 @@ async fn call(
     let path = path.to_owned();
     let body = body.map(<[u8]>::to_vec);
     let mut last = String::new();
-    for _ in 0..8 {
-        let sock = sock.clone();
-        let method = method.clone();
-        let path = path.clone();
-        let body = body.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            Client::over_uds(sock).request(&method, &path, body.as_deref())
-        })
-        .await;
-        match result {
-            Ok(Ok(response)) => return (response.status, response.body),
-            Ok(Err(err)) => last = err.to_string(),
-            Err(err) => last = err.to_string(),
+    for attempt in 0..8 {
+        match once(sock.clone(), method.clone(), path.clone(), body.clone()).await {
+            Ok(response) => return (response.status, response.body),
+            Err(err) if safe_retry(&method, &err) => {
+                last = err.to_string();
+                if attempt < 7 {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+            Err(err) => panic!("exchange {method} {path}: {err}"),
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("exchange {method} {path}: {last}");
+}
+
+async fn once(
+    sock: PathBuf,
+    method: String,
+    path: String,
+    body: Option<Vec<u8>>,
+) -> Result<crewmux_api::Response, crewmux_api::Error> {
+    tokio::task::spawn_blocking(move || {
+        Client::over_uds(sock).request(&method, &path, body.as_deref())
+    })
+    .await
+    .expect("join")
+}
+
+/// GET may be repeated. A POST is repeated only when dial itself failed.
+///
+/// An exchange error can mean the handler already committed. Archive is not
+/// idempotent: repeating it turns a lost 200 into 404.
+fn safe_retry(method: &str, err: &crewmux_api::Error) -> bool {
+    if method == "GET" || method == "HEAD" {
+        return true;
+    }
+    matches!(err, crewmux_api::Error::Connect { .. })
 }
 
 fn value(status: u16, body: &str) -> Value {
@@ -203,14 +223,14 @@ async fn stream_lease_and_classify_round_trip() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(value(status, &body)["body"], "hello");
 
-    let (status, _) = call(
+    let (status, body) = call(
         &harness.sock,
         "POST",
         "/api/stream/item-1/archive",
         Some(b"{}"),
     )
     .await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 200, "{body}");
     let (status, body) = call(&harness.sock, "GET", "/api/stream/list", None).await;
     assert_eq!(value(status, &body), json!([]));
 

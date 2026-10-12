@@ -148,7 +148,10 @@ async fn show(State(app): State<App>, Path(id): Path<String>) -> Response {
     }
 }
 
-async fn archive(State(app): State<App>, Path(id): Path<String>) -> Response {
+async fn archive(State(app): State<App>, Path(id): Path<String>, body: Bytes) -> Response {
+    // Read the body before the update. Replying first lets the peer see a
+    // reset while it is still writing, and a retry then archives twice.
+    drop(body);
     app.touch();
     reply(
         write_db(&app, move |conn| {
