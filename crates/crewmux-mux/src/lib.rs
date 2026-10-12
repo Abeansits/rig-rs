@@ -7,6 +7,7 @@
 mod argv;
 mod clients;
 mod control;
+mod control_child;
 mod control_line;
 mod death;
 mod decode;

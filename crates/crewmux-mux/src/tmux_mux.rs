@@ -18,6 +18,7 @@ use crate::argv::{
 };
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::control::{ControlCtx, run_control};
+use crate::control_child::ControlSlot;
 use crate::error::{MuxError, ensure_supported};
 use crate::exec::{ProcessExec, TmuxExec, is_absence, resolve_tmux_binary};
 use crate::hub::Hub;
@@ -63,6 +64,7 @@ pub struct TmuxMux {
     events: broadcast::Sender<MuxEvent>,
     own_write: watch::Sender<Option<Instant>>,
     cancel: CancellationToken,
+    child: Arc<ControlSlot>,
     tracker: TaskTracker,
     control: JoinHandle<()>,
 }
@@ -70,14 +72,19 @@ pub struct TmuxMux {
 impl Drop for TmuxMux {
     fn drop(&mut self) {
         self.cancel.cancel();
-        // Only a socket this process named may be torn down. The shared
-        // `rig-rs` server, and any server a parent process created, stay up.
-        if socket_owned_by(&self.socket, std::process::id()) {
-            let binary = self.binary.clone();
-            let socket = self.socket.clone();
-            let killer = std::thread::spawn(move || kill_owned_server(&binary, &socket));
-            drop(killer.join());
-        }
+        let child = Arc::clone(&self.child);
+        let binary = self.binary.clone();
+        let socket = self.socket.clone();
+        let reaper = std::thread::spawn(move || {
+            child.kill_and_wait();
+            // The server is forked from the control client and reparented to
+            // init, so killing the client leaves it running. This mux started
+            // that client, including when a parent process chose the socket
+            // name (`rig-rs-<their pid>-…`). Tests still refuse to kill a
+            // socket they do not own; see [`socket_owned_by`].
+            kill_server(&binary, &socket);
+        });
+        drop(reaper.join());
         self.control.abort();
         self.tracker.close();
     }
@@ -98,10 +105,7 @@ pub fn socket_owned_by(socket: &str, pid: u32) -> bool {
     }
 }
 
-fn kill_owned_server(binary: &str, socket: &str) {
-    if !socket_owned_by(socket, std::process::id()) {
-        return;
-    }
+fn kill_server(binary: &str, socket: &str) {
     let mut command = std::process::Command::new(binary);
     command
         .args(["-L", socket, "-f", "/dev/null", "kill-server"])
@@ -118,6 +122,17 @@ impl TmuxMux {
     ///
     /// A version older than 3.3 returns [`MuxError::TmuxTooOld`] and does not spawn.
     pub async fn connect(config: TmuxConfig) -> Result<Self, MuxError> {
+        Self::connect_until(config, CancellationToken::new()).await
+    }
+
+    /// [`connect`](Self::connect), stopping the control client when `cancel` fires.
+    ///
+    /// The daemon passes its shutdown token so a dying server is not replaced
+    /// with `new-session -A` while the process is exiting.
+    pub async fn connect_until(
+        config: TmuxConfig,
+        cancel: CancellationToken,
+    ) -> Result<Self, MuxError> {
         let binary = resolve_tmux_binary(&config.binary).await;
         let exec: Arc<dyn TmuxExec> =
             Arc::new(ProcessExec::new(binary.clone(), config.socket.clone()));
@@ -126,7 +141,7 @@ impl TmuxMux {
             socket: config.socket,
             pause_after: config.pause_after,
         };
-        Self::connect_with_exec(config, exec).await
+        Self::connect_with_exec(config, exec, cancel).await
     }
 
     /// Same as [`connect`](Self::connect), with a caller-supplied exec implementation.
@@ -136,6 +151,7 @@ impl TmuxMux {
     pub async fn connect_with_exec(
         config: TmuxConfig,
         exec: Arc<dyn TmuxExec>,
+        cancel: CancellationToken,
     ) -> Result<Self, MuxError> {
         ensure_version(exec.as_ref()).await?;
         let binary = config
@@ -143,13 +159,13 @@ impl TmuxMux {
             .to_str()
             .ok_or_else(|| MuxError::Control("tmux path is not utf-8".into()))?;
         let binary = binary.to_owned();
-        let cancel = CancellationToken::new();
         let tracker = TaskTracker::new();
         let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
         let (events, _) = broadcast::channel(2048);
         let (own_write, _) = watch::channel(None);
         let (bell_tx, bell_rx) = watch::channel(None);
         let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
+        let child = Arc::new(ControlSlot::new());
         let ctx = ControlCtx {
             binary: config.binary.clone(),
             socket: config.socket.clone(),
@@ -158,12 +174,16 @@ impl TmuxMux {
             hub: Arc::clone(&hub),
             events: events.clone(),
             cancel: cancel.clone(),
+            child: Arc::clone(&child),
             boot_tx: Some(boot_tx),
             bell: bell_rx,
         };
         let nudge_rx = events.subscribe();
         let control = tracker.spawn(run_control(ctx));
-        wait_ready(&cancel, &control, boot_rx).await?;
+        if let Err(err) = wait_ready(boot_rx).await {
+            fail_connect(&cancel, &child, &control, &binary, &config.socket).await;
+            return Err(err);
+        }
         tracker.spawn(crate::reap::nudge(
             Arc::clone(&exec),
             config.socket.clone(),
@@ -173,8 +193,7 @@ impl TmuxMux {
         let bell = match open_bell(exec.as_ref()).await {
             Ok(bell) => bell,
             Err(err) => {
-                cancel.cancel();
-                control.abort();
+                fail_connect(&cancel, &child, &control, &binary, &config.socket).await;
                 return Err(err);
             }
         };
@@ -182,8 +201,7 @@ impl TmuxMux {
         let socket_path = match read_socket_path(exec.as_ref()).await {
             Ok(path) => path,
             Err(err) => {
-                cancel.cancel();
-                control.abort();
+                fail_connect(&cancel, &child, &control, &binary, &config.socket).await;
                 return Err(err);
             }
         };
@@ -197,6 +215,7 @@ impl TmuxMux {
             events,
             own_write,
             cancel,
+            child,
             tracker,
             control,
         })
@@ -237,32 +256,39 @@ async fn ensure_version(exec: &dyn TmuxExec) -> Result<(), MuxError> {
     ensure_supported(&found)
 }
 
-async fn wait_ready(
+async fn fail_connect(
     cancel: &CancellationToken,
+    child: &Arc<ControlSlot>,
     control: &JoinHandle<()>,
+    binary: &str,
+    socket: &str,
+) {
+    cancel.cancel();
+    let slot = Arc::clone(child);
+    let binary = binary.to_owned();
+    let socket = socket.to_owned();
+    drop(
+        tokio::task::spawn_blocking(move || {
+            slot.kill_and_wait();
+            kill_server(&binary, &socket);
+        })
+        .await,
+    );
+    control.abort();
+}
+
+async fn wait_ready(
     boot_rx: tokio::sync::oneshot::Receiver<Result<(), MuxError>>,
 ) -> Result<(), MuxError> {
     match tokio::time::timeout(Duration::from_secs(8), boot_rx).await {
         Ok(Ok(Ok(()))) => Ok(()),
-        Ok(Ok(Err(err))) => {
-            cancel.cancel();
-            control.abort();
-            Err(err)
-        }
-        Ok(Err(_closed)) => {
-            cancel.cancel();
-            control.abort();
-            Err(MuxError::Control(
-                "control task ended before it was ready".into(),
-            ))
-        }
-        Err(_elapsed) => {
-            cancel.cancel();
-            control.abort();
-            Err(MuxError::Control(
-                "timed out starting the control client".into(),
-            ))
-        }
+        Ok(Ok(Err(err))) => Err(err),
+        Ok(Err(_closed)) => Err(MuxError::Control(
+            "control task ended before it was ready".into(),
+        )),
+        Err(_elapsed) => Err(MuxError::Control(
+            "timed out starting the control client".into(),
+        )),
     }
 }
 
@@ -425,6 +451,8 @@ mod tests {
 
     use async_trait::async_trait;
 
+    use tokio_util::sync::CancellationToken;
+
     use super::{TmuxConfig, TmuxMux};
     use crate::error::MuxError;
     use crate::exec::{ExecOutput, TmuxExec};
@@ -454,8 +482,12 @@ mod tests {
             stdout: "tmux 3.2a\n".into(),
             calls: AtomicUsize::new(0),
         });
-        let connected =
-            TmuxMux::connect_with_exec(TmuxConfig::default(), erase(Arc::clone(&probe))).await;
+        let connected = TmuxMux::connect_with_exec(
+            TmuxConfig::default(),
+            erase(Arc::clone(&probe)),
+            CancellationToken::new(),
+        )
+        .await;
         let Err(err) = connected else {
             panic!("old tmux was accepted");
         };

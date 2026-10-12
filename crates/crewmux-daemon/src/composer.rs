@@ -51,6 +51,34 @@ fn stub_region(screen: &str) -> Option<String> {
     Some(screen.get(start..).unwrap_or("").to_owned())
 }
 
+/// Composer text in `after`, starting at the prompt that was current in `before`.
+///
+/// That prompt is the last `stub> ` in the verdict-time snapshot. The same
+/// occurrence (by count, not by the line above it) is used in `after`. A later
+/// `stub> ` inside the payload stays in the region, and an earlier prompt is
+/// not selected just because it has the same reply line above it. If that
+/// occurrence has scrolled out of `after`, the last prompt in `after` is used.
+#[must_use]
+pub(crate) fn anchored_region(before: &str, after: &str) -> Option<String> {
+    let nth = before.matches("stub> ").count().checked_sub(1)?;
+    region_after_prompt(after, nth).or_else(|| stub_region(after))
+}
+
+fn region_after_prompt(screen: &str, nth: usize) -> Option<String> {
+    let mut from = 0usize;
+    let mut seen = 0usize;
+    loop {
+        let rest = screen.get(from..)?;
+        let rel = rest.find("stub> ")?;
+        let next = from.saturating_add(rel).saturating_add("stub> ".len());
+        if seen == nth {
+            return Some(screen.get(next..).unwrap_or("").to_owned());
+        }
+        seen = seen.saturating_add(1);
+        from = next;
+    }
+}
+
 /// Classify a stub pane. A gate is not a prompt. Text after `stub> ` is a draft.
 #[must_use]
 pub(crate) fn classify_stub(text: &str, draft_age: Option<Duration>) -> ComposerState {

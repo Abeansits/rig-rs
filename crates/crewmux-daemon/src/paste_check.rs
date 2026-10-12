@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crewmux_mux::{CaptureRange, PaneRef};
 
-use crate::composer::{ComposerParser, composer_empty};
+use crate::composer::{ComposerParser, anchored_region, composer_empty};
 use crate::error::Error;
 use crate::state::App;
 
@@ -35,17 +35,23 @@ pub(crate) fn classify_paste(before: &str, after: &str, payload: &str) -> PasteH
     // Width comes from the whole pane. The composer region starts mid-row, so
     // it no longer contains the padded rows that show where a wrap joins.
     let width = pane_width(before).or_else(|| pane_width(after));
-    let before = flat_region(parser, before, width);
-    let after = flat_region(parser, after, width);
+    let before_flat = flat_region(parser, before, width);
+    // The after-region starts at the verdict-time prompt (the last `stub> ` in
+    // `before`), not at a later copy inside the payload or an earlier one.
+    let after_flat = flatten_at(&composer_text(before, after), width);
     let payload_flat = flatten(payload);
-    if !located(&after, &payload_flat) {
+    if !located(&after_flat, &payload_flat) {
         return PasteHit::Missing;
     }
-    if leftover(&before, &after, &payload_flat) {
+    if leftover(&before_flat, &after_flat, &payload_flat) {
         PasteHit::Contaminated
     } else {
         PasteHit::Clean
     }
+}
+
+fn composer_text(before: &str, screen: &str) -> String {
+    anchored_region(before, screen).unwrap_or_else(|| screen.to_owned())
 }
 
 fn flat_region(parser: ComposerParser, screen: &str, width: Option<usize>) -> String {
@@ -53,7 +59,14 @@ fn flat_region(parser: ComposerParser, screen: &str, width: Option<usize>) -> St
     flatten_at(&text, width)
 }
 
-/// How much scrollback covers `payload` plus a margin, joined with `-J`.
+/// Scrollback for `capture-pane -J -S -<n>`.
+///
+/// `-S -<n>` is `n` raw grid rows of history plus the visible pane. Wrapped
+/// rows count toward `n`. `len / 20` overestimates a 90-column wrap; it is a
+/// window, not a paste limit. The window is clamped to 500 history rows. A
+/// paste whose prompt no longer fits fails closed: the payload is not found
+/// and Enter is not sent. A 20_000-character line on a 90-column pane is about
+/// 230 wrapped rows and still fits.
 #[must_use]
 pub(crate) fn history_range(payload: &str) -> CaptureRange {
     let wraps = payload.len() / 20;
@@ -72,11 +85,12 @@ pub(crate) fn exact_append(before: &str, after: &str, payload: &str) -> bool {
     after == expected
 }
 
-/// Recapture until a real pane has had time to echo the paste.
+/// Recapture until the composer text matches across two captures.
 ///
-/// An exact append is the in-memory multiplexer: the screen will not change.
-/// A contaminated screen is already final. Anything else may still be
-/// receiving the application's echo, including `EXTRA` from a contaminating stub.
+/// An exact append is the in-memory multiplexer and is returned immediately.
+/// A clean stable screen is returned as soon as the two captures match. A
+/// contaminated screen is final only after 150ms, so a frame torn mid-paste
+/// is not the verdict. A missing payload keeps polling until the deadline.
 pub(crate) async fn pasted_screen(
     app: &App,
     pane: &PaneRef,
@@ -85,48 +99,52 @@ pub(crate) async fn pasted_screen(
     range: CaptureRange,
 ) -> Result<String, Error> {
     let mut after = app.mux.capture(pane, range).await?.text;
-    let hit = classify_paste(before, &after, payload);
-    if exact_append(before, &after, payload) || hit == PasteHit::Contaminated {
+    if exact_append(before, &after, payload) {
         return Ok(after);
     }
     let started = Instant::now();
-    let floor = Duration::from_millis(150);
     let deadline = started + Duration::from_millis(500);
+    let mut seen = composer_text(before, &after);
     loop {
-        let hit = classify_paste(before, &after, payload);
-        if hit == PasteHit::Contaminated {
-            return Ok(after);
-        }
-        let waited = started.elapsed() >= floor;
-        if waited && hit != PasteHit::Clean {
-            return Ok(after);
-        }
         if Instant::now() >= deadline {
             return Ok(after);
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
-        let next = app.mux.capture(pane, range).await?.text;
-        if waited && next == after && hit == PasteHit::Clean {
+        after = app.mux.capture(pane, range).await?.text;
+        let text = composer_text(before, &after);
+        let stable = text == seen;
+        seen = text;
+        if stable && settled(started.elapsed(), before, &after, payload) {
             return Ok(after);
         }
-        after = next;
+    }
+}
+
+/// Clean is final as soon as the composer stops changing. Contamination needs
+/// the 150ms floor. Missing means the paste may still be landing.
+fn settled(elapsed: Duration, before: &str, after: &str, payload: &str) -> bool {
+    match classify_paste(before, after, payload) {
+        PasteHit::Clean => true,
+        PasteHit::Contaminated => elapsed >= Duration::from_millis(150),
+        PasteHit::Missing => false,
     }
 }
 
 /// Drop a failed paste. Enter is never sent.
 ///
-/// The stub's clear is `C-u`, repeated a bounded number of times for a
-/// multi-line buffer. Returns whether a recapture shows an empty composer.
-/// A composer that stays dirty is reported by the caller; this does not loop
-/// until it is empty and does not submit.
+/// The stub's clear is `C-u`, once per pasted line and at least 8 times.
+/// Returns whether a recapture shows an empty composer. A composer that stays
+/// dirty is reported by the caller; this does not submit.
 pub(crate) async fn clear_composer(
     app: &App,
     pane: &PaneRef,
     range: CaptureRange,
+    lines: usize,
 ) -> Result<bool, Error> {
     let parser = ComposerParser::Stub;
-    let deadline = Instant::now() + Duration::from_millis(500);
-    let mut sent = 0u8;
+    let budget = clear_passes(lines);
+    let deadline = Instant::now() + Duration::from_millis(40).saturating_mul(budget);
+    let mut sent = 0u32;
     loop {
         if sent > 0 {
             let text = app.mux.capture(pane, range).await?.text;
@@ -134,13 +152,20 @@ pub(crate) async fn clear_composer(
                 return Ok(true);
             }
         }
-        if sent >= 8 || (sent > 0 && Instant::now() >= deadline) {
+        if sent >= budget || (sent > 0 && Instant::now() >= deadline) {
             return Ok(false);
         }
         app.mux.send_keys(pane, parser.clear_keys()).await?;
         sent = sent.saturating_add(1);
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+}
+
+/// `C-u` passes for a paste of `lines` lines. Short pastes stay at 8.
+fn clear_passes(lines: usize) -> u32 {
+    u32::try_from(lines.saturating_add(1))
+        .unwrap_or(80)
+        .clamp(8, 80)
 }
 
 fn located(after_flat: &str, payload_flat: &str) -> bool {
@@ -261,7 +286,9 @@ fn grid_width(lines: &[&str]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PasteHit, classify_paste};
+    use crewmux_mux::CaptureRange;
+
+    use super::{PasteHit, classify_paste, clear_passes, history_range};
 
     fn payload() -> &'static str {
         "From: operator@host\nTo: one@pair\n---\nhello\n---\nreply-line"
@@ -374,5 +401,44 @@ mod tests {
         let mut dirty = after.clone();
         dirty.push_str("\nEXTRA\n");
         assert_eq!(classify_paste(before, &dirty, body), PasteHit::Contaminated);
+    }
+
+    #[test]
+    fn payload_containing_the_prompt_is_anchored_to_the_verdict_prompt() {
+        let before = "stub-agent\nstub> \n";
+        let body = "see stub> inside";
+        let mut after = String::new();
+        after.push_str(before);
+        after.push_str(body);
+        assert_eq!(classify_paste(before, &after, body), PasteHit::Clean);
+    }
+
+    #[test]
+    fn a_repeated_reply_line_stays_above_the_verdict_prompt() {
+        let reply = "↩ Reply: rig send operator@host \"...\"";
+        let first = format!("{}\n{reply}\n{reply}\nstub> \n", "A".repeat(20));
+        let second = format!("{}\n{reply}\n{reply}\nstub> \n", "B".repeat(20));
+        let before = format!("stub-agent\nstub> \n{first}{second}");
+        let body = format!("From: operator@host\n{}", "C".repeat(20));
+        let after = format!("{before}{body}");
+        assert_eq!(classify_paste(&before, &after, &body), PasteHit::Clean);
+    }
+
+    #[test]
+    fn history_range_clamps_at_500_rows() {
+        let wide = "W".repeat(20_000);
+        assert_eq!(history_range(&wide), CaptureRange::JoinedHistory(500));
+        let modest = "W".repeat(100);
+        assert!(matches!(
+            history_range(&modest),
+            CaptureRange::JoinedHistory(rows) if (48..500).contains(&rows)
+        ));
+    }
+
+    #[test]
+    fn clear_budget_tracks_the_pasted_line_count() {
+        assert_eq!(clear_passes(1), 8);
+        assert_eq!(clear_passes(62), 63);
+        assert_eq!(clear_passes(500), 80);
     }
 }

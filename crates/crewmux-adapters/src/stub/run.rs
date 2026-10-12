@@ -4,6 +4,8 @@
 
 use std::io::{BufRead, Read, Write};
 use std::os::fd::AsFd;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::io::AsyncWriteExt;
@@ -48,6 +50,7 @@ async fn drive(script: StubScript) -> Result<(), Error> {
             .map(|ms| started + Duration::from_millis(ms)),
         script.contaminate,
         script.buffer,
+        Arc::new(AtomicBool::new(true)),
     )
     .await
 }
@@ -59,13 +62,15 @@ async fn echo_until(
     exit_at: Option<tokio::time::Instant>,
     mut contaminate: bool,
     buffer: bool,
+    echo_lines: Arc<AtomicBool>,
 ) -> Result<(), Error> {
     // Tokio's stdin read cannot be cancelled, so a timer cannot win while tmux
     // holds the pty. Holding `Stdin::lock` also deadlocks process exit, which
     // flushes stdio. A detached thread reads a dup'd fd instead.
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let echoed = Arc::clone(&echo_lines);
     drop(std::thread::spawn(move || {
-        read_stdin(&tx, contaminate, buffer);
+        read_stdin(&tx, contaminate, buffer, &echoed);
     }));
     let mut stdout = tokio::io::stdout();
     loop {
@@ -85,7 +90,7 @@ async fn echo_until(
         let Some(event) = event else {
             return Ok(());
         };
-        write_event(&mut stdout, event, &mut contaminate).await?;
+        write_event(&mut stdout, event, &mut contaminate, &echo_lines).await?;
     }
 }
 
@@ -93,6 +98,7 @@ async fn write_event(
     stdout: &mut tokio::io::Stdout,
     event: StdinEvent,
     contaminate: &mut bool,
+    echo_lines: &AtomicBool,
 ) -> Result<(), Error> {
     match event {
         StdinEvent::Redraw => {
@@ -120,9 +126,13 @@ async fn write_event(
             stdout.write_all(line.as_bytes()).await?;
             stdout.write_all(b"stub> \n").await?;
         }
-        StdinEvent::Line(line) => {
+        // A tty with ECHO already showed this line. Writing it again races the
+        // rest of the paste and tears the composer (`WWWWFrom: …`). A pipe has
+        // no kernel echo, so the line is written there.
+        StdinEvent::Line(line) if echo_lines.load(Ordering::Acquire) => {
             stdout.write_all(line.as_bytes()).await?;
         }
+        StdinEvent::Line(_) => {}
     }
     stdout.flush().await?;
     Ok(())
@@ -132,6 +142,7 @@ fn read_stdin(
     tx: &tokio::sync::mpsc::UnboundedSender<StdinEvent>,
     contaminate: bool,
     buffer: bool,
+    echo_lines: &AtomicBool,
 ) {
     // Dup the fd so this read does not hold the stdio lock. `process::exit`
     // flushes stdio and would deadlock on that lock until the pty closed.
@@ -140,6 +151,8 @@ fn read_stdin(
     };
     let mut file = std::fs::File::from(fd);
     let raw = disable_canonical(&file);
+    // Set before any read so a `Line` event is not echoed twice.
+    echo_lines.store(!raw, Ordering::Release);
     if raw && buffer {
         read_buffered(&mut file, tx);
     } else if raw {

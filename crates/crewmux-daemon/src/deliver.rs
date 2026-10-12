@@ -207,20 +207,21 @@ async fn paste_and_check(
     app.mux.paste(pane, &payload, opts).await?;
     let after = pasted_screen(app, pane, &before.text, &payload, range).await?;
     let mut degraded = ComposerParser::Stub.state(&before.text, None) == ComposerState::Unknown;
+    let lines = payload.lines().count();
     let outcome = match classify_paste(&before.text, &after, &payload) {
         PasteHit::Clean => {
             app.mux.send_keys(pane, &[Key::Enter]).await?;
             DeliveryOutcome::Delivered
         }
         PasteHit::Contaminated => {
-            if !clear_composer(app, pane, range).await? {
+            if !clear_composer(app, pane, range, lines).await? {
                 degraded = true;
             }
             raise(app, address, "contaminated").await;
             DeliveryOutcome::Contaminated
         }
         PasteHit::Missing => {
-            if !clear_composer(app, pane, range).await? {
+            if !clear_composer(app, pane, range, lines).await? {
                 degraded = true;
             }
             raise(app, address, "did not render").await;

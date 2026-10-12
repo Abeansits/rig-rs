@@ -36,15 +36,15 @@ pub fn run() -> Result<(), Error> {
 }
 
 async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error> {
+    let cancel = CancellationToken::new();
     let socket_name = socket_name_from_env();
-    let mux = build_mux(&socket_name).await?;
+    let mux = build_mux(&socket_name, cancel.clone()).await?;
     let stub_bin = stub_binary();
     let mut registry = AdapterRegistry::new();
     registry.register(Arc::new(StubAdapter::new(
         Arc::clone(&mux),
         stub_bin.clone(),
     )));
-    let cancel = CancellationToken::new();
     let loaded = {
         let store = Arc::clone(&store);
         tokio::task::spawn_blocking(move || store.read(crewmux_store::load_book))
@@ -108,7 +108,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     Ok(())
 }
 
-async fn build_mux(socket: &str) -> Result<Arc<dyn Multiplexer>, Error> {
+async fn build_mux(socket: &str, cancel: CancellationToken) -> Result<Arc<dyn Multiplexer>, Error> {
     if fake_mux_requested() {
         let fake = Arc::new(crewmux_mux::FakeMux::with_socket(socket));
         fake.enable_stub_scripts().await;
@@ -118,7 +118,7 @@ async fn build_mux(socket: &str) -> Result<Arc<dyn Multiplexer>, Error> {
         socket: socket.to_owned(),
         ..TmuxConfig::default()
     };
-    let mux = TmuxMux::connect(config).await?;
+    let mux = TmuxMux::connect_until(config, cancel).await?;
     Ok(Arc::new(mux))
 }
 
