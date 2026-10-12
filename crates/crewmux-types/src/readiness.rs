@@ -35,6 +35,18 @@ pub enum ReadinessCode {
     UnknownMenu,
     /// A stable screen that matched nothing.
     UnrecognisedScreen,
+    /// Codex reported a stale app-server control socket. We do not kill it.
+    StaleCodexServer,
+    /// A Codex MCP tool approval that is not an auto-answered rig tool.
+    McpToolApproval,
+    /// Two Codex rollouts still match after first-message correlation.
+    ThreadIdAmbiguous,
+    /// `CODEX_HOME` is missing. The launch is not retried.
+    CodexHomeMissing,
+    /// The composer accepted input but no rollout user item appeared.
+    NotVerified,
+    /// The background-server menu. It is never auto-answered.
+    CodexBackgroundServer,
     /// Claude's fullscreen-renderer popup.
     FullscreenRenderer,
     /// The composer already holds text. Fail closed: do not paste or send Enter.
@@ -61,6 +73,12 @@ impl ReadinessCode {
             Self::OnboardingTheme => "onboarding_theme",
             Self::UnknownMenu => "unknown_menu",
             Self::UnrecognisedScreen => "unrecognised_screen",
+            Self::StaleCodexServer => "stale_codex_server",
+            Self::McpToolApproval => "mcp_tool_approval",
+            Self::ThreadIdAmbiguous => "thread_id_ambiguous",
+            Self::CodexHomeMissing => "codex_home_missing",
+            Self::NotVerified => "not_verified",
+            Self::CodexBackgroundServer => "codex_background_server",
             Self::FullscreenRenderer => "fullscreen_renderer",
             Self::PromptDraft => "prompt_draft",
             Self::Other(text) => text.as_str(),
@@ -93,6 +111,12 @@ impl ReadinessCode {
             "onboarding_theme" => Self::OnboardingTheme,
             "unknown_menu" => Self::UnknownMenu,
             "unrecognised_screen" => Self::UnrecognisedScreen,
+            "stale_codex_server" => Self::StaleCodexServer,
+            "mcp_tool_approval" => Self::McpToolApproval,
+            "thread_id_ambiguous" => Self::ThreadIdAmbiguous,
+            "codex_home_missing" => Self::CodexHomeMissing,
+            "not_verified" => Self::NotVerified,
+            "codex_background_server" => Self::CodexBackgroundServer,
             "fullscreen_renderer" => Self::FullscreenRenderer,
             "prompt_draft" => Self::PromptDraft,
             other => Self::Other(other.to_owned()),

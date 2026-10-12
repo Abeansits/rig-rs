@@ -17,10 +17,12 @@ const ALLOW_ENTER: &[&str] = &[
 ///
 /// Returns [`Error`] when a forbidden key is found, or a directory cannot be read.
 pub fn lint_blind_enter(root: &Path) -> Result<(), Error> {
-    let dir = root.join("crates/crewmux-adapters/src");
     let mut hits = Vec::new();
-    if dir.is_dir() {
-        walk(&dir, root, &mut hits)?;
+    for rel in ["crates", "xtask/src"] {
+        let dir = root.join(rel);
+        if dir.is_dir() {
+            walk(&dir, root, &mut hits)?;
+        }
     }
     if hits.is_empty() {
         Ok(())
@@ -39,10 +41,16 @@ fn walk(dir: &Path, root: &Path, hits: &mut Vec<String>) -> Result<(), Error> {
         let entry = entry.map_err(|source| io_err("read directory entry", source))?;
         let path = entry.path();
         if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some("tests") {
+                continue;
+            }
             walk(&path, root, hits)?;
             continue;
         }
         if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        if relative(&path, root).as_deref() == Some("xtask/src/lint_enter.rs") {
             continue;
         }
         scan(&path, root, hits)?;
@@ -53,25 +61,34 @@ fn walk(dir: &Path, root: &Path, hits: &mut Vec<String>) -> Result<(), Error> {
 fn scan(path: &Path, root: &Path, hits: &mut Vec<String>) -> Result<(), Error> {
     let text = fs::read_to_string(path)
         .map_err(|source| io_err(format!("read {}", path.display()), source))?;
-    let allow_enter = relative(path, root).is_some_and(|rel| ALLOW_ENTER.contains(&rel.as_str()));
+    let rel = relative(path, root).unwrap_or_default();
+    let in_adapters = rel.starts_with("crates/crewmux-adapters/src/");
+    let allow_enter = ALLOW_ENTER.contains(&rel.as_str());
     let code = strip_comments(&text);
     let compact: String = code.chars().filter(|ch| !ch.is_whitespace()).collect();
     if code.contains('\r') {
         hits.push(format!("{}:1: Enter", path.display()));
     }
-    if !allow_enter && (compact.contains("Key::Enter") || compact.contains("Key::*")) {
+    if in_adapters && !allow_enter && (compact.contains("Key::Enter") || compact.contains("Key::*"))
+    {
         hits.push(format!("{}:1: Enter", path.display()));
     }
-    if !allow_enter && (compact.contains("\"C-m\"") || compact.contains("\"Enter\"")) {
+    if in_adapters && !allow_enter && (compact.contains("\"C-m\"") || compact.contains("\"Enter\""))
+    {
         hits.push(format!("{}:1: Enter", path.display()));
     }
-    if carriage_return_literal(&compact) {
+    let cr = if in_adapters {
+        carriage_return_literal(&compact)
+    } else {
+        workspace_cr(&compact)
+    };
+    if cr {
         hits.push(format!("{}:1: Enter", path.display()));
     }
-    if compact.contains("Key::CtrlC") || compact.contains("Key::Escape") {
+    if in_adapters && (compact.contains("Key::CtrlC") || compact.contains("Key::Escape")) {
         hits.push(format!("{}:1: quit key", path.display()));
     }
-    if forbidden_literal(&compact) {
+    if in_adapters && forbidden_literal(&compact) {
         hits.push(format!("{}:1: menu literal", path.display()));
     }
     Ok(())
@@ -109,6 +126,7 @@ fn carriage_return_literal(compact: &str) -> bool {
     const NEWLINES: &[&str] = &["\"\\n\""];
     if NEEDLES.iter().any(|needle| compact.contains(needle))
         || compact.contains("\\r")
+        || cr_escape_any_case(compact)
         || cr_constructor(compact)
         || decimal_as_char(compact)
         || hex_cr(compact)
@@ -122,6 +140,20 @@ fn carriage_return_literal(compact: &str) -> bool {
     // file also builds a key from that value. A bare `"\r"` is already a hit.
     let has_newline = NEWLINES.iter().any(|escape| compact.contains(escape));
     has_newline && (compact.contains("Key::Literal") || compact.contains("send_keys"))
+}
+
+/// Carriage-return shapes that are blind Enter even outside the adapter tree.
+///
+/// A literal `"\r"` stays an adapter finding: HTTP and transcript code use it
+/// as a newline, not as a key.
+fn workspace_cr(compact: &str) -> bool {
+    cr_escape_any_case(compact) || decimal_as_char(compact) || cr_constructor(compact)
+}
+
+/// `\x0D` and `\u{000D}` are the same escapes as the lowercase forms.
+fn cr_escape_any_case(compact: &str) -> bool {
+    let lower = compact.to_ascii_lowercase();
+    lower.contains("\\x0d") || lower.contains("\\u{000d}") || lower.contains("\\u{d}")
 }
 
 fn cr_constructor(compact: &str) -> bool {

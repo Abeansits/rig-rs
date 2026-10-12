@@ -1,0 +1,380 @@
+[
+ {
+  "file": "cx-lo-00-first-launch.txt",
+  "scenario": "menu",
+  "tag": "first-launch",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-01-menu-80x24.txt",
+  "scenario": "menu",
+  "tag": "menu-80x24",
+  "size": "80x24",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-02-menu-200x50.txt",
+  "scenario": "menu",
+  "tag": "menu-200x50",
+  "size": "200x50",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-03-menu-60x20.txt",
+  "scenario": "menu",
+  "tag": "menu-60x20",
+  "size": "60x20",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-04-menu-120x40.txt",
+  "scenario": "menu",
+  "tag": "menu-120x40",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-05-menu-opt2-device.txt",
+  "scenario": "menu",
+  "tag": "menu-opt2-device",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-06-menu-opt3-apikey.txt",
+  "scenario": "menu",
+  "tag": "menu-opt3-apikey",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-07-menu-down-past-end.txt",
+  "scenario": "menu",
+  "tag": "menu-down-past-end",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-08-menu-up-to-opt1.txt",
+  "scenario": "menu",
+  "tag": "menu-up-to-opt1",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-09-menu-after-esc.txt",
+  "scenario": "menu",
+  "tag": "menu-after-esc",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-10-menu-after-esc2.txt",
+  "scenario": "menu",
+  "tag": "menu-after-esc2",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-11-first-launch.txt",
+  "scenario": "relaunch-after-esc",
+  "tag": "first-launch",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-12-after-esc.txt",
+  "scenario": "relaunch-after-esc",
+  "tag": "after-esc",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-13-second-launch-same-home.txt",
+  "scenario": "relaunch-after-esc-same-home",
+  "tag": "second-launch-same-home",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-14-menu.txt",
+  "scenario": "chatgpt",
+  "tag": "menu",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-15-chatgpt-login-start.txt",
+  "scenario": "chatgpt",
+  "tag": "chatgpt-login-start",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-16-chatgpt-login-later.txt",
+  "scenario": "chatgpt",
+  "tag": "chatgpt-login-later",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-17-chatgpt-login-80x24.txt",
+  "scenario": "chatgpt",
+  "tag": "chatgpt-login-80x24",
+  "size": "80x24",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-18-chatgpt-login-120x40.txt",
+  "scenario": "chatgpt",
+  "tag": "chatgpt-login-120x40",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-19-chatgpt-after-esc.txt",
+  "scenario": "chatgpt",
+  "tag": "chatgpt-after-esc",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-20-chatgpt-after-esc2.txt",
+  "scenario": "chatgpt",
+  "tag": "chatgpt-after-esc2",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-21-menu.txt",
+  "scenario": "device",
+  "tag": "menu",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-22-device-code-start.txt",
+  "scenario": "device",
+  "tag": "device-code-start",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-23-device-code-later.txt",
+  "scenario": "device",
+  "tag": "device-code-later",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-24-device-code-80x24.txt",
+  "scenario": "device",
+  "tag": "device-code-80x24",
+  "size": "80x24",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-25-device-after-esc.txt",
+  "scenario": "device",
+  "tag": "device-after-esc",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-26-device-after-esc2.txt",
+  "scenario": "device",
+  "tag": "device-after-esc2",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-27-menu.txt",
+  "scenario": "apikey",
+  "tag": "menu",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-28-apikey-entry.txt",
+  "scenario": "apikey",
+  "tag": "apikey-entry",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-29-apikey-entry-80x24.txt",
+  "scenario": "apikey",
+  "tag": "apikey-entry-80x24",
+  "size": "80x24",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-30-apikey-entry-120x40.txt",
+  "scenario": "apikey",
+  "tag": "apikey-entry-120x40",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-31-apikey-empty-enter.txt",
+  "scenario": "apikey",
+  "tag": "apikey-empty-enter",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-32-apikey-after-esc.txt",
+  "scenario": "apikey",
+  "tag": "apikey-after-esc",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-33-apikey-after-esc2.txt",
+  "scenario": "apikey",
+  "tag": "apikey-after-esc2",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-34-menu.txt",
+  "scenario": "ctrlc",
+  "tag": "menu",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-35-menu-ctrl-c.txt",
+  "scenario": "ctrlc",
+  "tag": "menu-ctrl-c",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-36-menu-ctrl-c2.txt",
+  "scenario": "ctrlc",
+  "tag": "menu-ctrl-c2",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-37-menu.txt",
+  "scenario": "keys",
+  "tag": "menu",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-38-menu-q.txt",
+  "scenario": "keys",
+  "tag": "menu-q",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-39-menu-digit3.txt",
+  "scenario": "keys",
+  "tag": "menu-digit3",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-40-menu-digit3-enter.txt",
+  "scenario": "keys",
+  "tag": "menu-digit3-enter",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-41-launch-60x20.txt",
+  "scenario": "small",
+  "tag": "launch-60x20",
+  "size": "60x20",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-42-launch-git-repo.txt",
+  "scenario": "gitrepo",
+  "tag": "launch-git-repo",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-43-resume-logged-out.txt",
+  "scenario": "resume",
+  "tag": "resume-logged-out",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-44-launch-no-daemon.txt",
+  "scenario": "nodaemon",
+  "tag": "launch-no-daemon",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-45-login-status.txt",
+  "scenario": "login-status",
+  "tag": "login-status",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-46-exec-logged-out.txt",
+  "scenario": "exec",
+  "tag": "exec-logged-out",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-47-codex-home-missing.txt",
+  "scenario": "home-missing",
+  "tag": "codex-home-missing",
+  "size": "120x40",
+  "pane_dead": "1"
+ },
+ {
+  "file": "cx-lo-48-menu.txt",
+  "scenario": "stale-daemon",
+  "tag": "menu",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-49-relaunch-1.txt",
+  "scenario": "stale-daemon",
+  "tag": "relaunch-1",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-50-relaunch-2.txt",
+  "scenario": "stale-daemon",
+  "tag": "relaunch-2",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-51-relaunch-3.txt",
+  "scenario": "stale-daemon",
+  "tag": "relaunch-3",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-52-relaunch-4.txt",
+  "scenario": "stale-daemon",
+  "tag": "relaunch-4",
+  "size": "120x40",
+  "pane_dead": "0"
+ },
+ {
+  "file": "cx-lo-53-relaunch-4-esc.txt",
+  "scenario": "stale-daemon",
+  "tag": "relaunch-4-esc",
+  "size": "120x40",
+  "pane_dead": "0"
+ }
+]

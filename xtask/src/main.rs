@@ -22,6 +22,7 @@ xtask lint-mux
 xtask lint-blind-enter
 xtask lint claude-json
 xtask lint window-size
+xtask lint blind-enter
 xtask record-tui [--openrig DIR] [--out DIR]
 
 diff exits 0 when every verdict is Equal or ExpectedDiff, 1 on Unexpected or a
@@ -162,6 +163,16 @@ fn cmd_lint(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
         Some("window-size") => match xtask::lint_window_size(&root) {
             Ok(()) => {
                 out("lint-window-size ok");
+                Ok(0)
+            }
+            Err(error) => {
+                err(&error.to_string());
+                Ok(1)
+            }
+        },
+        Some("blind-enter") => match xtask::lint_blind_enter(&root) {
+            Ok(()) => {
+                out("lint-blind-enter ok");
                 Ok(0)
             }
             Err(error) => {

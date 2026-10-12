@@ -7,7 +7,9 @@
 use serde::Deserialize;
 
 use crewmux_core::SeatState;
-use crewmux_types::{PodName, ReadinessCode, RigName, RuntimeKind, SeatKey, TmuxSession};
+use crewmux_types::{
+    LoginKind, PodName, ReadinessCode, RigName, RuntimeKind, SeatKey, TmuxSession,
+};
 
 use crate::client::Client;
 use crate::endpoint::{AttachInfo, Endpoint, ListSeats};
@@ -147,6 +149,10 @@ fn seat_state(state: &str, code: Option<&str>) -> Option<SeatState> {
         "attention" => Some(SeatState::Attention(ReadinessCode::parse(
             code.unwrap_or("unrecognised_screen"),
         ))),
+        "login_required" => Some(SeatState::LoginRequired {
+            kind: LoginKind::parse(code.unwrap_or("menu")),
+            evidence: String::new(),
+        }),
         _ => None,
     }
 }

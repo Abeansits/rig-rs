@@ -23,4 +23,10 @@ pub enum Error {
         /// Parser message.
         msg: String,
     },
+    /// The file has no complete jsonl line yet.
+    #[error("transcript {} is still being written", path.display())]
+    Incomplete {
+        /// Transcript path.
+        path: PathBuf,
+    },
 }

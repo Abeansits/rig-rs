@@ -192,12 +192,28 @@ fn detail_for(state: &State, id: &SeatKey) -> Vec<ContentRow> {
     lines
 }
 
+fn attention_text(seat: &SeatView) -> Option<String> {
+    match &seat.state {
+        SeatState::Attention(code) => Some(format!("{}  {}", seat.name.as_str(), code_name(code))),
+        SeatState::LoginRequired { kind, .. } => Some(format!(
+            "{}  login_required {} — run `codex login` in a terminal",
+            seat.name.as_str(),
+            kind.as_str()
+        )),
+        SeatState::Planned
+        | SeatState::Launching
+        | SeatState::Ready
+        | SeatState::Stopped
+        | SeatState::Dead => None,
+    }
+}
+
 fn attention_lines(state: &State) -> Vec<ContentRow> {
     let mut lines = Vec::new();
     for seat in &state.snapshot.seats {
-        if let SeatState::Attention(code) = &seat.state {
+        if let Some(text) = attention_text(seat) {
             lines.push(ContentRow {
-                text: format!("{}  {}", seat.name.as_str(), code_name(code)),
+                text,
                 action: Some(Action::Select(RowKey::Seat(seat.id.clone()))),
             });
         }
@@ -233,27 +249,10 @@ fn activity_lines(state: &State) -> Vec<ContentRow> {
         .collect()
 }
 
-/// Wire name of a readiness code, matching the serde rename.
+/// Wire name of a readiness code, matching [`ReadinessCode::as_str`].
 #[must_use]
 pub(crate) fn code_name(code: &ReadinessCode) -> String {
-    match code {
-        ReadinessCode::Ready => "ready".to_owned(),
-        ReadinessCode::Booting => "booting".to_owned(),
-        ReadinessCode::TrustGate => "trust_gate".to_owned(),
-        ReadinessCode::HookTrustGate => "hook_trust_gate".to_owned(),
-        ReadinessCode::UpdateGate => "update_gate".to_owned(),
-        ReadinessCode::LoginRequired => "login_required".to_owned(),
-        ReadinessCode::McpGate => "mcp_gate".to_owned(),
-        ReadinessCode::BypassConsentGate => "bypass_consent_gate".to_owned(),
-        ReadinessCode::CodexAuthRefusal => "codex_auth_refusal".to_owned(),
-        ReadinessCode::CodexClientIncompatible => "codex_client_incompatible".to_owned(),
-        ReadinessCode::OnboardingTheme => "onboarding_theme".to_owned(),
-        ReadinessCode::UnknownMenu => "unknown_menu".to_owned(),
-        ReadinessCode::UnrecognisedScreen => "unrecognised_screen".to_owned(),
-        ReadinessCode::FullscreenRenderer => "fullscreen_renderer".to_owned(),
-        ReadinessCode::PromptDraft => "prompt_draft".to_owned(),
-        ReadinessCode::Other(other) => other.clone(),
-    }
+    code.as_str().to_owned()
 }
 
 fn group(snapshot: &Snapshot) -> Vec<RigNode> {

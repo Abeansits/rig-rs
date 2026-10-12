@@ -4,11 +4,13 @@
 //! on adapters, so snapshot restore can call adapters without a cycle.
 
 mod claude;
+mod codex;
 mod error;
 mod normalize;
 mod source;
 
 pub use claude::{ClaudeTranscript, canonical_session_id, project_slug, transcript_path};
+pub use codex::{CodexRollout, SessionMeta, read_session_meta};
 pub use error::Error;
 pub use normalize::{
     Fingerprint, TurnMatch, fingerprint, fingerprint_raw, match_turn, normalize_for,

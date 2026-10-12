@@ -153,8 +153,8 @@ impl ClaudeIo {
 fn map_transcript(err: crewmux_transcript::Error) -> Error {
     match err {
         crewmux_transcript::Error::Io(err) => Error::Io(err),
-        crewmux_transcript::Error::SessionId | crewmux_transcript::Error::Parse { .. } => {
-            Error::Message(err.to_string())
-        }
+        crewmux_transcript::Error::SessionId
+        | crewmux_transcript::Error::Parse { .. }
+        | crewmux_transcript::Error::Incomplete { .. } => Error::Message(err.to_string()),
     }
 }

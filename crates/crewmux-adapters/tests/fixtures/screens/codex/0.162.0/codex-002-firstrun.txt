@@ -1,0 +1,40 @@
+
+  Cannot use the background server
+  Experimental feature request failed
+
+
+  1. Run without daemon this time
+     Restart with these settings (disabled)  Restart cannot resolve this compatibility check.
+› 2. Cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

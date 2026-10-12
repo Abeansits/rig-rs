@@ -15,17 +15,19 @@ use crewmux_types::{ReadinessCode, SeatId};
 mod support;
 
 const UPDATE_NOW: &str = "\
-Update available 0.162.0 → 0.162.1
+Update available · 0.162.0 → 0.162.1
 
-› 1. Update now (runs brew upgrade --cask codex)
+› 1. Update now (runs `brew upgrade --cask codex`)
   2. Skip
+  3. Skip until next version
 ";
 
 const UPDATE_SKIP: &str = "\
-Update available 0.162.0 → 0.162.1
+Update available · 0.162.0 → 0.162.1
 
-  1. Update now (runs brew upgrade --cask codex)
+  1. Update now (runs `brew upgrade --cask codex`)
 › 2. Skip
+  3. Skip until next version
 ";
 
 #[tokio::test]

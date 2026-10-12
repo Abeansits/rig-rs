@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crewmux_core::{Clock, Timestamp};
 use crewmux_mux::Capture;
-use crewmux_types::ReadinessCode;
+use crewmux_types::{LoginKind, ReadinessCode};
 
 use crate::types::Readiness;
 
@@ -27,6 +27,13 @@ pub enum WatchDecision {
     },
     /// The launch timeout fired first. Tests assert this does not happen for a stable screen.
     TimedOut,
+    /// Codex login. The daemon records [`crewmux_core::SeatState::LoginRequired`].
+    LoginRequired {
+        /// Login kind.
+        kind: LoginKind,
+        /// Evidence.
+        evidence: String,
+    },
 }
 
 /// Per-seat poll state. The clock is supplied by the caller so tests stay manual.
@@ -71,6 +78,10 @@ impl ReadinessWatch {
                 evidence: capture.text.clone(),
             },
             Readiness::Booting | Readiness::Inconclusive => self.inconclusive(now, capture),
+            Readiness::Login { kind, evidence } => WatchDecision::LoginRequired {
+                kind: *kind,
+                evidence: evidence.clone(),
+            },
         }
     }
 

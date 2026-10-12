@@ -103,6 +103,11 @@ fn as_option(line: &str, index: usize) -> Option<MenuOption> {
     if !selected {
         return None;
     }
+    // A column-0 unnumbered `›` is the Codex composer (`› Ask Codex…`), not a choice.
+    // `❯ Resume from summary` and indented ` ❯ No, exit` stay choices.
+    if number.is_none() && line.starts_with('›') {
+        return None;
+    }
     if label.is_empty() {
         return None;
     }
@@ -127,16 +132,24 @@ fn strip_cursor(trimmed: &str) -> (bool, &str) {
 fn split_label(rest: &str) -> (Option<u8>, String) {
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     if digits.is_empty() {
-        return (None, rest.to_owned());
+        return (None, choice_name(rest));
     }
     let Some(after) = rest.get(digits.len()..) else {
         return (None, rest.to_owned());
     };
     if after.starts_with(". ") || after == "." {
-        let label = after.trim_start_matches('.').trim().to_owned();
+        let label = choice_name(after.trim_start_matches('.').trim());
         (digits.parse().ok(), label)
     } else {
-        (None, rest.to_owned())
+        (None, choice_name(rest))
+    }
+}
+
+/// Help text after a Codex choice is separated by two or more spaces.
+fn choice_name(label: &str) -> String {
+    match label.find("  ") {
+        Some(index) => label.get(..index).unwrap_or(label).trim().to_owned(),
+        None => label.to_owned(),
     }
 }
 
@@ -148,6 +161,9 @@ fn is_sibling(line: &str) -> bool {
         || trimmed.contains("Enter to confirm")
         || trimmed.contains("Esc to cancel")
         || trimmed.contains("to navigate")
+        || trimmed.contains("enter continue")
+        || trimmed.contains("enter to submit")
+        || trimmed.to_ascii_lowercase().contains("esc to cancel")
         || trimmed.contains('⏵')
         || trimmed.contains('⏸')
         || trimmed.contains("shift+tab")

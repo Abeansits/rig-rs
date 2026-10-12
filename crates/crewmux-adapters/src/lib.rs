@@ -14,7 +14,7 @@ mod types;
 pub use adapter::{AgentAdapter, SeatIo};
 pub use budget::{BudgetOverrides, LaunchBudget};
 pub use claude::ClaudeAdapter;
-pub use codex::CODEX_DIALOGS;
+pub use codex::{CODEX_DIALOGS, CodexAdapter};
 pub use dialog::{AnswerPolicy, DialogDriver, DriveOutcome, EscalateReason, MuxPane, SeatContext};
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};

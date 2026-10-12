@@ -248,6 +248,37 @@ fn nearby_integers_are_not_a_carriage_return() {
 }
 
 #[test]
+fn uppercase_cr_escapes_and_decimal_char_fail_outside_adapters() {
+    for (label, body) in [
+        ("hex-upper", "fn sneak() { let _ = '\\x0D'; }\n"),
+        ("uni-upper", "fn sneak() { let _ = '\\u{000D}'; }\n"),
+        ("as-char", "fn sneak() { let _ = 13 as char; }\n"),
+    ] {
+        let root = scratch(label);
+        let path = root.join("crates/crewmux-mux/src/sneak.rs");
+        write(&path, body).expect("write");
+        let err = lint_blind_enter(&root).expect_err(label);
+        assert!(err.to_string().contains("Enter"), "{label} {err}");
+        drop(fs::remove_dir_all(&root));
+    }
+    let root = scratch("xtask-cr");
+    let path = root.join("xtask/src/sneak.rs");
+    write(&path, "fn sneak() { let _ = '\\u{000D}'; }\n").expect("write");
+    let err = lint_blind_enter(&root).expect_err("xtask");
+    assert!(err.to_string().contains("Enter"), "{err}");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
+fn key_enter_outside_adapters_is_not_this_lint() {
+    let root = scratch("mux-enter");
+    let path = root.join("crates/crewmux-mux/src/keys.rs");
+    write(&path, "fn map(key: Key) { let _ = Key::Enter; }\n").expect("write");
+    lint_blind_enter(&root).expect("mapping");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
 fn planted_digit_literal_fails() {
     let root = scratch("digit");
     let path = root.join("crates/crewmux-adapters/src/dialog/drive.rs");
