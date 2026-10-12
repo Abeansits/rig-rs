@@ -25,7 +25,10 @@ uuid.workspace = true
 rustix = { workspace = true, features = ["termios"] }
 
 [dev-dependencies]
+crewmux-mcp.workspace = true
 proptest.workspace = true
+# AC9 hashes `config.toml` so a launch that rewrites it fails the byte check.
+sha2.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 

@@ -21,9 +21,12 @@ pub(crate) async fn prepare(
 ) -> Result<Prepared, Error> {
     let mode = binding.permission_mode.clone();
     let dir = seat_dir.to_path_buf();
-    let (mcp, settings) = tokio::task::spawn_blocking(move || write_seat(&dir, mode))
-        .await
-        .map_err(|err| Error::Message(err.to_string()))??;
+    let seat_env = seat_env(binding, opts);
+    let rig_bin = crewmux_provider::rig_executable();
+    let (mcp, settings) =
+        tokio::task::spawn_blocking(move || write_seat(&dir, mode, &rig_bin, &seat_env))
+            .await
+            .map_err(|err| Error::Message(err.to_string()))??;
     let session_id = match &opts.resume {
         Some(token) => crewmux_transcript::canonical_session_id(&token.value)
             .map_err(|_| Error::Message("resume token is not a UUID".to_owned()))?,
@@ -57,12 +60,35 @@ pub(crate) fn token(session_id: String) -> ResumeToken {
     }
 }
 
+fn seat_env(binding: &NodeBinding, opts: &LaunchOpts) -> crewmux_provider::SeatEnv {
+    crewmux_provider::SeatEnv {
+        seat_id: opts
+            .env
+            .get(crewmux_types::SEAT_ID_ENV)
+            .cloned()
+            .unwrap_or_else(|| binding.seat.to_string()),
+        seat_token: opts
+            .env
+            .get(crewmux_types::SEAT_TOKEN_ENV)
+            .cloned()
+            .unwrap_or_default(),
+        rig_home: opts
+            .env
+            .get("RIG_HOME")
+            .cloned()
+            .or_else(|| std::env::var("RIG_HOME").ok())
+            .unwrap_or_default(),
+    }
+}
+
 fn write_seat(
     dir: &Path,
     permission_mode: Option<String>,
+    rig_bin: &Path,
+    env: &crewmux_provider::SeatEnv,
 ) -> Result<(PathBuf, PathBuf), crewmux_provider::ProviderError> {
     let files = ClaudeSeatFiles::new(dir);
-    let mcp = files.write_mcp(&[])?;
+    let mcp = files.write_mcp(&[crewmux_provider::claude_mcp_entry(rig_bin, env)])?;
     let settings = files.write_settings(&ClaudeSeatSettings {
         permission_mode,
         hooks: serde_json::json!({}),

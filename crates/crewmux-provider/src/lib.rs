@@ -15,6 +15,7 @@ mod error;
 mod guidance;
 mod herdr;
 mod json_edit;
+mod mcp;
 mod opencode;
 mod tmux_conf;
 
@@ -32,6 +33,10 @@ pub use drift::DriftReport;
 pub use error::ProviderError;
 pub use guidance::{MemoryFs, merge_managed_block};
 pub use herdr::HerdrLaunchConfig;
+pub use mcp::{
+    MCP_TOOL_NAMES, SeatEnv, claude_allowed_tools, claude_mcp_entry, claude_mcp_json,
+    codex_mcp_overrides, rig_executable,
+};
 pub use opencode::{OpenCodePermission, OpenCodeSeatConfig};
 pub use tmux_conf::{
     ManagedBlock, TMUX_BLOCK_BODY, global_window_size_manual, managed_block_current,

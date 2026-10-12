@@ -7,7 +7,7 @@ ADR-0010 makes this file the single PE register. Design-workspace ids that colli
 | --- | --- | --- |
 | PE-001 | Claude first-run is not ready | PE-001 |
 | PE-002 | Codex login | PE-002 |
-| PE-003 | MCP tool rename | PE-016 (reserved; no heading yet) |
+| PE-003 | MCP tool rename | PE-016 |
 | PE-004 | no writes to the Claude user config | PE-004 |
 | PE-005 | exactly-once direct/startup re-delivery | PE-017 (reserved; no heading yet) |
 | PE-006 | blind Enter | PE-013 |
@@ -122,6 +122,16 @@ The design index calls this PE-006. That id is already the setup/doctor exceptio
 - **TS behaviour:** `codex-thread-id.ts` and `launchHarness` scrape the live child process, a nested wrapper, the process home, or the versioned logs database, and pick a thread while title generation is the newest log activity.
 - **Rust behaviour:** the id is `session_meta.payload.id` in `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Candidates are the before-snapshot difference, the per-cwd launch lock, and first-message correlation. A tie is `ThreadIdError::Ambiguous`. The id is never guessed from a process or a log row.
 - **Required tests:** `back_to_back_launches_get_distinct_ids`, `outside_rollout_is_correlated_by_the_first_message`, `unresolvable_tie_is_ambiguous`, and `snapshot_excludes_rollouts_from_before_launch`.
+
+## PE-016: MCP tool names renamed
+
+The design index calls this PE-003. That id is already the slice 1 help exception in this file, so the MCP rename is PE-016.
+
+- **TS behaviour:** `packages/cli/src/mcp-server.ts` registers 18 tools. The names, sorted as `mcp-server.test.ts` lists them, are `rig_add`, `rig_agent_validate`, `rig_bind`, `rig_bundle_inspect`, `rig_capture`, `rig_chatroom_send`, `rig_chatroom_watch`, `rig_discover`, `rig_down`, `rig_ps`, `rig_restore`, `rig_rig_nodes`, `rig_rig_validate`, `rig_send`, `rig_snapshot_create`, `rig_snapshot_list`, `rig_status`, and `rig_up`. `tools/list` length is 18.
+- **Rust behaviour:** the stdio server name is `rig` and it registers exactly 15 tools: `rig_start`, `rig_stop`, `rig_list`, `agent_list`, `agent_add`, `agent_send`, `agent_read_screen`, `chat_send`, `chat_read`, `snapshot_create`, `snapshot_list`, `snapshot_restore`, `spec_validate_rig`, `spec_validate_agent`, and `daemon_health`. There are no aliases. `rig_discover`, `rig_bind`, and `rig_bundle_inspect` are not registered; calling one is the protocol error `unknown tool`. The other fifteen names were renamed as above.
+- **What this exception covers:** the tool name and the dropped tools. It does not cover a different HTTP path, request body, or timeout. Those `mcp-server.test.ts` rows stay `todo` in the ledger.
+- **Lint:** `cargo xtask lint mcp-legacy-names` fails when one of the 18 legacy names appears in `docs/`, `assets/skills/`, or `crates/**/src` outside `crates/crewmux-mcp/src/names.rs`. `cargo xtask lint mcp-state-path` fails when `crewmux-mcp`'s `[dependencies]` names `crewmux-store`, `crewmux-mux`, `crewmux-adapters`, or `crewmux-durability`.
+- **Required tests:** `tools_list_is_the_fifteen_names`, `stdio_reconnect_lists_fifteen`, `bundle_inspect_is_unknown_tool`, `schemas_have_required_fields`, and `spec_validate_tools_require_yaml`.
 
 ## Status of real-login testing
 
