@@ -3,9 +3,10 @@
 //! Derived from openrig packages/daemon/src/domain/session-transport.ts
 //! `hasExpectedStagedText` (v0.6.9, Apache-2.0); ported to Rust and modified.
 //! A single `[Pasted text #N +X lines]` token counts only when N is a positive
-//! integer and X equals the payload's line count. A 24-character prefix of a
-//! longer payload is not a match. Several tokens still need the residual suffix
-//! to land on an exact source-line boundary.
+//! integer and X equals the payload's newline count (`matches('\n')`, not
+//! `split('\n')`). A 24-character prefix of a longer payload is not a match.
+//! Several tokens still need the residual suffix to land on an exact
+//! source-line boundary.
 
 /// The composer shows `payload`, or Claude's collapsed paste of it.
 #[must_use]
@@ -83,11 +84,7 @@ fn is_rule(line: &str) -> bool {
 }
 
 fn line_count(payload: &str) -> usize {
-    if payload.is_empty() {
-        0
-    } else {
-        payload.split('\n').count()
-    }
+    payload.matches('\n').count()
 }
 
 fn collapse_ws(text: &str) -> String {
@@ -207,14 +204,28 @@ mod tests {
 ────────────────────────────────────────────────────────────────────────────────
   paste again to expand
 ";
-        let payload = "alpha line of pasted text\n".repeat(28) + "alpha line of pasted text";
-        assert_eq!(payload.split('\n').count(), 29);
-        assert!(staged_matches(screen, &payload), "29 lines");
-        let nearby = format!("{payload}\nextra");
-        assert_eq!(nearby.split('\n').count(), 30);
+        let payload = "alpha line of pasted text\n".repeat(29);
+        assert_eq!(payload.matches('\n').count(), 29);
+        assert_eq!(
+            payload.split('\n').count(),
+            30,
+            "split counts a trailing newline as an extra line"
+        );
+        assert!(staged_matches(screen, &payload), "29 newlines");
+        let short = "alpha line of pasted text\n".repeat(28) + "alpha line of pasted text";
+        assert_eq!(short.matches('\n').count(), 28);
+        assert!(!staged_matches(screen, &short), "28 newlines is not +29");
+        let nearby = format!("{payload}extra");
+        assert_eq!(nearby.matches('\n').count(), 29);
         assert!(
-            !staged_matches(screen, &nearby),
-            "30 lines is not this placeholder"
+            staged_matches(screen, &nearby),
+            "the count is newlines, not the last line's text"
+        );
+        let extra_newline = format!("{payload}\nextra");
+        assert_eq!(extra_newline.matches('\n').count(), 30);
+        assert!(
+            !staged_matches(screen, &extra_newline),
+            "30 newlines is not this placeholder"
         );
         assert!(
             !staged_matches(screen, "hello"),
@@ -225,7 +236,8 @@ mod tests {
 ❯ [Pasted text #1 +2 lines]
 ────────────────────────────────────────────────────────────────────────────────
 ";
-        assert!(!staged_matches(one, "hello"), "+2 is not a 1-line payload");
+        assert!(!staged_matches(one, "hello"), "+2 is not zero newlines");
+        assert!(!staged_matches(one, "hello\n"), "+2 is not one newline");
         let bare = "\
 ────────────────────────────────────────────────────────────────────────────────
 ❯ [Pasted text # +1 lines]
@@ -237,7 +249,11 @@ mod tests {
 ❯ [Pasted text #1 +1 lines]
 ────────────────────────────────────────────────────────────────────────────────
 ";
-        assert!(staged_matches(named, "hello"));
+        assert!(
+            !staged_matches(named, "hello"),
+            "a 1-line payload with no newline is +0"
+        );
+        assert!(staged_matches(named, "hello\n"));
         let long = "abcdefghijklmnopqrstuvwxyz-more-than-twenty-four";
         let partial = format!(
             "\
@@ -266,9 +282,51 @@ mod tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/screens/claude/2.1.289/collapsed-paste-hint.txt");
         let screen = std::fs::read_to_string(&path).expect("fixture");
-        let payload = "line of pasted text\n".repeat(28) + "line of pasted text";
-        assert_eq!(payload.split('\n').count(), 29);
+        let payload = "line of pasted text\n".repeat(29);
+        assert_eq!(payload.matches('\n').count(), 29);
         assert!(staged_matches(&screen, &payload), "{screen}");
+        let short = "line of pasted text\n".repeat(28) + "line of pasted text";
+        assert_eq!(short.matches('\n').count(), 28);
+        assert!(!staged_matches(&screen, &short), "28 newlines is not +29");
         assert!(!staged_matches(&screen, "not the paste"));
+    }
+
+    #[test]
+    fn collapsed_label_counts_newlines_not_split_lines() {
+        let prompt = (0..96)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(prompt.matches('\n').count(), 95);
+        assert_eq!(prompt.split('\n').count(), 96);
+        assert!(staged_matches(&composer(95), &prompt), "+95 for 96 lines");
+        assert!(
+            !staged_matches(&composer(96), &prompt),
+            "+96 is the split count, not Claude's newline count"
+        );
+        let file = format!(
+            "{prompt_29}\n",
+            prompt_29 = (0..29)
+                .map(|index| format!("line {index}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert_eq!(file.matches('\n').count(), 29);
+        assert!(
+            staged_matches(&composer(29), &file),
+            "a trailing newline is part of the count"
+        );
+        assert!(!staged_matches(&composer(28), &file));
+    }
+
+    fn composer(newlines: usize) -> String {
+        format!(
+            "\
+────────────────────────────────────────────────────────────────────────────────
+❯ [Pasted text #1 +{newlines} lines]
+────────────────────────────────────────────────────────────────────────────────
+  paste again to expand
+"
+        )
     }
 }

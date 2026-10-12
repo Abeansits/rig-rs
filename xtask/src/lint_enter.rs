@@ -56,6 +56,9 @@ fn scan(path: &Path, root: &Path, hits: &mut Vec<String>) -> Result<(), Error> {
     let allow_enter = relative(path, root).is_some_and(|rel| ALLOW_ENTER.contains(&rel.as_str()));
     let code = strip_comments(&text);
     let compact: String = code.chars().filter(|ch| !ch.is_whitespace()).collect();
+    if code.contains('\r') {
+        hits.push(format!("{}:1: Enter", path.display()));
+    }
     if !allow_enter && (compact.contains("Key::Enter") || compact.contains("Key::*")) {
         hits.push(format!("{}:1: Enter", path.display()));
     }
@@ -104,7 +107,12 @@ fn carriage_return_literal(compact: &str) -> bool {
         "'\\u{000d}'",
     ];
     const NEWLINES: &[&str] = &["\"\\n\""];
-    if NEEDLES.iter().any(|needle| compact.contains(needle)) || cr_constructor(compact) {
+    if NEEDLES.iter().any(|needle| compact.contains(needle))
+        || compact.contains("\\r")
+        || cr_constructor(compact)
+        || decimal_as_char(compact)
+        || hex_cr(compact)
+    {
         return true;
     }
     if BARE_CR.iter().any(|needle| compact.contains(needle)) {
@@ -117,21 +125,59 @@ fn carriage_return_literal(compact: &str) -> bool {
 }
 
 fn cr_constructor(compact: &str) -> bool {
+    for head in ["char::from(", "char::from_u32("] {
+        let mut rest = compact;
+        while let Some(pos) = rest.find(head) {
+            let after = rest.get(pos.saturating_add(head.len())..).unwrap_or("");
+            if cr_arg(after) {
+                return true;
+            }
+            rest = after;
+        }
+    }
+    false
+}
+
+fn cr_arg(after: &str) -> bool {
+    after.starts_with("13)")
+        || after.starts_with("13u8)")
+        || after.starts_with("0x0d)")
+        || after.starts_with("0x0D)")
+        || after.starts_with("0xd)")
+        || after.starts_with("0xD)")
+}
+
+fn decimal_as_char(compact: &str) -> bool {
     let mut rest = compact;
-    while let Some(pos) = rest.find("char::from(") {
-        let after = rest
-            .get(pos.saturating_add("char::from(".len())..)
-            .unwrap_or("");
-        if after.starts_with("13)")
-            || after.starts_with("13u8)")
-            || after.starts_with("0x0d)")
-            || after.starts_with("0x0D)")
-            || after.starts_with("0xd)")
-            || after.starts_with("0xD)")
-        {
+    while let Some(pos) = rest.find("13aschar") {
+        let before = rest.get(..pos).unwrap_or("");
+        let prev_is_digit = before
+            .chars()
+            .next_back()
+            .is_some_and(|ch| ch.is_ascii_digit());
+        if !prev_is_digit {
             return true;
         }
-        rest = after;
+        rest = rest.get(pos.saturating_add(1)..).unwrap_or("");
+    }
+    false
+}
+
+fn hex_cr(compact: &str) -> bool {
+    for needle in ["0x0d", "0x0D", "0xd", "0xD"] {
+        let mut rest = compact;
+        while let Some(pos) = rest.find(needle) {
+            let after = rest.get(pos.saturating_add(needle.len())..).unwrap_or("");
+            if after.starts_with("aschar")
+                || !after
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_hexdigit())
+            {
+                return true;
+            }
+            rest = after;
+        }
     }
     false
 }
@@ -153,52 +199,140 @@ fn forbidden_literal(compact: &str) -> bool {
 }
 
 fn strip_comments(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            out.push(ch);
-            copy_string(&mut chars, &mut out);
+    let mut index = 0usize;
+    while index < chars.len() {
+        if let Some(end) = raw_string_end(&chars, index) {
+            push_range(&chars, index, end, &mut out);
+            index = end;
             continue;
         }
-        if ch == '/' && chars.peek() == Some(&'/') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next == '\n' {
+        if chars.get(index).copied() == Some('"') {
+            let end = quoted_end(&chars, index);
+            push_range(&chars, index, end, &mut out);
+            index = end;
+            continue;
+        }
+        if chars.get(index).copied() == Some('/')
+            && chars.get(index.saturating_add(1)).copied() == Some('/')
+        {
+            index = index.saturating_add(2);
+            while let Some(ch) = chars.get(index).copied() {
+                index = index.saturating_add(1);
+                if ch == '\n' {
                     out.push('\n');
                     break;
                 }
             }
             continue;
         }
-        if ch == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            while let Some(next) = chars.next() {
-                if next == '*' && chars.peek() == Some(&'/') {
-                    chars.next();
+        if chars.get(index).copied() == Some('/')
+            && chars.get(index.saturating_add(1)).copied() == Some('*')
+        {
+            index = index.saturating_add(2);
+            while index < chars.len() {
+                if chars.get(index).copied() == Some('*')
+                    && chars.get(index.saturating_add(1)).copied() == Some('/')
+                {
+                    index = index.saturating_add(2);
                     break;
                 }
+                index = index.saturating_add(1);
             }
             continue;
         }
-        out.push(ch);
+        if let Some(ch) = chars.get(index).copied() {
+            out.push(ch);
+        }
+        index = index.saturating_add(1);
     }
     out
 }
 
-fn copy_string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
-    while let Some(next) = chars.next() {
-        out.push(next);
-        if next == '\\' {
-            if let Some(escaped) = chars.next() {
-                out.push(escaped);
+fn push_range(chars: &[char], start: usize, end: usize, out: &mut String) {
+    let mut index = start;
+    while index < end {
+        if let Some(ch) = chars.get(index).copied() {
+            out.push(ch);
+        }
+        index = index.saturating_add(1);
+    }
+}
+
+fn raw_string_end(chars: &[char], index: usize) -> Option<usize> {
+    let hashes = raw_hashes(chars, index)?;
+    let mut cursor = index.saturating_add(1);
+    while chars.get(cursor).copied() == Some('#') {
+        cursor = cursor.saturating_add(1);
+    }
+    if chars.get(cursor).copied() != Some('"') {
+        return None;
+    }
+    cursor = cursor.saturating_add(1);
+    loop {
+        if chars.get(cursor).is_none() {
+            return Some(chars.len());
+        }
+        if chars.get(cursor).copied() == Some('"')
+            && hash_run(chars, cursor.saturating_add(1), hashes)
+        {
+            return Some(cursor.saturating_add(1).saturating_add(hashes));
+        }
+        cursor = cursor.saturating_add(1);
+    }
+}
+
+fn raw_hashes(chars: &[char], index: usize) -> Option<usize> {
+    if chars.get(index).copied() != Some('r') {
+        return None;
+    }
+    if let Some(prev) = index.checked_sub(1).and_then(|at| chars.get(at).copied()) {
+        if prev == 'b' || prev == 'c' {
+            if let Some(before) = index.checked_sub(2).and_then(|at| chars.get(at).copied())
+                && (before.is_ascii_alphanumeric() || before == '_')
+            {
+                return None;
+            }
+        } else if prev.is_ascii_alphanumeric() || prev == '_' {
+            return None;
+        }
+    }
+    let mut cursor = index.saturating_add(1);
+    let mut hashes = 0usize;
+    while chars.get(cursor).copied() == Some('#') {
+        hashes = hashes.saturating_add(1);
+        cursor = cursor.saturating_add(1);
+    }
+    (chars.get(cursor).copied() == Some('"')).then_some(hashes)
+}
+
+fn hash_run(chars: &[char], start: usize, hashes: usize) -> bool {
+    let mut seen = 0usize;
+    while seen < hashes {
+        if chars.get(start.saturating_add(seen)).copied() != Some('#') {
+            return false;
+        }
+        seen = seen.saturating_add(1);
+    }
+    true
+}
+
+fn quoted_end(chars: &[char], index: usize) -> usize {
+    let mut cursor = index.saturating_add(1);
+    while let Some(ch) = chars.get(cursor).copied() {
+        cursor = cursor.saturating_add(1);
+        if ch == '\\' {
+            if chars.get(cursor).is_some() {
+                cursor = cursor.saturating_add(1);
             }
             continue;
         }
-        if next == '"' {
+        if ch == '"' {
             break;
         }
     }
+    cursor
 }
 
 fn relative(path: &Path, root: &Path) -> Option<String> {

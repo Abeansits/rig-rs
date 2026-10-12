@@ -738,7 +738,7 @@
 "packages/daemon/test/model-divergence-monitor.test.ts","","todo","","",""
 "packages/daemon/test/model-fidelity-enumeration-guard.test.ts","","todo","","",""
 "packages/daemon/test/native-claude-delivery.test.ts","2","todo","","","delivery is the jsonl fingerprint in ADR-0009, not process-lineage verification"
-"packages/daemon/test/native-claude-delivery.test.ts > selector and ordinary transport: %s","2","waived","","","ADR-0009 confirms delivery from the session jsonl. This file checks process lineage"
+"packages/daemon/test/native-claude-delivery.test.ts > selector and ordinary transport: %s","2","waived","","","slice 12: process-lineage selector. ADR-0009 confirms delivery from the session jsonl"
 "packages/daemon/test/native-process-executable.test.ts","","todo","","",""
 "packages/daemon/test/native-process-lineage.test.ts","","todo","","",""
 "packages/daemon/test/native-process-path-sampling.test.ts","","todo","","",""

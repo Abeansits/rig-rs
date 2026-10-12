@@ -277,16 +277,17 @@ fn is_live_line(trimmed: &str) -> bool {
             || trimmed.contains("Processing"))
 }
 
-/// `✻ <Word> for <duration>`, any verb, including Unicode letters.
+/// `✻ <words> for <duration>`. The verb may be several words. The duration is
+/// any mix of hours, minutes, and seconds, including a form with no seconds.
 fn completed_turn(trimmed: &str) -> bool {
     let Some(rest) = status_glyph_rest(trimmed) else {
         return false;
     };
     let rest = rest.trim_start();
-    let Some(after_word) = alphabetic_word_rest(rest) else {
+    let Some(after_words) = verb_phrase_rest(rest) else {
         return false;
     };
-    let Some(after_for) = after_word.strip_prefix(" for ") else {
+    let Some(after_for) = after_words.strip_prefix(" for ") else {
         return false;
     };
     has_duration(after_for)
@@ -299,22 +300,37 @@ fn status_glyph_rest(trimmed: &str) -> Option<&str> {
     GLYPHS.contains(&first).then_some(chars.as_str())
 }
 
-fn alphabetic_word_rest(text: &str) -> Option<&str> {
-    let end = text.find(|ch: char| !ch.is_alphabetic())?;
-    if end == 0 {
-        return None;
+fn verb_phrase_rest(text: &str) -> Option<&str> {
+    let mut rest = text;
+    loop {
+        let end = rest.find(|ch: char| !ch.is_alphabetic())?;
+        if end == 0 {
+            return None;
+        }
+        let after = rest.get(end..)?;
+        let next = after.strip_prefix(' ')?;
+        if next.starts_with("for ") {
+            return Some(after);
+        }
+        if !next.starts_with(|ch: char| ch.is_alphabetic()) {
+            return None;
+        }
+        rest = next;
     }
-    text.get(end..)
 }
 
 fn has_duration(text: &str) -> bool {
-    let text = skip_unit(text, 'h');
-    let text = skip_unit(text, 'm');
-    take_unit(text, 's').is_some()
+    let (text, hours) = take_optional(text, 'h');
+    let (text, minutes) = take_optional(text, 'm');
+    let (_text, seconds) = take_optional(text, 's');
+    hours || minutes || seconds
 }
 
-fn skip_unit(text: &str, unit: char) -> &str {
-    take_unit(text, unit).unwrap_or(text)
+fn take_optional(text: &str, unit: char) -> (&str, bool) {
+    match take_unit(text, unit) {
+        Some(rest) => (rest, true),
+        None => (text, false),
+    }
 }
 
 fn take_unit(text: &str, unit: char) -> Option<&str> {

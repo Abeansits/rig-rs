@@ -122,6 +122,31 @@ Quick safety check: Is this a project you created or one you trust?
 }
 
 #[test]
+fn completed_duration_without_seconds_is_ready() {
+    for before in [
+        "✻ Worked for 2m",
+        "✻ Worked for 1h",
+        "✻ Brewed for 1h 2m",
+        "✻ Sautéed slowly for 2m",
+        "✻ Thought hard for 1h 2m 3s",
+    ] {
+        let screen = pane(before, "❯\u{a0}", BAR, &[]);
+        let class = classify_text(&screen);
+        assert!(class.is_ready(), "{before} {class:?}");
+    }
+    for before in [
+        "✻ Onioning… (2m 38s · ↓ 10.9k tokens · thought for 8s)",
+        "✶ Thinking… (6s · ↑ 284 tokens · thinking)",
+        "✢ Cogitating…",
+        "· Running PreToolUse hook…",
+    ] {
+        let screen = pane(before, "❯\u{a0}", BAR, &[]);
+        let class = classify_text(&screen);
+        assert!(matches!(class, ClaudeScreen::Busy), "{before} {class:?}");
+    }
+}
+
+#[test]
 fn leading_spinner_glyphs_are_busy() {
     for body in [
         "✢ Cogitating…",
