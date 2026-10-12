@@ -8,8 +8,9 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
   - "Ready" requires a **positive composer match**: the Claude input box border plus the mode/footer line. It is never banner + `❯`.
   - New gate codes: `OnboardingTheme`, and `LoginRequired` for "Select login method".
   - **Any numbered-menu screen (`❯ 1.` / `  2.` pattern) that matches no known gate is `AttentionRequired(UnknownMenu)`, never ready.**
-- **Required test:** `rig-adapters/tests/claude_gates.rs::first_run_screens_are_not_ready`. It loads fixtures `claude/cl-0-theme.txt`, `cl-1-login-method.txt` and `cl-2-login-method-opt2.txt` (copied from spikes/scratch/3-gate-detection/fixtures). It asserts that `classify(..)` returns `OnboardingTheme`, `LoginRequired` and `LoginRequired` respectively, with `requires_attention() == true` and `!is_ready()`. A second test asserts that no delivery (paste) is issued to a seat in these states, using FakeMux to assert zero paste calls. Both are CI-blocking.
-- **Pending:** a positive "ready" fixture from a **logged-in** Claude Code, needed to prove the composer matcher doesn't produce false negatives.
+- **Required test:** `crewmux-adapters/tests/claude_gates.rs::first_run_screens_are_not_ready`. It loads fixtures `claude/cl-0-theme.txt`, `cl-1-login-method.txt` and `cl-2-login-method-opt2.txt`. It asserts `OnboardingTheme`, `LoginRequired` and `LoginRequired`, with `requires_attention() == true` and `!is_ready()`. The same test asserts zero paste and zero Enter on those screens. `splash_without_footer_is_not_ready` covers the splash case below. Both are CI-blocking.
+- **Mac rerun (2026-10-11, Claude Code 2.1.286):** a splash with the banner and a bare `❯` but no `? for shortcuts` footer is inconclusive, not ready. TS `assessNativeResumeProbe` classifies that splash as resumed. The Rust classifier is a positive match (footer, border, prompt, no menu, no interrupt), not a port of that probe.
+- **Pending:** the 2.1.286 corpus under `tests/fixtures/screens/claude/2.1.286/` is reconstructed from the dialog titles and this rerun. It is not a byte copy of the spike captures.
 
 ## PE-002: Codex login screens must be detected explicitly (TS hangs until timeout)
 - **TS behaviour:** `codex-runtime-adapter.ts` `checkReady` (l.483) has no login matcher apart from token-refresh failure text. "Sign in with ChatGPT" / "Provide your own API key" (fixtures cx-1/2/3) classify as `inconclusive / awaiting_runtime`, and the launch waits until the readiness timeout. A missing CODEX_HOME (cx-0) is also inconclusive, though it should be a hard failure.
@@ -88,5 +89,14 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Rust behaviour:** without a cursor the page is the newest `limit` rows, oldest first. A cursor pages forward (`id` greater than the cursor, ascending). An unknown topic is `UnknownTopic` after `has_topic` returns false, including when `limit` is 0.
 - **Required test:** `history_without_cursor_returns_the_newest_limit` and `unknown_topic_is_an_error`.
 
+## PE-013: never send a blind Enter to a provider dialog
+
+The design index calls this PE-006. That id is already the setup/doctor exception in this file, so the blind-Enter rule is PE-013.
+
+- **TS behaviour:** `claude-code-adapter.ts` `autoDriveProviderPrompts`, when the trust gate is up, sends `Enter` on the default choice. A default of "No, exit" or "Update now" submits that choice. Codex's update dialog runs `brew upgrade` on "Update now".
+- **Rust behaviour:** `DialogDriver` locates the choice by exact text, sends Up or Down, captures again, and sends Enter only when the cursor (`❯` or `›`) is on that exact line. A mismatch escalates and sends no Enter. Trust is answered only when `auto_trust` is true, and then only "Yes, I trust this folder". Bypass consent and the MCP dialog have no automatic choice. The fullscreen renderer is answered "2. Not now". Codex update is answered "2. Skip". Outside a verified dialog action and `SeatIo::submit`, adapter code does not send Enter, `q`, Ctrl-C, Escape, or a digit. Daemon stop kills the tmux session.
+- **Required test:** `never_enter_on_default_no_exit`, `trust_not_answered_without_opt_in`, `codex_update_answers_skip_never_update`, `bypass_always_escalates`, `unknown_menu_escalates`, `cursor_verification_failure_escalates`, and `no_quit_keys_on_login_menu`. `cargo xtask lint-blind-enter` fails when adapter source sends Enter outside `claude/submit.rs` and `dialog/drive.rs`.
+
 ## Status of real-login testing
-All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.
+
+A Mac rerun on 2026-10-11 with Claude Code 2.1.286 observed multi-line pastes wrapped in a pasted-content tag and tabs expanded to four spaces (ADR-0009 Amendment 2). Live Claude runs are gated on `RIG_LIVE_CLAUDE=1` inside the `tmux-it` feature and are not part of CI. This change did not execute that live suite. Codex real-login coverage is still pending.

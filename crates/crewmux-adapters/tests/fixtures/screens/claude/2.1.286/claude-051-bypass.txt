@@ -1,0 +1,4 @@
+WARNING: Bypass Permissions mode runs tools without asking.
+
+❯ No, exit
+  Yes, I accept

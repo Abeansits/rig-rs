@@ -1,0 +1,33 @@
+{"file":"claude-000-firstrun.txt","screen":"login","login":"theme"}
+{"file":"claude-001-firstrun.txt","screen":"login","login":"theme"}
+{"file":"claude-002-firstrun.txt","screen":"login","login":"theme"}
+{"file":"claude-003-firstrun.txt","screen":"login","login":"theme"}
+{"file":"claude-006-trust.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-018-trust.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-030-trust.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-039-trust.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-014-startup.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-015-startup.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-054-mcpgate-before-trust.txt","screen":"dialog","dialog":"trust","cursor":"No, exit"}
+{"file":"claude-050-bypass.txt","screen":"dialog","dialog":"bypass","cursor":"No, exit"}
+{"file":"claude-051-bypass.txt","screen":"dialog","dialog":"bypass","cursor":"No, exit"}
+{"file":"claude-055-mcpgate-after-trust.txt","screen":"dialog","dialog":"mcp","mcp":"dummy","cursor":"Continue without using this MCP server"}
+{"file":"claude-056-mcpgate-after-trust.txt","screen":"dialog","dialog":"mcp","mcp":"dummy","cursor":"Continue without using this MCP server"}
+{"file":"claude-007-fullscreen.txt","screen":"dialog","dialog":"fullscreen","cursor":"1. Yes, try it"}
+{"file":"claude-008-fullscreen.txt","screen":"dialog","dialog":"fullscreen","cursor":"1. Yes, try it"}
+{"file":"claude-009-fullscreen.txt","screen":"dialog","dialog":"fullscreen","cursor":"1. Yes, try it"}
+{"file":"claude-010-fullscreen.txt","screen":"dialog","dialog":"fullscreen","cursor":"1. Yes, try it"}
+{"file":"claude-011-fullscreen.txt","screen":"dialog","dialog":"fullscreen","cursor":"1. Yes, try it"}
+{"file":"claude-020-ready.txt","screen":"ready"}
+{"file":"claude-021-ready-80x24.txt","screen":"ready"}
+{"file":"claude-022-ready-200x50.txt","screen":"ready"}
+{"file":"claude-023-ready-60x20.txt","screen":"ready"}
+{"file":"claude-024-ready-120x40.txt","screen":"ready"}
+{"file":"claude-025-after-turn.txt","screen":"ready"}
+{"file":"claude-026-seat-ready.txt","screen":"ready"}
+{"file":"claude-040-midturn.txt","screen":"busy"}
+{"file":"claude-041-midturn.txt","screen":"busy"}
+{"file":"claude-016-login-method.txt","screen":"login","login":"method"}
+{"file":"claude-017-oauth.txt","screen":"login","login":"oauth"}
+{"file":"claude-019-splash.txt","screen":"inconclusive"}
+{"file":"claude-synth-reworded-trust.txt","screen":"unknown_menu"}

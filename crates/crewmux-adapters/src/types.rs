@@ -132,6 +132,12 @@ pub struct LaunchOpts {
     pub resume: Option<ResumeToken>,
     /// Fork instead of a fresh session. The stub ignores it.
     pub fork: bool,
+    /// Answer the Claude trust dialog. Default is false.
+    pub auto_trust: bool,
+    /// Claude launch budgets. `None` uses [`crate::budget::LaunchBudget::claude`].
+    pub budget: Option<crate::budget::LaunchBudget>,
+    /// Claude binary. `None` uses `claude` on `PATH`.
+    pub claude_bin: Option<std::path::PathBuf>,
 }
 
 /// Pane and session created by a successful launch.

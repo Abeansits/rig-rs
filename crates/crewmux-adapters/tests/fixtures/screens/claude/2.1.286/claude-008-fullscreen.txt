@@ -1,0 +1,4 @@
+Try the new fullscreen renderer?
+
+❯ 1. Yes, try it
+  2. Not now

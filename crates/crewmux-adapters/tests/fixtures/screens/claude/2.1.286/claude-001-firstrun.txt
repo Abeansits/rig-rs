@@ -1,0 +1,7 @@
+Welcome to Claude Code v2.1.286
+
+Choose the text style that looks best with your terminal
+
+❯ 1. ANSI dark
+  2. Light mode
+  3. Dark mode (colorblind friendly)

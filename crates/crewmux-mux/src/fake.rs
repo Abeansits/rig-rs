@@ -1,6 +1,6 @@
 //! In-memory [`Multiplexer`](crate::Multiplexer) for tests that must not start tmux.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -32,6 +32,8 @@ struct FakeInner {
     calls: Vec<Vec<String>>,
     clients: Vec<ClientInfo>,
     capture: Capture,
+    /// Frames returned by `capture`, advanced once per `send_keys` call.
+    replay: VecDeque<Capture>,
     screens: HashMap<String, Capture>,
     script_stubs: bool,
     in_mode: bool,
@@ -79,6 +81,7 @@ impl FakeMux {
                 calls: Vec::new(),
                 clients: Vec::new(),
                 capture: Capture::new(String::new(), (0, 0)),
+                replay: VecDeque::new(),
                 screens: HashMap::new(),
                 script_stubs: false,
                 in_mode: false,
@@ -159,8 +162,19 @@ impl FakeMux {
     }
 
     /// Screen returned by [`capture`](Multiplexer::capture) and unscripted guard tails.
+    ///
+    /// Clears any [`replay_screens`](Self::replay_screens) queue.
     pub async fn set_capture(&self, capture: Capture) {
-        self.inner.lock().await.capture = capture;
+        let mut guard = self.inner.lock().await;
+        guard.capture = capture;
+        guard.replay.clear();
+    }
+
+    /// Screens for a dialog replay. `capture` returns the front. Each `send_keys`
+    /// call drops the front once another frame is queued, so a test can show the
+    /// cursor moving before Enter.
+    pub async fn replay_screens(&self, frames: Vec<Capture>) {
+        self.inner.lock().await.replay = VecDeque::from(frames);
     }
 
     /// Value returned by [`pane_in_mode`](Multiplexer::pane_in_mode) when no guard is scripted.
@@ -323,6 +337,9 @@ impl Multiplexer for FakeMux {
         for batch in &batches {
             record(&mut guard, batch);
         }
+        if guard.replay.len() > 1 {
+            guard.replay.pop_front();
+        }
         drop(guard);
         self.own_write.send_replace(Some(Instant::now()));
         Ok(())
@@ -347,9 +364,10 @@ impl Multiplexer for FakeMux {
         let guard = self.inner.lock().await;
         let session = canonical_session_name(&pane.session);
         let capture = guard
-            .screens
-            .get(&session)
+            .replay
+            .front()
             .cloned()
+            .or_else(|| guard.screens.get(&session).cloned())
             .unwrap_or_else(|| guard.capture.clone());
         Ok(slice_capture(capture, range))
     }

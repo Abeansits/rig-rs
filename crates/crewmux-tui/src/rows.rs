@@ -250,6 +250,7 @@ pub(crate) fn code_name(code: &ReadinessCode) -> String {
         ReadinessCode::OnboardingTheme => "onboarding_theme".to_owned(),
         ReadinessCode::UnknownMenu => "unknown_menu".to_owned(),
         ReadinessCode::UnrecognisedScreen => "unrecognised_screen".to_owned(),
+        ReadinessCode::FullscreenRenderer => "fullscreen_renderer".to_owned(),
         ReadinessCode::Other(other) => other.clone(),
     }
 }

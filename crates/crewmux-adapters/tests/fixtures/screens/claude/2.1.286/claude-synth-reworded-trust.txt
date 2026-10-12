@@ -1,0 +1,4 @@
+Should this folder be opened?
+
+❯ No, exit
+  Yes, I trust this folder

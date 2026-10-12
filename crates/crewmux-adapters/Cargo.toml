@@ -16,8 +16,14 @@ async-trait.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+uuid.workspace = true
+
+[features]
+# Real tmux integration tests. Off by default so `cargo test` uses FakeMux only.
+tmux-it = []
 
 [dev-dependencies]
+proptest.workspace = true
 tokio.workspace = true
 
 [lints]

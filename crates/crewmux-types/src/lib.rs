@@ -5,6 +5,7 @@
 //! slice 1b re-exports it from `crewmux-mux`.
 
 mod chat;
+mod dialog;
 mod doctor;
 mod error;
 mod id;
@@ -18,6 +19,7 @@ pub use chat::{
     ChatCursor, ChatId, MAX_CURSOR_LEN, MAX_SEAT_TOKEN_LEN, MAX_SENDER_LEN, MAX_TOPIC_LEN,
     SEAT_ID_ENV, SEAT_ID_HEADER, SEAT_TOKEN_ENV, SEAT_TOKEN_HEADER, SenderRef, TopicId,
 };
+pub use dialog::{ComposerState, KnownDialog};
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
 pub use id::{MAX_NAME_LEN, RigId, RigName, SeatId, SeatName, SessionId};

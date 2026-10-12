@@ -1,0 +1,4 @@
+WARNING: Bypass Permissions mode skips confirmation prompts.
+
+❯ No, exit
+  Yes, I accept

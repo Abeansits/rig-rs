@@ -1,0 +1,4 @@
+New MCP server found in this project: dummy
+
+❯ Continue without using this MCP server
+  Use this MCP server now
