@@ -1,4 +1,7 @@
 //! `daemon_health`. A missing socket is `{"running": false}`, not a tool error.
+//!
+//! An up daemon returns its `/healthz` body, which is status and pid. This tool
+//! does not add a version field.
 
 use rmcp::model::CallToolResult;
 

@@ -65,6 +65,21 @@ impl Ctx {
     pub(crate) fn is_down(err: &Error) -> bool {
         matches!(err, Error::Api(crewmux_api::Error::Connect { .. }))
     }
+
+    /// The peer closed the socket while the body was still being written.
+    ///
+    /// An oversized `POST` surfaces as this rather than an HTTP status. Callers
+    /// map it to `payload_rejected` so the tool text is not the raw OS error.
+    #[must_use]
+    pub(crate) fn payload_rejected(err: &Error) -> bool {
+        let Error::Api(crewmux_api::Error::Exchange { source, .. }) = err else {
+            return false;
+        };
+        matches!(
+            source.kind(),
+            std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+        )
+    }
 }
 
 /// Percent-encode one path segment the way `encodeURIComponent` does for ULIDs and slashes.

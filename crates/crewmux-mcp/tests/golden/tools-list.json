@@ -1,7 +1,7 @@
 {
   "tools": [
     {
-      "description": "Add a member by posting to /api/rigs/{rigId}/pods/{podNamespace}/members. The current daemon has no such route; a 404 is a tool error.",
+      "description": "Not implemented. The daemon has no add-member route, so this returns {\"error\":\"not_implemented\"} and does not call the daemon.",
       "inputSchema": {
         "$defs": {
           "EdgeArg": {
@@ -41,7 +41,7 @@
             ]
           },
           "member": {
-            "description": "Member fragment. The daemon route is not implemented; the tool still posts it."
+            "description": "Member fragment. The tool returns `not_implemented` and does not post it."
           },
           "podNamespace": {
             "description": "Pod namespace, percent-encoded into the path.",
@@ -69,15 +69,24 @@
       "name": "agent_add"
     },
     {
-      "description": "List seats from GET /api/seats.",
+      "description": "List seats for rigId. Resolves the id or name with GET /api/rigs/summary, then returns that rig's seats from GET /api/seats.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "rigId": {
+            "description": "Rig id or name. Resolved through `GET /api/rigs/summary`, then filtered in `GET /api/seats`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rigId"
+        ],
         "type": "object"
       },
       "name": "agent_list"
     },
     {
-      "description": "Read a seat's live screen through POST /api/seats/capture.",
+      "description": "Read one seat's live screen through POST /api/seats/capture. rig and pod are refused.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -90,20 +99,37 @@
               "null"
             ]
           },
+          "pod": {
+            "default": null,
+            "description": "Refused. The daemon captures one seat, not a pod.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rig": {
+            "default": null,
+            "description": "Refused. The daemon captures one seat, not every seat in a rig.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "session": {
-            "description": "Seat or session name.",
-            "type": "string"
+            "default": null,
+            "description": "Seat or session name. Required unless `rig` or `pod` is set, and those are refused.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "required": [
-          "session"
-        ],
         "type": "object"
       },
       "name": "agent_read_screen"
     },
     {
-      "description": "Deliver text to a seat through POST /api/send, which runs lineage and pre-send checks. force does not bypass those checks. force combined with waitForIdleSeconds is rejected before any request. waitForIdleSeconds does not extend the timeout.",
+      "description": "Deliver text to a seat through POST /api/send. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -119,7 +145,7 @@
             "type": "string"
           },
           "text": {
-            "description": "Message text. The daemon runs lineage and pre-send checks.",
+            "description": "Message text posted to `POST /api/send`.",
             "type": "string"
           },
           "verify": {
@@ -130,7 +156,7 @@
             ]
           },
           "waitForIdleSeconds": {
-            "description": "Not implemented. Combined with `force` it is rejected before any HTTP call.",
+            "description": "Refused when set. The send route has no idle wait, so the timeout is not extended.",
             "format": "double",
             "type": [
               "number",
@@ -164,7 +190,7 @@
       "name": "chat_read"
     },
     {
-      "description": "Resolve rigName via GET /api/rigs/summary, then POST /api/rigs/{id}/chat/send. Two daemon calls. Seat headers are forwarded when this process is a seat.",
+      "description": "Resolve rigName via GET /api/rigs/summary, then POST /api/rigs/{id}/chat/send. Optional sender is accepted and not forwarded. Seat headers are forwarded when this process is a seat.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -175,6 +201,14 @@
           "rigName": {
             "description": "Rig name resolved through `GET /api/rigs/summary`.",
             "type": "string"
+          },
+          "sender": {
+            "default": null,
+            "description": "Accepted and not forwarded. The daemon derives the sender.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -186,7 +220,7 @@
       "name": "chat_send"
     },
     {
-      "description": "GET /healthz. When the socket is down, returns {\"running\": false} and does not start the daemon.",
+      "description": "GET /healthz and return that body. It has status and pid, and no version field. When the socket is down, returns {\"running\": false} and does not start the daemon.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object"
@@ -202,19 +236,19 @@
       "name": "rig_list"
     },
     {
-      "description": "Bootstrap a rig by posting the YAML file at sourceRef to the daemon. plan, autoApprove, and targetRoot are accepted and not applied.",
+      "description": "Post the YAML file at sourceRef to POST /api/rigs/up. plan, autoApprove, and targetRoot are refused when set to change bring-up. A file that is not a rig spec is rejected without quoting its contents.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "autoApprove": {
-            "description": "Accepted for the renamed schema. The daemon bring-up has no auto-approve flag.",
+            "description": "`true` is refused. The daemon bring-up has no auto-approve flag.",
             "type": [
               "boolean",
               "null"
             ]
           },
           "plan": {
-            "description": "Accepted for the renamed schema. The daemon bring-up has no plan flag.",
+            "description": "`true` is refused. The daemon bring-up has no plan-only mode.",
             "type": [
               "boolean",
               "null"
@@ -225,7 +259,7 @@
             "type": "string"
           },
           "targetRoot": {
-            "description": "Accepted for the renamed schema. The daemon bring-up has no target root.",
+            "description": "Any value is refused. The daemon bring-up has no target root.",
             "type": [
               "string",
               "null"
@@ -240,19 +274,19 @@
       "name": "rig_start"
     },
     {
-      "description": "Tear down one rig. The daemon body is {\"rig\": rigId}. delete, force, and snapshot are accepted and not applied.",
+      "description": "Stop one rig via POST /api/rigs/down with {\"rig\": rigId}. snapshot true creates a snapshot first and does not stop if that fails. delete and force are refused.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "delete": {
-            "description": "Accepted and not applied.",
+            "description": "`true` is refused. The daemon `down` route does not delete the rig record.",
             "type": [
               "boolean",
               "null"
             ]
           },
           "force": {
-            "description": "Accepted and not applied. This is not `dangerously_interact`.",
+            "description": "`true` is refused. This is not `dangerously_interact`.",
             "type": [
               "boolean",
               "null"
@@ -263,7 +297,7 @@
             "type": "string"
           },
           "snapshot": {
-            "description": "Accepted and not applied.",
+            "description": "`true` creates a snapshot, then stops. A failed snapshot does not stop the rig.",
             "type": [
               "boolean",
               "null"

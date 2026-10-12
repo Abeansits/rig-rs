@@ -12,12 +12,12 @@ use rmcp::model::{
     ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
-use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, tool, tool_router};
+use rmcp::{ErrorData, RoleServer, ServerHandler, tool, tool_router};
 use serde_json::Value;
 
 use crate::args::{
-    AgentAddArgs, AgentSendArgs, ChatReadArgs, ChatSendArgs, NoArgs, ReadScreenArgs, RigStartArgs,
-    RigStopArgs, SnapshotRestoreArgs, SnapshotRigArgs, YamlArgs,
+    AgentAddArgs, AgentListArgs, AgentSendArgs, ChatReadArgs, ChatSendArgs, NoArgs, ReadScreenArgs,
+    RigStartArgs, RigStopArgs, SnapshotRestoreArgs, SnapshotRigArgs, YamlArgs,
 };
 use crate::caller::Caller;
 use crate::error::Error;
@@ -89,7 +89,7 @@ impl RigMcp {
     /// Bootstrap a rig by posting the spec file at `sourceRef` to `POST /api/rigs/up`.
     #[tool(
         name = "rig_start",
-        description = "Bootstrap a rig by posting the YAML file at sourceRef to the daemon. plan, autoApprove, and targetRoot are accepted and not applied."
+        description = "Post the YAML file at sourceRef to POST /api/rigs/up. plan, autoApprove, and targetRoot are refused when set to change bring-up. A file that is not a rig spec is rejected without quoting its contents."
     )]
     async fn rig_start(
         &self,
@@ -101,7 +101,7 @@ impl RigMcp {
     /// Stop one rig via `POST /api/rigs/down`.
     #[tool(
         name = "rig_stop",
-        description = "Tear down one rig. The daemon body is {\"rig\": rigId}. delete, force, and snapshot are accepted and not applied."
+        description = "Stop one rig via POST /api/rigs/down with {\"rig\": rigId}. snapshot true creates a snapshot first and does not stop if that fails. delete and force are refused."
     )]
     async fn rig_stop(
         &self,
@@ -119,19 +119,22 @@ impl RigMcp {
         ops::rig_list(&self.ctx(), args).await
     }
 
-    /// List seats via `GET /api/seats`.
-    #[tool(name = "agent_list", description = "List seats from GET /api/seats.")]
+    /// List seats for one rig.
+    #[tool(
+        name = "agent_list",
+        description = "List seats for rigId. Resolves the id or name with GET /api/rigs/summary, then returns that rig's seats from GET /api/seats."
+    )]
     async fn agent_list(
         &self,
-        Parameters(args): Parameters<NoArgs>,
+        Parameters(args): Parameters<AgentListArgs>,
     ) -> rmcp::model::CallToolResult {
         ops::agent_list(&self.ctx(), args).await
     }
 
-    /// Post a member to the pod-members route.
+    /// Report that adding a member is not implemented.
     #[tool(
         name = "agent_add",
-        description = "Add a member by posting to /api/rigs/{rigId}/pods/{podNamespace}/members. The current daemon has no such route; a 404 is a tool error."
+        description = "Not implemented. The daemon has no add-member route, so this returns {\"error\":\"not_implemented\"} and does not call the daemon."
     )]
     async fn agent_add(
         &self,
@@ -143,7 +146,7 @@ impl RigMcp {
     /// Deliver text through `POST /api/send`.
     #[tool(
         name = "agent_send",
-        description = "Deliver text to a seat through POST /api/send, which runs lineage and pre-send checks. force does not bypass those checks. force combined with waitForIdleSeconds is rejected before any request. waitForIdleSeconds does not extend the timeout."
+        description = "Deliver text to a seat through POST /api/send. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout."
     )]
     async fn agent_send(
         &self,
@@ -155,7 +158,7 @@ impl RigMcp {
     /// Capture a seat screen.
     #[tool(
         name = "agent_read_screen",
-        description = "Read a seat's live screen through POST /api/seats/capture."
+        description = "Read one seat's live screen through POST /api/seats/capture. rig and pod are refused."
     )]
     async fn agent_read_screen(
         &self,
@@ -167,7 +170,7 @@ impl RigMcp {
     /// Send a chat message after resolving the rig name.
     #[tool(
         name = "chat_send",
-        description = "Resolve rigName via GET /api/rigs/summary, then POST /api/rigs/{id}/chat/send. Two daemon calls. Seat headers are forwarded when this process is a seat."
+        description = "Resolve rigName via GET /api/rigs/summary, then POST /api/rigs/{id}/chat/send. Optional sender is accepted and not forwarded. Seat headers are forwarded when this process is a seat."
     )]
     async fn chat_send(
         &self,
@@ -251,7 +254,7 @@ impl RigMcp {
     /// Report daemon health.
     #[tool(
         name = "daemon_health",
-        description = "GET /healthz. When the socket is down, returns {\"running\": false} and does not start the daemon."
+        description = "GET /healthz and return that body. It has status and pid, and no version field. When the socket is down, returns {\"running\": false} and does not start the daemon."
     )]
     async fn daemon_health(
         &self,
@@ -305,15 +308,9 @@ impl ServerHandler for RigMcp {
 ///
 /// Returns [`Error::Serve`] when the handshake or the session task fails.
 pub async fn serve_stdio(server: RigMcp) -> Result<(), Error> {
-    let running = server
-        .serve(rmcp::transport::stdio())
-        .await
-        .map_err(|err| Error::Serve(err.to_string()))?;
-    running
-        .waiting()
-        .await
-        .map_err(|err| Error::Serve(err.to_string()))?;
-    Ok(())
+    let input = tokio::io::stdin();
+    let output = tokio::io::stdout();
+    crate::stdio_frame::serve_io(server, input, output).await
 }
 
 /// Build a current-thread runtime and serve stdin and stdout.

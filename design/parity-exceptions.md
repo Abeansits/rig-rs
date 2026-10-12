@@ -93,6 +93,7 @@ Repo PE-006 stays the setup/doctor exception below. It is not the blind-Enter ru
 - **Snapshot:** `tests/diff/snapshots/daemon-health.rs.snap` records that Rust side. `ExpectedDiff(PE-009)` applies only while the live Rust observation still matches it. stderr, exit, json, files, and tmux argv stay compared as ordinary fields.
 - **Why this is recorded:** a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`) shows the same `status=ok` and a longer key list on the TypeScript side. Delete this heading and the `.rs.snap` when `/healthz` carries the same top-level keys.
 - **Required test:** `daemon_health_against_product_daemon`. `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-009)` for `daemon-health`.
+- MCP `daemon_health` returns this same body. It does not add a version field. A socket that is down is `{"running": false}` rather than an error string (PE-019).
 
 ## PE-011: chat sender is a seat token, not `X-OpenRig-Session`
 
@@ -129,9 +130,27 @@ The design index calls this PE-003. That id is already the slice 1 help exceptio
 
 - **TS behaviour:** `packages/cli/src/mcp-server.ts` registers 18 tools. The names, sorted as `mcp-server.test.ts` lists them, are `rig_add`, `rig_agent_validate`, `rig_bind`, `rig_bundle_inspect`, `rig_capture`, `rig_chatroom_send`, `rig_chatroom_watch`, `rig_discover`, `rig_down`, `rig_ps`, `rig_restore`, `rig_rig_nodes`, `rig_rig_validate`, `rig_send`, `rig_snapshot_create`, `rig_snapshot_list`, `rig_status`, and `rig_up`. `tools/list` length is 18.
 - **Rust behaviour:** the stdio server name is `rig` and it registers exactly 15 tools: `rig_start`, `rig_stop`, `rig_list`, `agent_list`, `agent_add`, `agent_send`, `agent_read_screen`, `chat_send`, `chat_read`, `snapshot_create`, `snapshot_list`, `snapshot_restore`, `spec_validate_rig`, `spec_validate_agent`, and `daemon_health`. There are no aliases. `rig_discover`, `rig_bind`, and `rig_bundle_inspect` are not registered; calling one is the protocol error `unknown tool`. The other fifteen names were renamed as above.
-- **What this exception covers:** the tool name and the dropped tools. It does not cover a different HTTP path, request body, or timeout. Those `mcp-server.test.ts` rows stay `todo` in the ledger.
+- **What this exception covers:** the tool name and the dropped tools. It does not cover a different HTTP path, request body, timeout, or flag. Those differences are PE-019.
 - **Lint:** `cargo xtask lint mcp-legacy-names` fails when one of the 18 legacy names appears in `docs/`, `assets/skills/`, or `crates/**/src` outside `crates/crewmux-mcp/src/names.rs`. `cargo xtask lint mcp-state-path` fails when `crewmux-mcp`'s `[dependencies]` names `crewmux-store`, `crewmux-mux`, `crewmux-adapters`, or `crewmux-durability`.
 - **Required tests:** `tools_list_is_the_fifteen_names`, `stdio_reconnect_lists_fifteen`, `bundle_inspect_is_unknown_tool`, `schemas_have_required_fields`, and `spec_validate_tools_require_yaml`.
+
+## PE-019: MCP tools call the Rust daemon routes
+
+PE-016 covers the renamed tool list only. These are the route, body, and flag differences that remain after that rename. Matching the TypeScript assertions would call routes this daemon does not have, or would ignore a flag that changes what the tool does.
+
+- **`agent_add`:** there is no `POST /api/rigs/{id}/pods/{ns}/members` route. The tool returns `{"error":"not_implemented","feature":"agent_add"}` and does not open the socket. A 404 with an empty body was the previous result.
+- **`rig_start`:** posts the spec file's YAML bytes to `POST /api/rigs/up` (120s). It does not post `{sourceRef, plan, autoApprove, targetRoot}` to `POST /api/up`. `plan: true`, `autoApprove: true`, and any `targetRoot` are refused before HTTP, because each one would change bring-up and the daemon has no such flag. A file that does not parse as a rig spec is rejected locally; the error text does not include the file body, so a non-spec file's keys are not echoed.
+- **`rig_stop`:** `snapshot: true` calls `POST /api/snapshot/create` with `{"rig": rigId}` and, only if that succeeds, `POST /api/rigs/down` with `{"rig": rigId}`. A failed snapshot does not stop the rig. `delete: true` and `force: true` are refused. This is not `POST /api/down` with `{rigId, delete, force, snapshot}`.
+- **`rig_list`:** `GET /api/rigs/summary` returns `{id, name}` rows. There is no `GET /api/ps`, and the summary has no status, uptime, or node counts.
+- **`agent_list`:** `rigId` is required. The tool resolves it through `GET /api/rigs/summary` and returns that rig's seats from `GET /api/seats`. There is no `GET /api/rigs/:id/nodes`, and the seats are not a node inventory (`nodeKind`, attach command, resume command).
+- **`agent_read_screen`:** one session is `POST /api/seats/capture` with `{seat, lines}`. `rig` and `pod` are refused. The daemon captures a single seat, not every session in a rig or pod.
+- **`chat_send`:** optional `sender` is accepted and not forwarded, which matches the TypeScript tool (the field is deprecated and ignored). The body stays `{body}`.
+- **`daemon_health`:** returns the `/healthz` body from PE-009 (`status` and `pid`, no version). A down socket is `{"running": false}` and does not start the daemon.
+- **`waitForIdleSeconds`:** a positive value is refused with `not_implemented` before any HTTP call. It is not sent as `waitForIdleMs`, and the client timeout is not extended. `force` combined with the wait is still the TypeScript error, also before HTTP. `force` alone does not set `dangerously_interact`.
+- **`spec_validate_rig` and `spec_validate_agent`:** local `crewmux-spec` checks. Zero HTTP. They do not `POST` the YAML to `/api/rigs/import/validate` or `/api/agents/validate`.
+- **`snapshot_create`:** `POST /api/snapshot/create` with `{"rig": rigId}`. The id is not a percent-encoded path segment under `/api/rigs/:id/snapshots`.
+- **Pre-existing, not changed here:** `POST /api/send` attributes the row from the JSON `from` field. The `X-Rig-Seat-*` headers the MCP process forwards are the seat pair from PE-011, and this send route does not read them. Chat send does authenticate with those headers. That gap is left as it was.
+- **Required tests:** `agent_add_is_not_implemented`, `rig_start_posts_spec_yaml`, `rig_start_refuses_flags`, `rig_start_hides_non_spec_keys`, `rig_stop_posts_down`, `rig_stop_snapshots_then_stops`, `rig_stop_does_not_stop_when_snapshot_fails`, `rig_stop_refuses_delete_and_force`, `rig_list_gets_summary`, `agent_list_filters_by_rig`, `agent_read_screen_returns_capture`, `agent_read_screen_refuses_rig_or_pod`, `chat_send_ignores_sender`, `agent_send_wait_is_refused`, `spec_validate_rig_is_local`, `snapshot_create_posts_body`, and `daemon_health_returns_up_body`. `cargo xtask diff` case `mcp-tool-names` maps the legacy names onto the registered Rust names.
 
 ## Status of real-login testing
 

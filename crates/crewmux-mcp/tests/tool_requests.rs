@@ -21,40 +21,9 @@ fn partial_seat_env_is_rejected() {
 }
 
 #[tokio::test]
-async fn agent_add_posts_members() {
+async fn agent_add_is_not_implemented() {
     let (hits, result) = call(
-        vec![script(
-            201,
-            r#"{"ok":true,"result":{"node":{"logicalId":"infra.server2","status":"launched"}}}"#,
-        )],
-        "agent_add",
-        json!({"rigId":"rig-1","podNamespace":"infra","member":{"id":"server2"}}),
-        false,
-    )
-    .await;
-    assert_eq!(result.is_error, Some(false));
-    assert_eq!(
-        harness::json_of(&result)["result"]["node"]["logicalId"],
-        "infra.server2"
-    );
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].method, "POST");
-    assert_eq!(hits[0].path, "/api/rigs/rig-1/pods/infra/members");
-    assert_eq!(
-        body(&hits[0])["member"]["id"],
-        "server2",
-        "{}",
-        hits[0].body
-    );
-}
-
-#[tokio::test]
-async fn agent_add_forwards_edges() {
-    let (hits, _) = call(
-        vec![script(
-            201,
-            r#"{"ok":true,"result":{"node":{"status":"launched"}}}"#,
-        )],
+        vec![script(201, r#"{"ok":true}"#)],
         "agent_add",
         json!({
             "rigId": "rig/1",
@@ -65,39 +34,10 @@ async fn agent_add_forwards_edges() {
         false,
     )
     .await;
-    assert_eq!(hits[0].path, "/api/rigs/rig%2F1/pods/infra/members");
-    assert_eq!(body(&hits[0])["edges"][0]["kind"], "delegates_to");
-}
-
-#[tokio::test]
-async fn agent_add_conflict_is_error() {
-    let (_, result) = call(
-        vec![script(
-            409,
-            r#"{"ok":false,"code":"member_conflict","message":"exists"}"#,
-        )],
-        "agent_add",
-        json!({"rigId":"rig-1","podNamespace":"infra","member":{"id":"server"}}),
-        false,
-    )
-    .await;
+    assert!(hits.is_empty());
     assert_eq!(result.is_error, Some(true));
-    assert_eq!(harness::json_of(&result)["code"], "member_conflict");
-}
-
-#[tokio::test]
-async fn agent_add_unlaunched_is_error() {
-    let (_, result) = call(
-        vec![script(
-            201,
-            r#"{"ok":true,"result":{"node":{"status":"failed"}}}"#,
-        )],
-        "agent_add",
-        json!({"rigId":"rig-1","podNamespace":"infra","member":{"id":"server2"}}),
-        false,
-    )
-    .await;
-    assert_eq!(result.is_error, Some(true));
+    assert_eq!(harness::json_of(&result)["error"], "not_implemented");
+    assert_eq!(harness::json_of(&result)["feature"], "agent_add");
 }
 
 #[tokio::test]
@@ -130,7 +70,7 @@ async fn rig_stop_posts_down() {
     let (hits, _) = call(
         vec![script(200, r#"{"stopped":true}"#)],
         "rig_stop",
-        json!({"rigId":"rig-1","delete":true,"force":false}),
+        json!({"rigId":"rig-1","delete":false,"force":false,"snapshot":false}),
         false,
     )
     .await;
@@ -157,16 +97,23 @@ async fn rig_list_gets_summary() {
 }
 
 #[tokio::test]
-async fn agent_list_gets_seats() {
-    let (hits, _) = call(
-        vec![script(200, r#"{"seats":[]}"#)],
+async fn agent_list_filters_by_rig() {
+    let (hits, result) = call(
+        vec![
+            script(200, r#"[{"id":"rig-1","name":"demo"}]"#),
+            script(
+                200,
+                r#"{"rigs":[{"name":"demo","seats":[{"name":"dev"}]},{"name":"other","seats":[]}]}"#,
+            ),
+        ],
         "agent_list",
-        json!({}),
+        json!({"rigId":"rig-1"}),
         false,
     )
     .await;
-    assert_eq!(hits[0].method, "GET");
-    assert_eq!(hits[0].path, "/api/seats");
+    assert_eq!(hits[0].path, "/api/rigs/summary");
+    assert_eq!(hits[1].path, "/api/seats");
+    assert_eq!(harness::json_of(&result)[0]["name"], "dev");
 }
 
 #[tokio::test]
@@ -194,7 +141,7 @@ async fn agent_send_returns_daemon_json() {
 }
 
 #[tokio::test]
-async fn agent_send_wait_is_not_applied() {
+async fn agent_send_wait_is_refused() {
     let (hits, result) = call(
         vec![script(200, r#"{"ok":true}"#)],
         "agent_send",
@@ -202,11 +149,9 @@ async fn agent_send_wait_is_not_applied() {
         false,
     )
     .await;
-    assert_eq!(result.is_error, Some(false));
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "/api/send");
-    assert!(body(&hits[0]).get("waitForIdleMs").is_none());
-    assert!(body(&hits[0]).get("waitForIdleSeconds").is_none());
+    assert!(hits.is_empty());
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(harness::json_of(&result)["feature"], "waitForIdleSeconds");
 }
 
 #[tokio::test]
@@ -327,7 +272,7 @@ async fn rig_start_posts_spec_yaml() {
     let (hits, result) = call(
         vec![script(200, r#"{"name":"demo"}"#)],
         "rig_start",
-        json!({"sourceRef": path.display().to_string(), "plan": false, "autoApprove": true}),
+        json!({"sourceRef": path.display().to_string(), "plan": false}),
         false,
     )
     .await;
@@ -392,13 +337,188 @@ async fn daemon_health_returns_up_body() {
     .await;
     assert_eq!(hits[0].path, "/healthz");
     assert_eq!(harness::json_of(&result)["pid"], 7);
+    assert!(harness::json_of(&result).get("version").is_none());
     assert_eq!(result.is_error, Some(false));
+}
+
+#[tokio::test]
+async fn rig_stop_snapshots_then_stops() {
+    let (hits, result) = call(
+        vec![
+            script(200, r#"{"id":"snap-1"}"#),
+            script(200, r#"{"stopped":true}"#),
+        ],
+        "rig_stop",
+        json!({"rigId":"demo","snapshot":true}),
+        false,
+    )
+    .await;
+    assert_eq!(result.is_error, Some(false));
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].path, "/api/snapshot/create");
+    assert_eq!(body(&hits[0])["rig"], "demo");
+    assert_eq!(hits[1].path, "/api/rigs/down");
+    assert_eq!(body(&hits[1])["rig"], "demo");
+    let parsed = harness::json_of(&result);
+    assert_eq!(parsed["snapshot"]["id"], "snap-1");
+    assert_eq!(parsed["down"]["stopped"], true);
+}
+
+#[tokio::test]
+async fn rig_stop_does_not_stop_when_snapshot_fails() {
+    let (hits, result) = call(
+        vec![script(500, r#"{"error":"snapshot failed"}"#)],
+        "rig_stop",
+        json!({"rigId":"demo","snapshot":true}),
+        false,
+    )
+    .await;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "/api/snapshot/create");
+    assert_eq!(result.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn rig_stop_refuses_delete_and_force() {
+    for (flag, feature) in [("delete", "delete"), ("force", "force")] {
+        let (hits, result) = call(
+            vec![script(200, r#"{"stopped":true}"#)],
+            "rig_stop",
+            json!({"rigId":"demo", flag: true, "snapshot": true}),
+            false,
+        )
+        .await;
+        assert!(hits.is_empty(), "{flag}");
+        assert_eq!(harness::json_of(&result)["feature"], feature, "{flag}");
+    }
+}
+
+#[tokio::test]
+async fn rig_start_refuses_flags() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("rig.yaml");
+    std::fs::write(
+        &path,
+        "name: demo\nseats:\n  - name: dev\n    runtime: terminal\n",
+    )
+    .expect("spec");
+    let source = path.display().to_string();
+    for (extra, feature) in [
+        (json!({"plan": true}), "plan"),
+        (json!({"autoApprove": true}), "autoApprove"),
+        (json!({"targetRoot": "/tmp/elsewhere"}), "targetRoot"),
+    ] {
+        let mut args = json!({"sourceRef": source});
+        let Some(map) = args.as_object_mut() else {
+            panic!("args");
+        };
+        let Some(extra) = extra.as_object() else {
+            panic!("extra");
+        };
+        for (key, value) in extra {
+            map.insert(key.clone(), value.clone());
+        }
+        let (hits, result) = call(
+            vec![script(200, r#"{"name":"demo"}"#)],
+            "rig_start",
+            args,
+            false,
+        )
+        .await;
+        assert!(hits.is_empty(), "{feature}");
+        assert_eq!(harness::json_of(&result)["feature"], feature, "{feature}");
+    }
+}
+
+#[tokio::test]
+async fn rig_start_hides_non_spec_keys() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("not-a-spec.env");
+    let secret = "sk-live-SUPERSECRET-key";
+    std::fs::write(&path, format!("{secret}: hunter2\n")).expect("file");
+    let (hits, result) = call(
+        vec![script(200, r#"{"name":"demo"}"#)],
+        "rig_start",
+        json!({"sourceRef": path.display().to_string()}),
+        false,
+    )
+    .await;
+    assert!(hits.is_empty());
+    let text = harness::text_of(&result);
+    assert_eq!(result.is_error, Some(true));
+    assert!(text.contains("not a rig spec"), "{text}");
+    assert!(!text.contains(secret), "{text}");
+    assert!(!text.contains("hunter2"), "{text}");
+}
+
+#[tokio::test]
+async fn agent_read_screen_refuses_rig_or_pod() {
+    let (hits, result) = call(
+        vec![script(200, r#"{"text":"ready"}"#)],
+        "agent_read_screen",
+        json!({"session":"dev","rig":"demo"}),
+        false,
+    )
+    .await;
+    assert!(hits.is_empty());
+    assert_eq!(harness::json_of(&result)["feature"], "rig");
+    let (hits, result) = call(
+        vec![script(200, r#"{"text":"ready"}"#)],
+        "agent_read_screen",
+        json!({"pod":"infra"}),
+        false,
+    )
+    .await;
+    assert!(hits.is_empty());
+    assert_eq!(harness::json_of(&result)["feature"], "pod");
+}
+
+#[tokio::test]
+async fn chat_send_ignores_sender() {
+    let (hits, _) = call(
+        vec![
+            script(200, r#"[{"id":"r1","name":"demo"}]"#),
+            script(201, r#"{"id":"m1","body":"hi"}"#),
+        ],
+        "chat_send",
+        json!({"rigName":"demo","body":"hi","sender":"mcp"}),
+        false,
+    )
+    .await;
+    assert!(body(&hits[1]).get("sender").is_none());
+    assert_eq!(body(&hits[1])["body"], "hi");
+}
+
+#[tokio::test]
+async fn oversized_send_is_payload_rejected() {
+    let (hits, result) = call(
+        vec![close_early()],
+        "agent_send",
+        json!({"session":"dev","text": "x".repeat(512 * 1024)}),
+        false,
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true), "{}", harness::text_of(&result));
+    let text = harness::text_of(&result);
+    assert!(text.contains("payload_rejected"), "{text}");
+    assert!(!text.contains("Broken pipe"), "{text}");
+    assert!(!text.to_ascii_lowercase().contains("broken pipe"), "{text}");
+    drop(hits);
 }
 
 fn script(status: u16, body: &str) -> Scripted {
     Scripted {
         status,
         body: body.to_owned(),
+        close_early: false,
+    }
+}
+
+fn close_early() -> Scripted {
+    Scripted {
+        status: 200,
+        body: String::new(),
+        close_early: true,
     }
 }
 

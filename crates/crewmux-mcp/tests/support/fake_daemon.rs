@@ -21,6 +21,8 @@ pub(crate) struct Hit {
 pub(crate) struct Scripted {
     pub(crate) status: u16,
     pub(crate) body: String,
+    /// Close after the headers, before the body is read. Status `0` is unused.
+    pub(crate) close_early: bool,
 }
 
 pub(crate) struct FakeDaemon {
@@ -85,11 +87,19 @@ fn thread(
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            let Ok(request) = read_request(&mut stream) else {
+            let Ok(head) = read_headers(&mut stream) else {
                 continue;
             };
-            hits.lock().push(request_hit(&request));
             let scripted = script.lock().pop_front_script();
+            if scripted.close_early {
+                hits.lock().push(hit_from(&head.text, ""));
+                drop(stream.shutdown(std::net::Shutdown::Both));
+                continue;
+            }
+            let Ok(body) = read_body(&mut stream, &head) else {
+                continue;
+            };
+            hits.lock().push(hit_from(&head.text, &body));
             drop(write_response(&mut stream, &scripted));
         }
     })
@@ -105,6 +115,7 @@ impl PopFront for Vec<Scripted> {
             Scripted {
                 status: 500,
                 body: "{\"error\":\"no script\"}".to_owned(),
+                close_early: false,
             }
         } else {
             self.remove(0)
@@ -112,13 +123,14 @@ impl PopFront for Vec<Scripted> {
     }
 }
 
-struct RawRequest {
-    head: String,
-    body: String,
+struct Head {
+    text: String,
+    leftover: Vec<u8>,
+    length: usize,
 }
 
-fn request_hit(request: &RawRequest) -> Hit {
-    let mut lines = request.head.lines();
+fn hit_from(head: &str, body: &str) -> Hit {
+    let mut lines = head.lines();
     let start = lines.next().unwrap_or("");
     let mut parts = start.split_whitespace();
     let method = parts.next().unwrap_or("").to_owned();
@@ -126,52 +138,50 @@ fn request_hit(request: &RawRequest) -> Hit {
     Hit {
         method,
         path,
-        body: request.body.clone(),
-        headers: request.head.clone(),
+        body: body.to_owned(),
+        headers: head.to_owned(),
     }
 }
 
-fn read_request(stream: &mut UnixStream) -> std::io::Result<RawRequest> {
+fn read_headers(stream: &mut UnixStream) -> std::io::Result<Head> {
     let mut buf = Vec::new();
     let mut chunk = [0_u8; 1024];
-    let header_end = loop {
+    let index = loop {
         let n = stream.read(&mut chunk)?;
         if n == 0 {
-            break None;
+            return eof("no header");
         }
         let Some(piece) = chunk.get(..n) else {
-            break None;
+            return eof("short read");
         };
         buf.extend_from_slice(piece);
         if let Some(index) = find_header_end(&buf) {
-            break Some(index);
+            break index;
         }
         if buf.len() > 1_000_000 {
-            break None;
+            return eof("header too large");
         }
     };
-    let Some(index) = header_end else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "no header",
-        ));
-    };
     let Some(head_bytes) = buf.get(..index) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "header index",
-        ));
+        return eof("header index");
     };
-    let head = String::from_utf8_lossy(head_bytes).into_owned();
-    let length = content_length(&head);
-    let Some(rest) = buf.get(index.saturating_add(4)..) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "header end",
-        ));
-    };
-    let mut body = rest.to_vec();
-    while body.len() < length {
+    let text = String::from_utf8_lossy(head_bytes).into_owned();
+    let length = content_length(&text);
+    let leftover = buf
+        .get(index.saturating_add(4)..)
+        .unwrap_or_default()
+        .to_vec();
+    Ok(Head {
+        text,
+        leftover,
+        length,
+    })
+}
+
+fn read_body(stream: &mut UnixStream, head: &Head) -> std::io::Result<String> {
+    let mut body = head.leftover.clone();
+    let mut chunk = [0_u8; 1024];
+    while body.len() < head.length {
         let n = stream.read(&mut chunk)?;
         if n == 0 {
             break;
@@ -181,11 +191,15 @@ fn read_request(stream: &mut UnixStream) -> std::io::Result<RawRequest> {
         };
         body.extend_from_slice(piece);
     }
-    body.truncate(length);
-    Ok(RawRequest {
-        head,
-        body: String::from_utf8_lossy(&body).into_owned(),
-    })
+    body.truncate(head.length);
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+fn eof(message: &str) -> std::io::Result<Head> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::UnexpectedEof,
+        message,
+    ))
 }
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {

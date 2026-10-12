@@ -9,43 +9,58 @@ use serde_json::Value;
 #[serde(default)]
 pub(crate) struct NoArgs {}
 
-/// `rig_start`. `sourceRef` is required. The other fields are accepted and not applied.
+/// `rig_start`. `sourceRef` is required. Flags that would change bring-up are refused.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct RigStartArgs {
     /// Path to a rig spec YAML file.
     #[serde(rename = "sourceRef")]
     pub source_ref: String,
-    /// Accepted for the renamed schema. The daemon bring-up has no plan flag.
+    /// `true` is refused. The daemon bring-up has no plan-only mode.
     pub plan: Option<bool>,
-    /// Accepted for the renamed schema. The daemon bring-up has no auto-approve flag.
+    /// `true` is refused. The daemon bring-up has no auto-approve flag.
     #[serde(rename = "autoApprove")]
     pub auto_approve: Option<bool>,
-    /// Accepted for the renamed schema. The daemon bring-up has no target root.
+    /// Any value is refused. The daemon bring-up has no target root.
     #[serde(rename = "targetRoot")]
     pub target_root: Option<String>,
 }
 
-/// `rig_stop`. Optional flags are accepted and not sent.
+/// `rig_stop`. `snapshot` creates a snapshot before stop. `delete` and `force` are refused.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct RigStopArgs {
     /// Rig id or name the daemon `down` route understands.
     #[serde(rename = "rigId")]
     pub rig_id: String,
-    /// Accepted and not applied.
+    /// `true` is refused. The daemon `down` route does not delete the rig record.
     pub delete: Option<bool>,
-    /// Accepted and not applied. This is not `dangerously_interact`.
+    /// `true` is refused. This is not `dangerously_interact`.
     pub force: Option<bool>,
-    /// Accepted and not applied.
+    /// `true` creates a snapshot, then stops. A failed snapshot does not stop the rig.
     pub snapshot: Option<bool>,
 }
 
-/// `agent_read_screen`.
+/// `agent_read_screen`. One seat. `rig` and `pod` are refused.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct ReadScreenArgs {
-    /// Seat or session name.
-    pub session: String,
+    /// Seat or session name. Required unless `rig` or `pod` is set, and those are refused.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Refused. The daemon captures one seat, not every seat in a rig.
+    #[serde(default)]
+    pub rig: Option<String>,
+    /// Refused. The daemon captures one seat, not a pod.
+    #[serde(default)]
+    pub pod: Option<String>,
     /// Capture line budget. Omitted uses the daemon default.
     pub lines: Option<u32>,
+}
+
+/// `agent_list`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct AgentListArgs {
+    /// Rig id or name. Resolved through `GET /api/rigs/summary`, then filtered in `GET /api/seats`.
+    #[serde(rename = "rigId")]
+    pub rig_id: String,
 }
 
 /// `agent_send`.
@@ -53,13 +68,13 @@ pub(crate) struct ReadScreenArgs {
 pub(crate) struct AgentSendArgs {
     /// Target session name.
     pub session: String,
-    /// Message text. The daemon runs lineage and pre-send checks.
+    /// Message text posted to `POST /api/send`.
     pub text: String,
     /// Ask the daemon to verify delivery.
     pub verify: Option<bool>,
     /// Accepted only so `force` plus `waitForIdleSeconds` can be rejected locally.
     pub force: Option<bool>,
-    /// Not implemented. Combined with `force` it is rejected before any HTTP call.
+    /// Refused when set. The send route has no idle wait, so the timeout is not extended.
     #[serde(rename = "waitForIdleSeconds")]
     pub wait_for_idle_seconds: Option<f64>,
 }
@@ -84,7 +99,7 @@ pub(crate) struct AgentAddArgs {
     /// Pod namespace, percent-encoded into the path.
     #[serde(rename = "podNamespace")]
     pub pod_namespace: String,
-    /// Member fragment. The daemon route is not implemented; the tool still posts it.
+    /// Member fragment. The tool returns `not_implemented` and does not post it.
     pub member: Value,
     /// Optional pod-local edges.
     pub edges: Option<Vec<EdgeArg>>,
@@ -101,6 +116,9 @@ pub(crate) struct ChatSendArgs {
     pub rig_name: String,
     /// Message body.
     pub body: String,
+    /// Accepted and not forwarded. The daemon derives the sender.
+    #[serde(default)]
+    pub sender: Option<String>,
 }
 
 /// `chat_read`.

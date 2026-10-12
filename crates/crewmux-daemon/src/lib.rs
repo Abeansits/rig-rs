@@ -45,6 +45,8 @@ mod flow;
 #[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]
+mod reply_hint_tests;
+#[cfg(test)]
 mod slice4_tests;
 #[cfg(test)]
 mod slice8_delivery_tests;

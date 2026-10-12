@@ -14,7 +14,7 @@ async fn daemon_down_is_unavailable() {
     for name in ["rig_list", "agent_list", "snapshot_list", "agent_send"] {
         let args = match name {
             "agent_send" => serde_json::json!({"session": "dev", "text": "hi"}),
-            "snapshot_list" => serde_json::json!({"rigId": "rig-1"}),
+            "agent_list" | "snapshot_list" => serde_json::json!({"rigId": "rig-1"}),
             _ => serde_json::json!({}),
         };
         let result = session.call(name, args).await.expect(name);

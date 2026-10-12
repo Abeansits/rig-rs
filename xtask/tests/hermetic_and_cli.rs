@@ -123,13 +123,8 @@ fn missing_typescript_tree_exits_2_and_does_not_skip() {
     assert!(stderr.contains("Node >= 22"), "{stderr}");
 }
 
-#[test]
-fn self_mode_exits_0_and_update_with_self_is_a_usage_error() {
-    let dir = tempfile::TempDir::with_prefix("rigrs-bin-").unwrap();
-    let bin = dir.path().join("rig");
-    fs::write(
-        &bin,
-        r#"#!/usr/bin/env python3
+/// Fake `rig`: `daemon run` answers `/healthz`. `mcp` answers `tools/list`.
+const FAKE_RIG: &str = r#"#!/usr/bin/env python3
 import os, socket, sys
 if sys.argv[1:3] == ["daemon", "run"]:
     path = os.path.join(os.environ["RIG_HOME"], "run", "daemon.sock")
@@ -172,10 +167,33 @@ if sys.argv[1:3] == ["daemon", "run"]:
         read_request(conn)
         conn.sendall(head + body)
         conn.close()
+if sys.argv[1:2] == ["mcp"]:
+    import json
+    names = ["agent_send", "rig_start"]
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        ident = msg.get("id")
+        if ident == 1:
+            reply = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05"}}
+        elif ident == 2:
+            reply = {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": name} for name in names]}}
+        else:
+            continue
+        sys.stdout.write(json.dumps(reply) + "\n")
+        sys.stdout.flush()
+        if ident == 2:
+            break
 raise SystemExit(0)
-"#,
-    )
-    .unwrap();
+"#;
+
+#[test]
+fn self_mode_exits_0_and_update_with_self_is_a_usage_error() {
+    let dir = tempfile::TempDir::with_prefix("rigrs-bin-").unwrap();
+    let bin = dir.path().join("rig");
+    fs::write(&bin, FAKE_RIG).unwrap();
     fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
     let bin_text = bin.display().to_string();
     let _reap = FakeDaemons {

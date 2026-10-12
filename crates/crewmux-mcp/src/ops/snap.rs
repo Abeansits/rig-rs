@@ -41,7 +41,6 @@ async fn post(ctx: &Ctx, path: &str, body: serde_json::Value) -> CallToolResult 
             headers: Vec::new(),
             timeout: None,
         },
-        false,
     )
     .await
 }

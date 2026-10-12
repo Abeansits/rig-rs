@@ -14,11 +14,17 @@ use crate::result::{daemon_unavailable, local_error, map_body};
 use super::rig::one;
 
 pub(crate) async fn chat_send(ctx: &Ctx, args: ChatSendArgs) -> CallToolResult {
-    let rig_id = match lookup(ctx, &args.rig_name).await {
+    let crate::args::ChatSendArgs {
+        rig_name,
+        body,
+        sender,
+    } = args;
+    drop(sender);
+    let rig_id = match lookup(ctx, &rig_name).await {
         Lookup::One(id) => id,
         Lookup::Failed(result) => return result,
     };
-    let Ok(bytes) = json_body(&json!({"body": args.body})) else {
+    let Ok(bytes) = json_body(&json!({"body": body})) else {
         return local_error(&json!({"error": "could not encode chat_send"}));
     };
     one(
@@ -30,7 +36,6 @@ pub(crate) async fn chat_send(ctx: &Ctx, args: ChatSendArgs) -> CallToolResult {
             headers: ctx.caller.headers(),
             timeout: None,
         },
-        false,
     )
     .await
 }
@@ -49,7 +54,6 @@ pub(crate) async fn chat_read(ctx: &Ctx, args: ChatReadArgs) -> CallToolResult {
             headers: Vec::new(),
             timeout: None,
         },
-        false,
     )
     .await
 }

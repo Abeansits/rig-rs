@@ -3470,12 +3470,14 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "crewmux-api",
+ "crewmux-mcp",
  "insta",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

@@ -37,6 +37,12 @@ pub(crate) fn daemon_unavailable() -> CallToolResult {
     local_error(&serde_json::json!({"error": "daemon_unavailable"}))
 }
 
+/// A flag or route this daemon does not implement. No HTTP call was made.
+#[must_use]
+pub(crate) fn not_implemented(feature: &str) -> CallToolResult {
+    local_error(&serde_json::json!({"error": "not_implemented", "feature": feature}))
+}
+
 fn text_result(text: &str, failed: bool) -> CallToolResult {
     let content = vec![ContentBlock::text(text.to_owned())];
     if failed {
@@ -66,14 +72,4 @@ fn truthy(value: Option<&Value>) -> bool {
         Some(Value::String(text)) => !text.is_empty(),
         Some(Value::Array(items)) => !items.is_empty(),
     }
-}
-
-/// `agent_add`: a node status other than `launched` is a structural failure.
-#[must_use]
-pub(crate) fn unlaunched(data: &Value) -> bool {
-    data.get("result")
-        .and_then(|result| result.get("node"))
-        .and_then(|node| node.get("status"))
-        .and_then(Value::as_str)
-        .is_some_and(|status| status != "launched")
 }
