@@ -264,26 +264,28 @@ struct ItemView {
 }
 
 fn count_body(home: &std::path::Path, body: &str) -> usize {
-    let root = home.join("transcripts");
-    let Ok(seats) = std::fs::read_dir(&root) else {
+    count_plain(&home.join("transcripts"), body)
+}
+
+fn count_plain(dir: &std::path::Path, body: &str) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
     let mut count = 0usize;
-    for seat in seats.flatten() {
-        let Ok(files) = std::fs::read_dir(seat.path()) else {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            count += count_plain(&path, body);
             continue;
-        };
-        for file in files.flatten() {
-            let plain = file
-                .path()
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"));
-            if !plain {
-                continue;
-            }
-            let contents = std::fs::read_to_string(file.path()).unwrap_or_default();
-            count += contents.matches(body).count();
         }
+        let plain = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"));
+        if !plain {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&path).unwrap_or_default();
+        count += contents.matches(body).count();
     }
     count
 }

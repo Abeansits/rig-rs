@@ -16,13 +16,19 @@ use crate::queue::{load_book, overwrite_book};
 
 /// Replace the live rows for `rig_name` with the rows in `snap_path`.
 ///
-/// Seats keep their live session fields. Cwd, resume, edges, deliveries,
-/// checkpoints, and that rig's queue rows come from the snapshot.
+/// Seats that appeared after the snapshot are deleted. Resume token files in
+/// `resume_dir` are rewritten before the transaction commits, so a failed
+/// write rolls the import back.
 ///
 /// # Errors
 ///
 /// Returns [`Error`] when the snapshot cannot be read or a write fails.
-pub fn import_rig(live: &mut Connection, snap_path: &Path, rig_name: &str) -> Result<(), Error> {
+pub fn import_rig(
+    live: &mut Connection,
+    snap_path: &Path,
+    rig_name: &str,
+    resume_dir: &Path,
+) -> Result<(), Error> {
     let snap = Connection::open_with_flags(snap_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let rig_id = rig_id(&snap, rig_name)?;
     let tx = live.transaction()?;
@@ -34,13 +40,57 @@ pub fn import_rig(live: &mut Connection, snap_path: &Path, rig_name: &str) -> Re
             put_seat_restore(&tx, &row)?;
         }
     }
+    drop_extra_seats(&tx, &rig_id, &seats, resume_dir)?;
     copy_edges(&tx, &snap, &rig_id)?;
     copy_direct(&tx, &snap, &rig_id)?;
     copy_checkpoints(&tx, &snap, &seats)?;
     let book = merged_queue(&tx, &snap, rig_name)?;
     overwrite_book(&tx, &book)?;
+    write_resume_files(&tx, resume_dir, &seats)?;
     tx.commit()?;
     Ok(())
+}
+
+fn drop_extra_seats(
+    live: &Connection,
+    rig_id: &str,
+    kept: &[String],
+    resume_dir: &Path,
+) -> Result<(), Error> {
+    let mut stmt = live.prepare("SELECT id FROM seats WHERE rig_id = ?1")?;
+    let ids = stmt
+        .query_map(params![rig_id], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    for id in ids {
+        if kept.iter().any(|kept_id| kept_id == &id) {
+            continue;
+        }
+        live.execute("DELETE FROM sessions WHERE seat_id = ?1", params![id])?;
+        live.execute("DELETE FROM seats WHERE id = ?1", params![id])?;
+        remove_token(resume_dir, &id)?;
+    }
+    Ok(())
+}
+
+fn write_resume_files(live: &Connection, dir: &Path, seats: &[String]) -> Result<(), Error> {
+    std::fs::create_dir_all(dir)?;
+    for id in seats {
+        let value = load_seat_restore(live, id)?.and_then(|row| row.resume_value);
+        let path = dir.join(format!("{id}.token"));
+        match value.as_deref().filter(|text| !text.is_empty()) {
+            Some(text) => std::fs::write(&path, text)?,
+            None => remove_token(dir, id)?,
+        }
+    }
+    Ok(())
+}
+
+fn remove_token(dir: &Path, id: &str) -> Result<(), Error> {
+    match std::fs::remove_file(dir.join(format!("{id}.token"))) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn rig_id(snap: &Connection, name: &str) -> Result<String, Error> {

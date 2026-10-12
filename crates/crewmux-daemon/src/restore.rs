@@ -89,7 +89,7 @@ async fn restore_one(
         (seat.clone(), had.is_some())
     } else {
         let replay = if had.is_some() {
-            write_replay(app, seat).await?
+            write_replay(app, seat, rig_name).await?
         } else {
             None
         };
@@ -188,18 +188,24 @@ async fn discover(app: &App, seat: &Seat, rig_name: &str) -> Result<Option<Resum
         .map_err(Error::from)
 }
 
-async fn write_replay(app: &App, seat: &Seat) -> Result<Option<PathBuf>, Error> {
+async fn write_replay(app: &App, seat: &Seat, rig_name: &str) -> Result<Option<PathBuf>, Error> {
     let name = seat.name.as_str().to_owned();
+    let rig = rig_name.to_owned();
     let home = app.home.clone();
     let dest = replay_path(&app.home, &seat.id);
-    let wrote = tokio::task::spawn_blocking(move || replay_file(&home, &name, &dest))
+    let wrote = tokio::task::spawn_blocking(move || replay_file(&home, &rig, &name, &dest))
         .await
         .map_err(join_err)??;
     Ok(wrote.then_some(replay_path(&app.home, &seat.id)))
 }
 
-fn replay_file(home: &std::path::Path, seat: &str, dest: &std::path::Path) -> Result<bool, Error> {
-    let bytes = crate::transcripts::plain_bytes(home, seat)?;
+fn replay_file(
+    home: &std::path::Path,
+    rig: &str,
+    seat: &str,
+    dest: &std::path::Path,
+) -> Result<bool, Error> {
+    let bytes = crate::transcripts::plain_bytes(home, rig, seat)?;
     let turns = envelope_turns(&bytes, 0);
     if turns.is_empty() {
         return Ok(false);
@@ -277,7 +283,7 @@ async fn reconcile_deliveries(
     rig_name: &str,
     seats: &[Seat],
 ) -> Result<Vec<Value>, Error> {
-    let planned = plan_for(app, rig, seats).await?;
+    let planned = plan_for(app, rig, rig_name, seats).await?;
     let mut rendered = Vec::new();
     for action in planned {
         apply_action(app, rig_name, seats, &action).await;
@@ -287,14 +293,20 @@ async fn reconcile_deliveries(
     Ok(rendered)
 }
 
-async fn plan_for(app: &App, rig: &RigId, seats: &[Seat]) -> Result<Vec<ReconcileAction>, Error> {
+async fn plan_for(
+    app: &App,
+    rig: &RigId,
+    rig_name: &str,
+    seats: &[Seat],
+) -> Result<Vec<ReconcileAction>, Error> {
     let id = rig.to_string();
     let home = app.home.clone();
+    let rig_name = rig_name.to_owned();
     let seats = seats.to_vec();
     let store = Arc::clone(&app.store);
     tokio::task::spawn_blocking(move || {
         let inflight = store.read(move |conn| inflight_of(conn, &id))?;
-        let probe = HomeProbe::new(home, &seats);
+        let probe = HomeProbe::new(home, &rig_name, &seats);
         plan_reconcile(&inflight, &probe)
             .map_err(|err| crewmux_store::Error::Event(err.to_string()))
     })

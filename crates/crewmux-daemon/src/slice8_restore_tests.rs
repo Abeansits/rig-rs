@@ -238,40 +238,15 @@ async fn crash_cart_orders_kernel_cancel_and_a_failed_rig() {
     up(&rig.app, &spec("fleet", &[("oseat", "/tmp")])).await;
     up(&rig.app, &spec("kernel", &[("kseat", "/tmp")])).await;
     mark_kernel(&rig.app, "kernel").await;
-    let cancelled = crate::cart::crash_cart(&rig.app, true).await.expect("cart");
-    let rows = cancelled
-        .get("rigs")
-        .and_then(Value::as_array)
-        .expect("rigs");
-    assert_eq!(
-        rows.first()
-            .and_then(|row| row.get("rig"))
-            .and_then(Value::as_str),
-        Some("kernel")
+    let idle = crate::cart::crash_cart(&rig.app, true).await.expect("idle");
+    assert_eq!(idle.get("status").and_then(Value::as_str), Some("idle"));
+    assert!(
+        idle.get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .contains("no crash-cart"),
+        "{idle}"
     );
-    assert_eq!(
-        rows.first()
-            .and_then(|row| row.get("kernel"))
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    assert_ne!(
-        rows.first()
-            .and_then(|row| row.get("outcome"))
-            .and_then(Value::as_str),
-        Some("not_attempted")
-    );
-    assert_eq!(
-        rows.get(1)
-            .and_then(|row| row.get("outcome"))
-            .and_then(Value::as_str),
-        Some("not_attempted")
-    );
-    assert_eq!(
-        cancelled.get("cancelled_before").and_then(Value::as_str),
-        Some("fleet")
-    );
-
     kill_sessions(&rig.app).await;
     break_cwd(&rig.app, "kernel").await;
     let continued = crate::cart::crash_cart(&rig.app, false)
@@ -322,6 +297,67 @@ async fn restore_snapshot_brings_back_the_resume_token() {
     assert_eq!(seat_field(&body, "one", "outcome"), "resumed");
     let text = std::fs::read_to_string(&token).expect("rewritten");
     assert!(text.starts_with("stub-"), "{text}");
+}
+
+#[tokio::test]
+async fn restore_snapshot_drops_seats_added_later() {
+    let rig = rig().await;
+    up(&rig.app, &spec("pair", &[("one", "/tmp")])).await;
+    let created = crate::snapshot::create(&rig.app, "pair")
+        .await
+        .expect("snap");
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("id")
+        .to_owned();
+    let one = seat(&rig.app, "one").await;
+    let rig_id = one.rig_id.to_string();
+    let later = crewmux_types::SeatId::new().to_string();
+    let later_id = later.clone();
+    let store = Arc::clone(&rig.app.store);
+    tokio::task::spawn_blocking(move || {
+        store.write(move |conn| {
+            conn.execute(
+                "INSERT INTO seats (id, rig_id, name, runtime, state)
+                 VALUES (?1, ?2, 'later', 'stub', 'ready')",
+                rusqlite::params![later_id, rig_id],
+            )?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("join")
+    .expect("insert");
+    let token = rig.home.join("resume").join(format!("{later}.token"));
+    std::fs::create_dir_all(token.parent().expect("resume")).expect("dir");
+    std::fs::write(&token, "stub-extra").expect("token");
+    kill_sessions(&rig.app).await;
+    crate::restore::restore_rig(&rig.app, "pair", Some(&id), LaunchPosture::Auto)
+        .await
+        .expect("restore");
+    let rig_key = one.rig_id;
+    let listed = crate::db::read(&rig.app.store, move |conn| {
+        crewmux_core::SeatRepo::list_by_rig(conn, &rig_key)
+    })
+    .await
+    .expect("seats");
+    assert!(
+        listed.iter().all(|seat| seat.name.as_str() != "later"),
+        "{listed:?}"
+    );
+    assert_eq!(listed.len(), 1);
+    assert!(!token.exists(), "dropped seat token remains");
+}
+
+#[tokio::test]
+async fn a_partial_snapshot_directory_is_removed() {
+    let rig = rig().await;
+    let dir = rig.home.join("snapshots").join("pair").join("partial");
+    std::fs::create_dir_all(&dir).expect("dir");
+    std::fs::write(dir.join("rig.db"), b"partial").expect("db");
+    crate::snapshot::discard_partial(&dir).await;
+    assert!(!dir.exists());
 }
 
 #[tokio::test]

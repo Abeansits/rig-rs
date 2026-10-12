@@ -384,6 +384,88 @@ mod tmux_it {
     }
 
     #[test]
+    fn cancel_during_rig_two_of_three() {
+        let _stub = Command::cargo_bin("rig-stub-agent").expect("stub");
+        let live = Live::new(true);
+        for name in ["alpha", "beta", "gamma"] {
+            let spec_path = write_spec(
+                &live,
+                &format!("{name}.yaml"),
+                &spec(&live.home, name, &["seat"]),
+            );
+            let (code, _, err) = run(live.rig().arg("up").arg(&spec_path).arg("--json"));
+            assert_eq!(code, 0, "{err}");
+        }
+        let hold = live.rig_home.join("cart-hold");
+        std::fs::write(&hold, "beta").expect("hold");
+        let mut child = live
+            .rig()
+            .args(["crash-cart", "restore", "--json"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("cart");
+        let at = live.rig_home.join("cart-at");
+        let (_tx, rx) = std::sync::mpsc::channel::<()>();
+        let mut saw = false;
+        for _ in 0..400 {
+            if std::fs::read_to_string(&at).ok().as_deref().map(str::trim) == Some("beta") {
+                saw = true;
+                break;
+            }
+            if rx.recv_timeout(Duration::from_millis(50)).is_ok() {
+                break;
+            }
+        }
+        if !saw {
+            drop(child.kill());
+            drop(child.wait());
+            panic!("cart did not reach beta");
+        }
+        let (code, out, err) =
+            run(live
+                .rig()
+                .args(["crash-cart", "restore", "--cancel", "--json"]));
+        assert_eq!(code, 0, "{err} {out}");
+        let cancel: Value = serde_json::from_str(out.trim()).expect("json");
+        assert_eq!(
+            cancel.get("status").and_then(Value::as_str),
+            Some("cancel_requested"),
+            "{cancel}"
+        );
+        assert!(cancel.get("rigs").is_none(), "{cancel}");
+        let (busy, busy_out, busy_err) = run(live.rig().args(["crash-cart", "restore", "--json"]));
+        assert_ne!(busy, 0, "{busy_out}");
+        assert!(
+            busy_err.contains("already running") || busy_out.contains("already running"),
+            "{busy_err} {busy_out}"
+        );
+        std::fs::remove_file(&hold).expect("release");
+        let output = child.wait_with_output().expect("wait");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{stderr} {stdout}");
+        let body: Value = serde_json::from_str(stdout.trim()).expect("json");
+        let rows = body.get("rigs").and_then(Value::as_array).expect("rigs");
+        assert_eq!(outcome(rows, "alpha"), "fully_restored", "{body}");
+        assert_eq!(outcome(rows, "beta"), "fully_restored", "{body}");
+        assert_eq!(outcome(rows, "gamma"), "not_attempted", "{body}");
+        assert_eq!(
+            body.get("cancelled_before").and_then(Value::as_str),
+            Some("gamma")
+        );
+        let conn = rusqlite::Connection::open(live.rig_home.join("state/rig.db")).expect("db");
+        let restores: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE kind = 'restore_completed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(restores, 2, "no rig is restored twice");
+    }
+
+    #[test]
     fn crash_cart_kernel_cancel_and_continue() {
         let _stub = Command::cargo_bin("rig-stub-agent").expect("stub");
         let live = Live::new(false);
@@ -404,21 +486,13 @@ mod tmux_it {
                 .args(["crash-cart", "restore", "--cancel", "--json"]));
         assert_eq!(code, 0, "{err} {out}");
         let body: Value = serde_json::from_str(out.trim()).expect("json");
-        assert_eq!(
-            body.pointer("/rigs/0/rig").and_then(Value::as_str),
-            Some("kernel")
-        );
-        assert_eq!(
-            body.pointer("/rigs/0/kernel").and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            body.pointer("/rigs/1/outcome").and_then(Value::as_str),
-            Some("not_attempted")
-        );
-        assert_eq!(
-            body.get("cancelled_before").and_then(Value::as_str),
-            Some("fleet")
+        assert_eq!(body.get("status").and_then(Value::as_str), Some("idle"));
+        assert!(
+            body.get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .contains("no crash-cart"),
+            "{body}"
         );
         shutdown(&live);
         let conn = rusqlite::Connection::open(live.rig_home.join("state/rig.db")).expect("db");
@@ -471,26 +545,28 @@ mod tmux_it {
     }
 
     fn count_turns(live: &Live, body: &str) -> usize {
-        let root = live.rig_home.join("transcripts");
-        let Ok(seats) = std::fs::read_dir(root) else {
+        count_plain(&live.rig_home.join("transcripts"), body)
+    }
+
+    fn count_plain(dir: &std::path::Path, body: &str) -> usize {
+        let Ok(entries) = std::fs::read_dir(dir) else {
             return 0;
         };
         let mut count = 0usize;
-        for seat in seats.flatten() {
-            let Ok(files) = std::fs::read_dir(seat.path()) else {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                count += count_plain(&path, body);
                 continue;
-            };
-            for file in files.flatten() {
-                let plain = file
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"));
-                if !plain {
-                    continue;
-                }
-                let contents = std::fs::read_to_string(file.path()).unwrap_or_default();
-                count += contents.matches(body).count();
             }
+            let plain = path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"));
+            if !plain {
+                continue;
+            }
+            let contents = std::fs::read_to_string(&path).unwrap_or_default();
+            count += contents.matches(body).count();
         }
         count
     }

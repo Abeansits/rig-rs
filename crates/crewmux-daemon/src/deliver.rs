@@ -271,10 +271,10 @@ async fn paste_and_check(
         preserve_lf: true,
     };
     tracing::debug!(verify = outbound.verify, seat = address, "paste");
-    let seat_name = address.split_once('@').map_or(address, |(name, _)| name);
-    let cursor = transcript_len(app, seat_name).await?;
+    let (seat_name, rig_name) = split_address(address);
+    let cursor = transcript_len(app, rig_name, seat_name).await?;
     app.mux.paste(pane, &payload, opts).await?;
-    wait_landed(app, seat_name, cursor, &outbound.body).await;
+    wait_landed(app, rig_name, seat_name, cursor, &outbound.body).await;
     let after = pasted_screen(app, pane, &before.text, &payload, range, route.display).await?;
     let view = PasteView {
         before: &before.text,
@@ -298,9 +298,13 @@ async fn paste_and_check(
     .await
 }
 
-async fn transcript_len(app: &App, seat_name: &str) -> Result<u64, Error> {
+fn split_address(address: &str) -> (&str, &str) {
+    address.split_once('@').unwrap_or((address, ""))
+}
+
+async fn transcript_len(app: &App, rig_name: &str, seat_name: &str) -> Result<u64, Error> {
     if app.transcripts {
-        crate::transcripts::len_of(&app.home, seat_name)
+        crate::transcripts::len_of(&app.home, rig_name, seat_name)
             .await
             .map_err(Error::from)
     } else {
@@ -308,9 +312,9 @@ async fn transcript_len(app: &App, seat_name: &str) -> Result<u64, Error> {
     }
 }
 
-async fn wait_landed(app: &App, seat_name: &str, cursor: u64, body: &str) {
+async fn wait_landed(app: &App, rig_name: &str, seat_name: &str, cursor: u64, body: &str) {
     if app.transcripts {
-        crate::transcripts::wait_for_paste(&app.home, seat_name, cursor, body).await;
+        crate::transcripts::wait_for_paste(&app.home, rig_name, seat_name, cursor, body).await;
     }
 }
 

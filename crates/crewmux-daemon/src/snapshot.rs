@@ -30,17 +30,57 @@ pub(crate) async fn create(app: &App, rig_name: &str) -> Result<Value, Error> {
     let (rig_id, seats) = load_rig(app, rig_name).await?;
     let id = SnapshotId::new();
     let dir = snap_dir(&app.home, rig_name, &id.to_string());
-    let db_path = dir.join("rig.db");
+    let written = write_snapshot(
+        app,
+        &Shot {
+            rig_id: &rig_id,
+            rig_name,
+            id,
+            dir: &dir,
+            seats: &seats,
+        },
+    )
+    .await;
+    if written.is_err() {
+        discard_partial(&dir).await;
+    }
+    written
+}
+
+struct Shot<'a> {
+    rig_id: &'a crewmux_types::RigId,
+    rig_name: &'a str,
+    id: SnapshotId,
+    dir: &'a std::path::Path,
+    seats: &'a [crewmux_core::Seat],
+}
+
+async fn write_snapshot(app: &App, shot: &Shot<'_>) -> Result<Value, Error> {
+    let db_path = shot.dir.join("rig.db");
     backup(app, db_path.clone()).await?;
     let bytes = read_file(db_path.clone()).await?;
     let sha = sha256_hex(&bytes);
     let schema = schema_of(&db_path).await?;
-    let manifest = build_manifest(app, &rig_id, rig_name, id, schema, sha, &seats).await?;
-    let path = dir.join("manifest.json");
+    let manifest = build_manifest(
+        app,
+        shot.rig_id,
+        shot.rig_name,
+        shot.id,
+        schema,
+        sha,
+        shot.seats,
+    )
+    .await?;
+    let path = shot.dir.join("manifest.json");
     let text =
         serde_json::to_string_pretty(&manifest).map_err(|err| Error::Message(err.to_string()))?;
     write_file(path, text).await?;
     serde_json::to_value(&manifest).map_err(|err| Error::Message(err.to_string()))
+}
+
+pub(crate) async fn discard_partial(dir: &std::path::Path) {
+    let dir = dir.to_path_buf();
+    drop(tokio::task::spawn_blocking(move || std::fs::remove_dir_all(dir)).await);
 }
 
 /// List snapshot ids for a rig.
@@ -94,57 +134,19 @@ pub(crate) async fn apply(app: &App, rig_name: &str, id: &str) -> Result<(), Err
     load_verified(app, rig_name, id).await?;
     let db_path = snap_dir(&app.home, rig_name, id).join("rig.db");
     let rig = rig_name.to_owned();
+    let resume = app.home.join("resume");
     let store = Arc::clone(&app.store);
     tokio::task::spawn_blocking(move || {
-        store.write(move |conn| crewmux_store::import_rig(conn, &db_path, &rig))
+        store.write(move |conn| crewmux_store::import_rig(conn, &db_path, &rig, &resume))
     })
     .await
     .map_err(join_err)??;
-    write_tokens(app, rig_name).await?;
     let store = Arc::clone(&app.store);
     let book = tokio::task::spawn_blocking(move || store.read(crewmux_store::load_book))
         .await
         .map_err(join_err)??;
     *app.queue.lock().await = book;
     Ok(())
-}
-
-async fn write_tokens(app: &App, rig_name: &str) -> Result<(), Error> {
-    let (_, seats) = load_rig(app, rig_name).await?;
-    for seat in seats {
-        let id = seat.id.to_string();
-        let store = Arc::clone(&app.store);
-        let row = tokio::task::spawn_blocking(move || {
-            store.read(move |conn| crewmux_store::load_seat_restore(conn, &id))
-        })
-        .await
-        .map_err(join_err)??;
-        let path = crate::resume::resume_path(&app.home, &seat.id);
-        let value = row.and_then(|row| row.resume_value);
-        write_token(&path, value.as_deref()).await?;
-    }
-    Ok(())
-}
-
-async fn write_token(path: &std::path::Path, value: Option<&str>) -> Result<(), Error> {
-    let path = path.to_path_buf();
-    let value = value.map(str::to_owned);
-    tokio::task::spawn_blocking(move || match value.as_deref() {
-        Some(text) if !text.is_empty() => {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&path, text)?;
-            Ok(())
-        }
-        _ => match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(Error::from(err)),
-        },
-    })
-    .await
-    .map_err(join_err)?
 }
 
 async fn load_verified(app: &App, rig_name: &str, id: &str) -> Result<SnapshotManifest, Error> {

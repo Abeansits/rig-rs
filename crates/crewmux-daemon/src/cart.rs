@@ -12,20 +12,23 @@ use crate::error::Error;
 use crate::restore::restore_rig;
 use crate::state::{App, join_err};
 
-/// Restore every rig. `cancel` lets the in-flight rig finish and skips the rest.
+/// Restore every rig. `cancel` does not start a walk.
 ///
-/// The flag is an atomic the in-flight restore can raise. Later rigs are
-/// `not_attempted`. One failed rig does not stop the fleet.
+/// When a walk is already in progress, `cancel` sets the flag and returns.
+/// The in-flight rig finishes. Later rigs are `not_attempted`. When nothing
+/// is running, `cancel` is a no-op with a message. A second walk is refused.
 ///
 /// # Errors
 ///
-/// Returns [`Error`] when the rig list cannot be read.
+/// Returns [`Error`] when a walk is already running, or the rig list cannot be read.
 pub(crate) async fn crash_cart(app: &App, cancel: bool) -> Result<Value, Error> {
     if cancel {
-        app.request_cart_cancel();
-    } else {
-        app.clear_cart_cancel();
+        return Ok(cancel_only(app));
     }
+    if !app.try_begin_cart() {
+        return Err(Error::Message("a crash-cart is already running".to_owned()));
+    }
+    let _guard = CartGuard { app };
     let listed = read(&app.store, |conn| conn.list()).await?;
     let kernels = kernel_ids(app).await?;
     let pairs: Vec<(RigId, bool)> = listed
@@ -67,7 +70,33 @@ pub(crate) async fn crash_cart(app: &App, cancel: bool) -> Result<Value, Error> 
     Ok(json!({"rigs": rows, "cancelled_before": cancelled_before}))
 }
 
+fn cancel_only(app: &App) -> Value {
+    if app.request_cart_cancel() {
+        json!({
+            "status": "cancel_requested",
+            "message": "the in-flight rig will finish; later rigs will not be restored",
+        })
+    } else {
+        json!({
+            "status": "idle",
+            "message": "no crash-cart is running",
+        })
+    }
+}
+
+/// Clears the running bit when the walk returns, including on error.
+struct CartGuard<'a> {
+    app: &'a App,
+}
+
+impl Drop for CartGuard<'_> {
+    fn drop(&mut self) {
+        self.app.end_cart();
+    }
+}
+
 async fn one_rig(app: &App, name: &str) -> RigRestoreOutcome {
+    hold_for_test(app, name).await;
     match restore_rig(app, name, None, LaunchPosture::Auto).await {
         Ok(value) => parse_outcome(
             value
@@ -86,6 +115,41 @@ fn parse_outcome(text: &str) -> RigRestoreOutcome {
         "not_attempted" => RigRestoreOutcome::NotAttempted,
         _ => RigRestoreOutcome::Failed,
     }
+}
+
+/// `$RIG_HOME/cart-hold` names the rig to pause on, under `RIG_TEST_HOOKS=1`.
+///
+/// The walk writes `$RIG_HOME/cart-at` and waits until the hold file no longer
+/// names this rig, then restores it. A cancel during the wait still lets the
+/// rig finish.
+async fn hold_for_test(app: &App, rig_name: &str) {
+    if std::env::var("RIG_TEST_HOOKS").ok().as_deref() != Some("1") {
+        return;
+    }
+    let hold = app.home.join("cart-hold");
+    let marker = app.home.join("cart-at");
+    for _ in 0..1500 {
+        if app.cancel.is_cancelled() {
+            return;
+        }
+        let wanted = read_trim(&hold).await;
+        if wanted.as_deref() != Some(rig_name) {
+            return;
+        }
+        let path = marker.clone();
+        let name = rig_name.to_owned();
+        drop(tokio::task::spawn_blocking(move || std::fs::write(path, name)).await);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+async fn read_trim(path: &std::path::Path) -> Option<String> {
+    let path = path.to_path_buf();
+    let text = tokio::task::spawn_blocking(move || std::fs::read_to_string(path).ok()).await;
+    text.ok()
+        .flatten()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty())
 }
 
 async fn kernel_ids(app: &App) -> Result<Vec<String>, Error> {

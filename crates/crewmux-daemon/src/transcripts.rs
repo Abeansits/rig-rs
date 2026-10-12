@@ -1,4 +1,6 @@
-//! Per-seat pane transcripts. ANSI is kept, and a stripped twin is written beside it.
+//! Per-seat pane transcripts under `transcripts/<rig>/<seat>`.
+//!
+//! The `.log` keeps terminal bytes. The `.txt` twin strips CSI and OSC.
 
 use std::io::Write;
 
@@ -17,11 +19,16 @@ pub(crate) async fn run(app: App) {
             event = events.recv() => {
                 match event {
                     Ok(MuxEvent::Output { pane_id, bytes }) => {
-                        if let Some(seat) = seat_for(&app, &pane_id).await {
+                        if let Some((rig, seat)) = place_of(&app, &pane_id).await {
                             let text = String::from_utf8_lossy(bytes.as_ref()).into_owned();
                             let home = app.home.clone();
                             let cap = app.transcript_cap;
-                            drop(tokio::task::spawn_blocking(move || append(&home, &seat, &text, cap)).await);
+                            drop(
+                                tokio::task::spawn_blocking(move || {
+                                    append(&home, &rig, &seat, &text, cap)
+                                })
+                                .await,
+                            );
                         }
                     }
                     Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
@@ -32,18 +39,33 @@ pub(crate) async fn run(app: App) {
     }
 }
 
-async fn seat_for(app: &App, pane_id: &str) -> Option<String> {
+async fn place_of(app: &App, pane_id: &str) -> Option<(String, String)> {
     let pane = pane_id.to_owned();
     let seats = crate::db::read(&app.store, |conn| crewmux_core::SeatRepo::list_all(conn))
         .await
         .ok()?;
-    seats.into_iter().find_map(|seat| {
-        (seat.pane_id.as_deref() == Some(pane.as_str())).then(|| seat.name.to_string())
-    })
+    let seat = seats
+        .into_iter()
+        .find(|seat| seat.pane_id.as_deref() == Some(pane.as_str()))?;
+    let rigs = crate::db::read(&app.store, |conn| crewmux_core::RigRepo::list(conn))
+        .await
+        .ok()?;
+    let rig = rigs.into_iter().find(|rig| rig.id == seat.rig_id)?;
+    Some((rig.name.as_str().to_owned(), seat.name.to_string()))
 }
 
-fn append(home: &std::path::Path, seat: &str, ansi: &str, cap: u64) -> std::io::Result<()> {
-    let dir = home.join("transcripts").join(seat);
+fn seat_dir(home: &std::path::Path, rig: &str, seat: &str) -> std::path::PathBuf {
+    home.join("transcripts").join(rig).join(seat)
+}
+
+fn append(
+    home: &std::path::Path,
+    rig: &str,
+    seat: &str,
+    ansi: &str,
+    cap: u64,
+) -> std::io::Result<()> {
+    let dir = seat_dir(home, rig, seat);
     std::fs::create_dir_all(&dir)?;
     let generation = next_generation(&dir, cap)?;
     let log = dir.join(format!("{generation}.log"));
@@ -82,9 +104,13 @@ fn next_generation(dir: &std::path::Path, cap: u64) -> std::io::Result<u64> {
     }
 }
 
-/// Byte length of the plain pane transcript. A missing directory is `0`.
-pub(crate) fn plain_bytes(home: &std::path::Path, seat: &str) -> std::io::Result<Vec<u8>> {
-    let dir = home.join("transcripts").join(seat);
+/// Plain pane transcript bytes. A missing directory is empty.
+pub(crate) fn plain_bytes(
+    home: &std::path::Path,
+    rig: &str,
+    seat: &str,
+) -> std::io::Result<Vec<u8>> {
+    let dir = seat_dir(home, rig, seat);
     let mut files = generation_paths(&dir)?;
     files.sort_by_key(|(generation, _)| *generation);
     let mut out = Vec::new();
@@ -98,31 +124,40 @@ pub(crate) fn plain_bytes(home: &std::path::Path, seat: &str) -> std::io::Result
     Ok(out)
 }
 
-pub(crate) fn plain_len(home: &std::path::Path, seat: &str) -> std::io::Result<u64> {
-    let bytes = plain_bytes(home, seat)?;
+pub(crate) fn plain_len(home: &std::path::Path, rig: &str, seat: &str) -> std::io::Result<u64> {
+    let bytes = plain_bytes(home, rig, seat)?;
     Ok(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
 }
 
-pub(crate) async fn len_of(home: &std::path::Path, seat: &str) -> std::io::Result<u64> {
+pub(crate) async fn len_of(home: &std::path::Path, rig: &str, seat: &str) -> std::io::Result<u64> {
     let home = home.to_path_buf();
+    let rig = rig.to_owned();
     let seat = seat.to_owned();
-    match tokio::task::spawn_blocking(move || plain_len(&home, &seat)).await {
+    match tokio::task::spawn_blocking(move || plain_len(&home, &rig, &seat)).await {
         Ok(result) => result,
         Err(_) => Err(std::io::Error::other("transcript length task stopped")),
     }
 }
 
 /// Wait until `needle` appears at or after `before` in the plain transcript.
-pub(crate) async fn wait_for_paste(home: &std::path::Path, seat: &str, before: u64, needle: &str) {
+pub(crate) async fn wait_for_paste(
+    home: &std::path::Path,
+    rig: &str,
+    seat: &str,
+    before: u64,
+    needle: &str,
+) {
     let home = home.to_path_buf();
+    let rig = rig.to_owned();
     let seat = seat.to_owned();
     let needle = needle.to_owned();
     for _ in 0..100 {
         let found = {
             let home = home.clone();
+            let rig = rig.clone();
             let seat = seat.clone();
             let needle = needle.clone();
-            tokio::task::spawn_blocking(move || landed(&home, &seat, before, &needle)).await
+            tokio::task::spawn_blocking(move || landed(&home, &rig, &seat, before, &needle)).await
         };
         if found.ok().and_then(Result::ok).unwrap_or(false) {
             return;
@@ -131,11 +166,17 @@ pub(crate) async fn wait_for_paste(home: &std::path::Path, seat: &str, before: u
     }
 }
 
-fn landed(home: &std::path::Path, seat: &str, before: u64, needle: &str) -> std::io::Result<bool> {
+fn landed(
+    home: &std::path::Path,
+    rig: &str,
+    seat: &str,
+    before: u64,
+    needle: &str,
+) -> std::io::Result<bool> {
     if needle.is_empty() {
         return Ok(true);
     }
-    let bytes = plain_bytes(home, seat)?;
+    let bytes = plain_bytes(home, rig, seat)?;
     let start = usize::try_from(before).unwrap_or(0).min(bytes.len());
     let tail = bytes.get(start..).unwrap_or(&[]);
     Ok(String::from_utf8_lossy(tail).contains(needle))
@@ -170,7 +211,11 @@ fn strip_ansi(input: &str) -> String {
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '\u{1b}' {
-            skip_csi(&mut chars);
+            match chars.peek() {
+                Some('[') => skip_csi(&mut chars),
+                Some(']') => skip_osc(&mut chars),
+                _ => {}
+            }
             continue;
         }
         out.push(ch);
@@ -189,6 +234,23 @@ fn skip_csi(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
     }
 }
 
+/// OSC: `ESC ] ... BEL` or `ESC ] ... ESC \`.
+fn skip_osc(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    if chars.peek() != Some(&']') {
+        return;
+    }
+    chars.next();
+    while let Some(next) = chars.next() {
+        if next == '\u{7}' {
+            break;
+        }
+        if next == '\u{1b}' && chars.peek() == Some(&'\\') {
+            chars.next();
+            break;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::strip_ansi;
@@ -196,5 +258,11 @@ mod tests {
     #[test]
     fn ansi_is_removed_from_the_twin() {
         assert_eq!(strip_ansi("\u{1b}[31mred\u{1b}[0m"), "red");
+    }
+
+    #[test]
+    fn osc_title_is_removed_from_the_twin() {
+        assert_eq!(strip_ansi("\u{1b}]0;title\u{7}body"), "body");
+        assert_eq!(strip_ansi("\u{1b}]0;title\u{1b}\\body"), "body");
     }
 }

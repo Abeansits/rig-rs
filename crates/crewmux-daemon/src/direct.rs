@@ -37,7 +37,8 @@ pub(crate) async fn crash_before_paste(
         return Ok(false);
     }
     let seat = find_address(app, address).await?;
-    let cursor = crate::transcripts::len_of(&app.home, seat.name.as_str()).await?;
+    let (seat_name, rig_name) = split_address(address);
+    let cursor = crate::transcripts::len_of(&app.home, rig_name, seat_name).await?;
     insert_row(
         app,
         &seat,
@@ -91,8 +92,9 @@ pub(crate) async fn record_startup(app: &App, seats: &[crewmux_core::Seat]) -> R
         let Some(body) = read_startup(&path).await? else {
             continue;
         };
-        let cursor = crate::transcripts::len_of(&app.home, seat.name.as_str()).await?;
         let address = crate::query::address_of(app, seat).await?;
+        let (seat_name, rig_name) = split_address(&address);
+        let cursor = crate::transcripts::len_of(&app.home, rig_name, seat_name).await?;
         let report = crate::deliver::deliver(app, startup_outbound(&address, &body)).await?;
         if !delivery_confirmed(&report) {
             continue;
@@ -208,6 +210,10 @@ async fn phase(app: &App) -> Option<Phase> {
     phase_token(text.trim())
 }
 
+fn split_address(address: &str) -> (&str, &str) {
+    address.split_once('@').unwrap_or((address, ""))
+}
+
 fn phase_token(token: &str) -> Option<Phase> {
     match token {
         "before" => Some(Phase::Before),
@@ -216,15 +222,16 @@ fn phase_token(token: &str) -> Option<Phase> {
     }
 }
 
-/// Read-only probe over pane transcripts (`transcripts/<seat>/<gen>.txt`).
+/// Read-only probe over pane transcripts (`transcripts/<rig>/<seat>/<gen>.txt`).
 pub(crate) struct HomeProbe {
     home: std::path::PathBuf,
+    rig: String,
     names: HashMap<SeatId, String>,
     runtimes: HashMap<SeatId, RuntimeKind>,
 }
 
 impl HomeProbe {
-    pub(crate) fn new(home: std::path::PathBuf, seats: &[crewmux_core::Seat]) -> Self {
+    pub(crate) fn new(home: std::path::PathBuf, rig: &str, seats: &[crewmux_core::Seat]) -> Self {
         let names = seats
             .iter()
             .map(|seat| (seat.id, seat.name.as_str().to_owned()))
@@ -232,6 +239,7 @@ impl HomeProbe {
         let runtimes = seats.iter().map(|seat| (seat.id, seat.runtime)).collect();
         Self {
             home,
+            rig: rig.to_owned(),
             names,
             runtimes,
         }
@@ -254,7 +262,7 @@ impl TranscriptProbe for HomeProbe {
         let Some(name) = self.names.get(seat) else {
             return Ok(Vec::new());
         };
-        let bytes = crate::transcripts::plain_bytes(&self.home, name)?;
+        let bytes = crate::transcripts::plain_bytes(&self.home, &self.rig, name)?;
         Ok(envelope_turns(&bytes, after.map_or(0, |cursor| cursor.0)))
     }
 }

@@ -307,13 +307,13 @@ async fn transcript_writer_keeps_ansi_and_rotates() {
     let pane = pane_of(&app, "one").await;
     mux.inject_output(&pane, "\u{1b}[31mneedle\u{1b}[0m\n")
         .await;
-    let twin = wait_file(&home.join("transcripts/one/1.txt")).await;
+    let twin = wait_file(&home.join("transcripts/pair/one/1.txt")).await;
     assert!(twin.contains("needle"), "{twin}");
     assert!(!twin.contains('\u{1b}'), "{twin}");
-    let log = std::fs::read_to_string(home.join("transcripts/one/1.log")).expect("log");
+    let log = std::fs::read_to_string(home.join("transcripts/pair/one/1.log")).expect("log");
     assert!(log.contains("\u{1b}[31m"), "{log}");
     mux.inject_output(&pane, "second-chunk\n").await;
-    let rotated = wait_file(&home.join("transcripts/one/2.txt")).await;
+    let rotated = wait_file(&home.join("transcripts/pair/one/2.txt")).await;
     assert!(rotated.contains("second-chunk"), "{rotated}");
     drop(std::fs::remove_dir_all(&home));
 }

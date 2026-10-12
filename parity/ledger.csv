@@ -717,7 +717,7 @@
 "packages/daemon/test/crash-cart-conductor.test.ts","8","todo","","","slice 8 ports R2 kernel-first order, R5 continue-after-failure, and R8 cancel-before-the-next-rig. Copy, probes, adopt, and TUI stay unported."
 "packages/daemon/test/crash-cart-conductor.test.ts > R2: restores rigs kernel-first, in order","8","ported","conductor::tests::restores_rigs_kernel_first_in_order","",""
 "packages/daemon/test/crash-cart-conductor.test.ts > R5: best-effort — one rig's failure never halts the fleet; the failed rig is `failed`","8","ported","conductor::tests::one_failure_never_halts_the_fleet","",""
-"packages/daemon/test/crash-cart-conductor.test.ts > R8: stop-before-next-rig cancel — the in-flight rig completes; later rigs are `not_attempted`","8","ported","conductor::tests::cancel_lets_the_in_flight_rig_finish","",""
+"packages/daemon/test/crash-cart-conductor.test.ts > R8: stop-before-next-rig cancel — the in-flight rig completes; later rigs are `not_attempted`","8","ported","tmux_it::cancel_during_rig_two_of_three","",""
 "packages/daemon/test/crash-cart-copy-read.test.ts","","todo","","",""
 "packages/daemon/test/crash-cart-detect.test.ts","","todo","","",""
 "packages/daemon/test/crash-cart-emit.test.ts","","todo","","",""
