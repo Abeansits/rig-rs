@@ -33,13 +33,25 @@ fn fire_compaction(
 fn fire_compaction_recorded_payload() {
     let home = tempfile::tempdir().expect("home");
     let body = std::fs::read_to_string(fixture()).expect("fixture");
-    let line = body.lines().next().expect("precompact");
-    fire_compaction(home.path(), "PreCompact", line)
+    let payload = body
+        .lines()
+        .find_map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).ok()?;
+            if value.get("argv_event").and_then(serde_json::Value::as_str) == Some("PreCompact") {
+                value.get("input").cloned()
+            } else {
+                None
+            }
+        })
+        .expect("precompact");
+    let text = serde_json::to_string(&payload).expect("encode");
+    fire_compaction(home.path(), "PreCompact", &text)
         .success()
         .stdout("");
     let spool = home.path().join("seats/seat-key/hooks.spool.jsonl");
     let stored = std::fs::read_to_string(&spool).expect("spool");
     assert!(stored.contains("PreCompact"));
+    assert!(stored.contains("b5461a7f-0588-427a-b7a2-31a9bb2c5b99"));
     assert!(stored.contains("run-1"));
     assert!(stored.ends_with('\n'));
 }

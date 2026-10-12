@@ -678,7 +678,7 @@
 "packages/daemon/test/compaction-clock-injection.test.ts","9","diverged","no_timing_triggered_restore","PE-018","elapsed time does not restore; the injected clock still drives decide"
 "packages/daemon/test/compaction-drain-readiness.test.ts","9","diverged","compaction_never_submits_when_not_ready","PE-018","one restore after both hooks and Ready; no turn-boundary or compliance send"
 "packages/daemon/test/compaction-generation.test.ts","9","diverged","","PE-018","occupant generation and the expected.json sentinel are not ported"
-"packages/daemon/test/compaction-preparation.test.ts","9","diverged","enforcer_table","PE-018","prep prompt text matches; map filesystem publication is not the TS writer"
+"packages/daemon/test/compaction-preparation.test.ts","9","diverged","enforcer_table","PE-018","prep prompt text matches; the daemon renames RESTORE-MAP.md.tmp onto RESTORE-MAP.md when that file ends with the completion marker"
 "packages/daemon/test/compaction-routes.test.ts","9","diverged","hook_parse_golden","PE-018","hooks are rig hook over the UDS, not the Node precompact script"
 "packages/daemon/test/complete-human-notifications.test.ts","","todo","","",""
 "packages/daemon/test/compose-zero-tail-native.test.ts","","todo","","",""

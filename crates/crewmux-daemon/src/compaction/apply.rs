@@ -30,7 +30,9 @@ pub(crate) async fn ingest(app: &App, seat_key: &str, body: &[u8]) -> Result<Val
         write_marker(&app.home, &marker).await?;
     }
     save(app).await?;
-    if let (HookEvent::SessionEnd { .. }, Some(run_id)) = (&event, run_id.as_deref()) {
+    if let (HookEvent::SessionEnd { reason, .. }, Some(run_id)) = (&event, run_id.as_deref())
+        && reason != "clear"
+    {
         gc_run(&app.home, seat_key, run_id).await?;
     }
     deliver_seat(app, seat_key).await?;
@@ -95,7 +97,12 @@ pub(super) async fn deliver_seat(app: &App, seat_key: &str) -> Result<(), Error>
     let text = restore_text(&app.home, &attempt, &session);
     match submit_text(app, &session, &text).await {
         Ok(_) => mark_restored(app, &attempt, &session).await,
-        Err(Error::Adapter(crewmux_adapters::Error::NotReady)) => Ok(()),
+        Err(Error::Adapter(err)) if after_enter(&err) => {
+            fail_restore(app, &attempt, &err.to_string()).await
+        }
+        Err(Error::Adapter(
+            crewmux_adapters::Error::NotReady | crewmux_adapters::Error::PasteMismatch,
+        )) => Ok(()),
         Err(err) => {
             tracing::warn!(seat_key, %err, "restore submit failed");
             Ok(())
@@ -103,9 +110,24 @@ pub(super) async fn deliver_seat(app: &App, seat_key: &str) -> Result<(), Error>
     }
 }
 
+fn after_enter(err: &crewmux_adapters::Error) -> bool {
+    matches!(
+        err,
+        crewmux_adapters::Error::NotVerified | crewmux_adapters::Error::Contaminated
+    )
+}
+
 async fn due_attempt(app: &App, seat_key: &str) -> Option<Attempt> {
     let guard = app.compaction.lock().await;
     guard.book.due_restore(seat_key, true, now_ms()).cloned()
+}
+
+async fn fail_restore(app: &App, attempt: &Attempt, reason: &str) -> Result<(), Error> {
+    {
+        let mut guard = app.compaction.lock().await;
+        guard.book.mark_failed(&attempt.id, reason);
+    }
+    save(app).await
 }
 
 async fn mark_restored(app: &App, attempt: &Attempt, session: &str) -> Result<(), Error> {

@@ -230,6 +230,16 @@ fn assert_label(screen: &ClaudeScreen, label: &Value, name: &str) {
     }
 }
 
+#[test]
+fn scrollback_interrupt_is_not_the_live_region() {
+    let rule = "─".repeat(40);
+    let scrollback =
+        format!("esc to interrupt\nold answer\n{rule}\n❯ \n{rule}\n  ? for shortcuts\n");
+    assert!(classify_text(&scrollback).is_ready(), "{scrollback}");
+    let live = format!("{rule}\n❯ \n{rule}\n  esc to interrupt\n");
+    assert!(matches!(classify_text(&live), ClaudeScreen::Busy), "{live}");
+}
+
 fn assert_dialog(dialog: &ClassifiedDialog, label: &Value, name: &str) {
     let cursor = label.get("cursor").and_then(Value::as_str).expect("cursor");
     let at = dialog.cursor.expect("cursor index");

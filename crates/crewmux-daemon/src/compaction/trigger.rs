@@ -16,8 +16,8 @@ use crate::query::find_seat;
 use crate::state::{App, now_ms};
 use crate::submit::submit_text;
 
-use super::Runtime;
 use super::persist::save;
+use super::{CompactPlan, Runtime};
 
 #[derive(Deserialize)]
 struct TriggerBody {
@@ -184,6 +184,7 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
             now_ms(),
         );
     }
+    runtime_plan(&mut guard, session, &input);
     remember(
         &mut guard,
         session,
@@ -201,6 +202,140 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
             | EnforcerOutcome::SendCompact(_)
             | EnforcerOutcome::SendRestore(_) => None,
         },
+    }
+}
+
+fn runtime_plan(runtime: &mut Runtime, session: &str, input: &EnforcerInput) {
+    runtime.set_plan(
+        session,
+        CompactPlan {
+            instruction: input.compact_instruction.clone(),
+            used_percent: input.used_percent,
+            threshold: input.threshold,
+        },
+    );
+}
+
+pub(super) async fn deliver_prepared(app: &App) -> Result<(), Error> {
+    let sessions = {
+        let guard = app.compaction.lock().await;
+        guard
+            .preps
+            .iter()
+            .filter(|(_, prep)| {
+                prep.active && prep.map_complete && matches!(prep.status, PrepStatus::Waiting)
+            })
+            .map(|(session, _)| session.clone())
+            .collect::<Vec<_>>()
+    };
+    for session in sessions {
+        let Ok(seat) = find_seat(app, &session).await else {
+            continue;
+        };
+        if !super::apply::seat_is_ready(app, &seat).await {
+            continue;
+        }
+        send_prepared(app, &seat).await?;
+    }
+    Ok(())
+}
+
+async fn send_prepared(app: &App, seat: &Seat) -> Result<(), Error> {
+    let session = seat.name.as_str();
+    let text = {
+        let mut guard = app.compaction.lock().await;
+        let prep = guard.prep(session);
+        let Some(plan) = guard.plan(session).cloned() else {
+            return Ok(());
+        };
+        let input = prepared_input(seat, &prep, &plan, &app.home);
+        let outcome = match prep.mode {
+            PrepMode::Manual => guard.enforcer.decide_manual(&input, &prep, now_ms()),
+            PrepMode::Automatic => guard.enforcer.decide(&input, &prep, now_ms()),
+        };
+        let Some(text) = gated_submit(true, &outcome) else {
+            return Ok(());
+        };
+        if !matches!(outcome, EnforcerOutcome::SendCompact(_)) {
+            return Ok(());
+        }
+        let open = guard
+            .book
+            .for_seat(&seat.id.to_string())
+            .into_iter()
+            .any(|attempt| {
+                attempt.managed
+                    && matches!(
+                        attempt.state,
+                        crewmux_health::compaction::AttemptState::Requested
+                    )
+            });
+        if !open {
+            guard.book.request(
+                &seat.id.to_string(),
+                AttemptId(prep.attempt_id),
+                now_ms(),
+            );
+        }
+        text
+    };
+    if !compact_landed(submit_text(app, session, &text).await, session) {
+        return Ok(());
+    }
+    {
+        let mut guard = app.compaction.lock().await;
+        if let Some(prep) = guard.preps.get_mut(session) {
+            prep.status = PrepStatus::CompactSent;
+            prep.map_complete = true;
+        }
+    }
+    save(app).await
+}
+
+fn compact_landed(result: Result<Value, Error>, session: &str) -> bool {
+    match result {
+        Ok(_) => true,
+        Err(Error::Adapter(err)) if compact_entered(&err) => true,
+        Err(Error::Adapter(
+            crewmux_adapters::Error::NotReady | crewmux_adapters::Error::PasteMismatch,
+        )) => false,
+        Err(err) => {
+            tracing::warn!(session, %err, "compact submit failed");
+            false
+        }
+    }
+}
+
+fn compact_entered(err: &crewmux_adapters::Error) -> bool {
+    matches!(
+        err,
+        crewmux_adapters::Error::NotVerified | crewmux_adapters::Error::Contaminated
+    )
+}
+
+fn prepared_input(
+    seat: &Seat,
+    prep: &PreparationState,
+    plan: &CompactPlan,
+    home: &std::path::Path,
+) -> EnforcerInput {
+    EnforcerInput {
+        seat: seat.id,
+        session: seat.name.as_str().to_owned(),
+        runtime: seat.runtime,
+        used_percent: plan.used_percent.or(Some(0)),
+        sample_at_ms: Some(now_ms()),
+        threshold: plan.threshold,
+        enabled: true,
+        ready: true,
+        cwd: seat.cwd.clone(),
+        transcript_path: None,
+        session_id: None,
+        compact_instruction: plan.instruction.clone(),
+        pre_compact_instruction: None,
+        rig_home: home.to_path_buf(),
+        attempt_id: prep.attempt_id.clone(),
+        skip_map: false,
     }
 }
 
@@ -264,12 +399,18 @@ fn status_value(
     reason: Option<&str>,
 ) -> Value {
     let key = seat.id.to_string();
-    let attempts = runtime
+    let mut attempts = runtime
         .book
         .for_seat(&key)
         .into_iter()
         .map(crewmux_health::compaction::summary_value)
         .collect::<Vec<_>>();
+    if attempts.is_empty() {
+        let prep = runtime.prep(seat.name.as_str());
+        if prep.active && !prep.attempt_id.is_empty() {
+            attempts.push(prep_row(&prep, &key));
+        }
+    }
     let mut value = json!({
         "seat": seat.name.as_str(),
         "seat_key": key,
@@ -285,6 +426,25 @@ fn status_value(
         }
     }
     value
+}
+
+fn prep_row(prep: &PreparationState, seat_key: &str) -> Value {
+    let state = match prep.status {
+        PrepStatus::Sending | PrepStatus::Waiting => "preparing",
+        PrepStatus::CompactSent => "compacting",
+        PrepStatus::Stopped => "stopped",
+    };
+    json!({
+        "attempt_id": prep.attempt_id,
+        "seat_key": seat_key,
+        "trigger": "manual",
+        "managed": true,
+        "state": state,
+        "abort_reason": prep.reason,
+        "summary_sha": Value::Null,
+        "summary_len": Value::Null,
+        "confirmed": false,
+    })
 }
 
 fn manual_input(

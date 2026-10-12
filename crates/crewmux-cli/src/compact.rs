@@ -87,7 +87,7 @@ fn print_status(value: &Value) {
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
-        Some(Value::String(text)) => text.clone(),
+        Some(Value::String(text)) if !text.is_empty() => text.clone(),
         Some(Value::Number(number)) => number.to_string(),
         Some(Value::Bool(flag)) => flag.to_string(),
         _ => "-".to_owned(),

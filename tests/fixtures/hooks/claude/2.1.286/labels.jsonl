@@ -1,10 +1,14 @@
-{"line":1,"event":"PreCompact","detail":"manual","sha256":"e48b3dbeb81a36f22f53e7a39162e4d5506da7ea88c6c89a77693df00f1cff88"}
-{"line":2,"event":"PreCompact","detail":"auto","sha256":"bb17348a3efb9ecbb35851655354b01b0815312cf9b7f83c030c2ef954a0b0c4"}
-{"line":3,"event":"SessionStart","detail":"compact","sha256":"5139736a3ccaa18da713d6630a6d8f8bac412d7c37c8d747e2a02468cd7407f3"}
-{"line":4,"event":"SessionStart","detail":"resume","sha256":"887377a8118ed5be4f8a1581850ec7eadb8d55fe9e5a7bd818b14d3a7b928ba4"}
-{"line":5,"event":"PostCompact","detail":"manual","sha256":"652149c4bd41463af7177ca1758d107ddb45aa7590a76d4829fa8dc88ad01c0e"}
-{"line":6,"event":"UserPromptSubmit","detail":null,"sha256":"880cc14b95a28fda4eeee3922b7fd8942bc91ecadb9b40f38a3c45fb0a7b5752"}
-{"line":7,"event":"Stop","detail":null,"sha256":"a8c6292e532d66fab80056d44e4e3adcbe5c136b18b81a99fd4355e37be9e80b"}
-{"line":8,"event":"SessionEnd","detail":null,"sha256":"d434246f90566733d67092bab8eea351807562acc415a025852cd3aef1673f31"}
-{"line":9,"event":"Elicitation","detail":null,"sha256":"3eb56efc0008cd32a639e80ffa3d01c38fbb76fcaf58afd7fe364e79542f65b4"}
-{"line":10,"event":"PreCompact","detail":"manual-extra","sha256":"2cdbc7c6d2337a8a0d7356dbaf4ff8119b2edd2a259dba979bedd0eedaed7ad2"}
+{"sha256": "3a58ce60097a1cf8cb5ff2212a6d8fb787a62ac69bf824163ec295d5afba7333", "event": "SessionStart", "detail": "startup"}
+{"sha256": "d94c361056f405bc0617f792d5aaf2fd62f8facdb92f516df01dab39a625e447", "event": "UserPromptSubmit", "detail": ""}
+{"sha256": "2f9f403b5fa4a225760d650db94c9cd2d1886a302cdc3dca39493ac287441f0c", "event": "Stop", "detail": ""}
+{"sha256": "db09f7bb5a585de28c57f81b31ec58fe0676cf09707ff835a5e5f2aceff5b342", "event": "PreCompact", "detail": "manual"}
+{"sha256": "3e90910f61a38eccff3b92910663c85ebcbbbeca5b737caddc492445d4156cb0", "event": "SessionStart", "detail": "compact"}
+{"sha256": "05c6b310bb56e39fc7b09258f42d847ffeeb8a31a162117e0b23bed8a49e169b", "event": "PostCompact", "detail": "manual"}
+{"sha256": "8f40a394b93b4a8949d610948f4495b27d8fcc532a412a4197e7d71008efb227", "event": "UserPromptSubmit", "detail": ""}
+{"sha256": "3f020129ef0ec81bc97131e0504095fd545340b931d004a68e6062dd86e451f2", "event": "Stop", "detail": ""}
+{"sha256": "78dc10a26bc5c5a4eee95e8c4ae3507613df7932aa65e45d23c93bd7954b29e0", "event": "SessionEnd", "detail": "other"}
+{"sha256": "feaa30fce13375841df1b128e2329b78a201af53f0afd929af9b83ec5405f0eb", "event": "SessionStart", "detail": "resume"}
+{"sha256": "5c31cc3b82b1bcabda4345740a2ea79e5659c59fd417ad986e28c0ab9f0d0398", "event": "UserPromptSubmit", "detail": ""}
+{"sha256": "091ddc699864f9226ea2970511f6b679aac7a6cc32f9aeaefd21196fdc1b545a", "event": "PreCompact", "detail": "auto"}
+{"sha256": "528f97fbb4573cd51acfe66c69cc7380ccfb33cdac820020e715180afe28a85c", "event": "Stop", "detail": ""}
+{"sha256": "2ffa8fc38c34925f81cdca6582b7e28eea7d4f87b8ff43bec807b582c53447e0", "event": "SessionEnd", "detail": "other"}

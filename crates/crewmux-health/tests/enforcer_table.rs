@@ -18,6 +18,12 @@ fn enforcer_table() {
     rearm_and_dedup();
     cooldown();
     manual_skip_map();
+    already_in_progress();
+    degraded_duplicate();
+    per_session_dedup();
+    send_failed_does_not_dedup();
+    env_threshold_fallback();
+    manual_then_auto_dedup();
 }
 
 fn prompts() {
@@ -187,6 +193,206 @@ fn manual_skip_map() {
             .map(ManualCompactionStage::as_str),
         Some("cancelled")
     );
+}
+
+fn already_in_progress() {
+    let mut enforcer = Enforcer::new();
+    let started = manual_sample("a", Some(20));
+    assert!(matches!(
+        enforcer.decide_manual(&started, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    let other = manual_sample("b", Some(30));
+    let blocked =
+        enforcer.decide_manual(&other, &manual_prep("a", PrepStatus::Waiting, false), 1_000);
+    assert!(matches!(
+        blocked,
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress)
+    ));
+    assert_eq!(stage(&enforcer), Some("preparing"));
+    let compact = enforcer.decide_manual(
+        &manual_sample("a", Some(20)),
+        &manual_prep("a", PrepStatus::Waiting, true),
+        2_000,
+    );
+    assert!(matches!(compact, EnforcerOutcome::SendCompact(_)));
+    let dup = enforcer.decide_manual(
+        &manual_sample("c", Some(20)),
+        &manual_prep("a", PrepStatus::CompactSent, true),
+        3_000,
+    );
+    assert!(matches!(
+        dup,
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress)
+    ));
+    assert_eq!(stage(&enforcer), Some("compacting"));
+}
+
+fn degraded_duplicate() {
+    let mut enforcer = Enforcer::new();
+    assert!(matches!(
+        enforcer.decide_manual(&manual_sample("a", Some(20)), &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    let degraded = manual_sample("a", None);
+    let blocked = enforcer.decide_manual(
+        &degraded,
+        &manual_prep("a", PrepStatus::Waiting, false),
+        1_000,
+    );
+    assert!(matches!(
+        blocked,
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress)
+    ));
+    assert_eq!(stage(&enforcer), Some("preparing"));
+}
+
+fn per_session_dedup() {
+    let mut enforcer = Enforcer::new();
+    let mut first = input(
+        Some(99),
+        true,
+        true,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    "a".clone_into(&mut first.session);
+    let mut second = input(
+        Some(99),
+        true,
+        true,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    "b".clone_into(&mut second.session);
+    assert!(matches!(
+        enforcer.decide(&first, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    assert!(matches!(
+        enforcer.decide(&second, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    let prep = waiting(true);
+    assert!(matches!(
+        enforcer.decide(&first, &prep, 1_000),
+        EnforcerOutcome::SendCompact(_)
+    ));
+    assert!(matches!(
+        enforcer.decide(&second, &prep, 1_000),
+        EnforcerOutcome::SendCompact(_)
+    ));
+}
+
+fn send_failed_does_not_dedup() {
+    let mut enforcer = Enforcer::new();
+    let blocked = input(
+        Some(95),
+        true,
+        false,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    assert!(matches!(
+        enforcer.decide(&blocked, &PreparationState::idle(), 0),
+        EnforcerOutcome::Skip(EnforcerSkipReason::SendFailed)
+    ));
+    let ready = input(
+        Some(95),
+        true,
+        true,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    assert!(matches!(
+        enforcer.decide(&ready, &PreparationState::idle(), 1_000),
+        EnforcerOutcome::SendPrep(_)
+    ));
+}
+
+fn env_threshold_fallback() {
+    assert!(Threshold::parse_text("0").get().is_none());
+    assert!(Threshold::parse_text("80abc").get().is_none());
+    assert_eq!(Threshold::parse_text("80").get(), Some(80));
+    let mut enforcer = Enforcer::new();
+    let below = input(
+        Some(79),
+        true,
+        true,
+        Threshold::some(80),
+        RuntimeKind::ClaudeCode,
+    );
+    assert!(matches!(
+        enforcer.decide(&below, &PreparationState::idle(), 0),
+        EnforcerOutcome::Skip(EnforcerSkipReason::BelowThreshold)
+    ));
+    let high = input(
+        Some(99),
+        true,
+        true,
+        Threshold::some(80),
+        RuntimeKind::ClaudeCode,
+    );
+    assert!(matches!(
+        enforcer.decide(&high, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+}
+
+fn manual_then_auto_dedup() {
+    let mut enforcer = Enforcer::new();
+    let manual = manual_sample("a", Some(20));
+    assert!(matches!(
+        enforcer.decide_manual(&manual, &PreparationState::idle(), 0),
+        EnforcerOutcome::SendPrep(_)
+    ));
+    assert!(matches!(
+        enforcer.decide_manual(&manual, &manual_prep("a", PrepStatus::Waiting, true), 1_000),
+        EnforcerOutcome::SendCompact(_)
+    ));
+    let auto = input(
+        Some(95),
+        true,
+        true,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    let held = enforcer.decide(&auto, &PreparationState::idle(), 62_000);
+    assert!(matches!(
+        held,
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyTriggeredAboveThreshold)
+    ));
+}
+
+fn stage(enforcer: &Enforcer) -> Option<&'static str> {
+    enforcer
+        .manual_stage("claude")
+        .map(ManualCompactionStage::as_str)
+}
+
+fn manual_sample(attempt: &str, used: Option<u8>) -> EnforcerInput {
+    let mut sample = input(
+        used,
+        true,
+        true,
+        Threshold::some(70),
+        RuntimeKind::ClaudeCode,
+    );
+    attempt.clone_into(&mut sample.attempt_id);
+    sample.skip_map = true;
+    sample
+}
+
+fn manual_prep(id: &str, status: PrepStatus, map_complete: bool) -> PreparationState {
+    PreparationState {
+        active: true,
+        attempt_id: id.to_owned(),
+        mode: PrepMode::Manual,
+        status,
+        map_complete,
+        deadline_ms: Some(u64::MAX),
+        reason: None,
+    }
 }
 
 fn waiting(map_complete: bool) -> PreparationState {

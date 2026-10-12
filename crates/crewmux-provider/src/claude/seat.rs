@@ -29,6 +29,8 @@ pub struct RunHooks {
     pub rig_home: PathBuf,
     /// `RIG_RUN_ID`. One directory under `run/`.
     pub run_id: String,
+    /// Absolute path of the `rig` binary the hook execs.
+    pub rig_bin: PathBuf,
 }
 
 /// Settings passed with `--settings`. Hooks are an arbitrary JSON object.
@@ -101,7 +103,7 @@ impl ClaudeSeatFiles {
 
     /// Write `<seat>/run/<run-id>/settings.json` for one Claude process.
     ///
-    /// The file registers `rig hook <event>` for the six compaction events and
+    /// The file registers `<rig> hook <event>` for the six compaction events and
     /// is not rewritten while that process runs. Callers pass it as `--settings`.
     ///
     /// # Errors
@@ -186,10 +188,11 @@ fn render_run(run: &RunHooks, permission_mode: Option<&str>) -> Result<String, P
 
 fn hook_command(run: &RunHooks, event: &str) -> String {
     format!(
-        "env RIG_SEAT_KEY={} RIG_HOME={} RIG_RUN_ID={} rig hook {event}",
+        "env RIG_SEAT_KEY={} RIG_HOME={} RIG_RUN_ID={} {} hook {event}",
         shell_quote(&run.seat_key),
         shell_quote(&run.rig_home.display().to_string()),
-        shell_quote(&run.run_id)
+        shell_quote(&run.run_id),
+        shell_quote(&run.rig_bin.display().to_string())
     )
 }
 

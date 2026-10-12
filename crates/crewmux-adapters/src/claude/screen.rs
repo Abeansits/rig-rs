@@ -223,7 +223,44 @@ fn line_has_title(text: &str, title: &str) -> bool {
 }
 
 fn has_interrupt(text: &str) -> bool {
+    let Some(anchor) = composer_anchor(text) else {
+        return contains_interrupt(text);
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let start = live_band_start(&lines, anchor.line);
+    lines
+        .get(start..)
+        .is_some_and(|band| band.iter().any(|line| contains_interrupt(line)))
+}
+
+fn contains_interrupt(text: &str) -> bool {
     text.to_ascii_lowercase().contains("esc to interrupt")
+}
+
+/// Busy only because the live region shows `esc to interrupt`, with no spinner.
+#[must_use]
+pub(crate) fn bounded_interrupt(text: &str) -> bool {
+    has_interrupt(text) && !pane_is_busy(text, composer_anchor(text).as_ref())
+}
+
+fn live_band_start(lines: &[&str], prompt: usize) -> usize {
+    let mut index = prompt;
+    let mut start = prompt;
+    while index > 0 {
+        index = index.saturating_sub(1);
+        let Some(line) = lines.get(index) else {
+            break;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() || is_box_rule(line) {
+            continue;
+        }
+        if !line.starts_with([' ', '\t']) {
+            break;
+        }
+        start = index;
+    }
+    start
 }
 
 fn pane_is_busy(text: &str, anchor: Option<&ComposerAnchor>) -> bool {

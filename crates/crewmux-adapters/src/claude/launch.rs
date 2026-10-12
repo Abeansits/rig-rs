@@ -79,10 +79,21 @@ fn write_seat(
             seat_key: seat_key.to_owned(),
             rig_home: rig_home.to_path_buf(),
             run_id,
+            rig_bin: rig_binary(),
         },
         permission_mode,
     )?;
     Ok((mcp, settings))
+}
+
+fn rig_binary() -> PathBuf {
+    let Ok(path) = std::env::current_exe() else {
+        return PathBuf::from("rig");
+    };
+    if path.is_absolute() {
+        return path;
+    }
+    std::env::current_dir().map_or(path.clone(), |cwd| cwd.join(&path))
 }
 
 fn rig_home_of(seat_dir: &Path) -> PathBuf {

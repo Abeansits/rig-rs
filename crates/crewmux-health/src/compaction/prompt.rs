@@ -113,7 +113,7 @@ pub fn build_pre_compact_prep_prompt(input: &PrepPrompt<'_>) -> String {
 pub struct RestorePrompt<'a> {
     /// Seat or session name. Sanitised into the legacy marker key when `marker_path` is absent.
     pub session_name: &'a str,
-    /// Rig home. Used for the legacy marker path and the refocusing skill path.
+    /// Rig home. Used for the legacy marker path when `marker_path` is absent.
     pub rig_home: &'a Path,
     /// Per-attempt marker path. When absent, the prompt uses the v0.6.9 singleton path.
     pub marker_path: Option<&'a Path>,
@@ -180,20 +180,16 @@ pub fn build_post_compact_restore_prompt(input: &RestorePrompt<'_>) -> String {
         );
     }
     pieces.push(
-        "Load/read the claude-compaction-restore skill, follow the marker's restoreInstruction and postCompactInstruction when present, read your newest restore map and use the restore packet as a lookup, then reply with: restored from packet at <path>; resumed at step <X>.".to_owned(),
+        "Follow the marker's restoreInstruction and postCompactInstruction when present, read your newest restore map and use the restore packet as a lookup, then reply with: restored from packet at <path>; resumed at step <X>.".to_owned(),
     );
-    let skill = input
-        .rig_home
-        .join("plugins")
-        .join("openrig-core")
-        .join("skills")
-        .join("refocusing")
-        .join("SKILL.md");
-    pieces.push(format!(
-        "During this restore, read {} and consume the current topology and work traces delivered with this restore request, if present; do not rerun Python just to duplicate a delivered trace. Missing trace delivery is a named gap. Read required notes and full sources with the native file-read tool; a pointer, compact summary or truncated extract is not a full source read. Name any missing source, the current user outcome, and your next action from the files you actually read, not from the compact summary.",
-        skill.display()
-    ));
     pieces.join(" ")
+}
+
+/// The preparation file ends with this attempt's completion marker.
+#[must_use]
+pub fn map_is_complete(body: &str, marker: &str) -> bool {
+    let trimmed = body.trim_end();
+    !marker.is_empty() && trimmed.ends_with(marker)
 }
 
 /// The turn-boundary handshake `OpenRig` sends before the restore prompt.

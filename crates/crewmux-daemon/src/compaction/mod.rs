@@ -4,13 +4,14 @@
 
 mod apply;
 mod http;
+mod map;
 mod persist;
 mod spool;
 mod trigger;
 
 use std::collections::BTreeMap;
 
-use crewmux_health::compaction::{Book, Enforcer, PreparationState};
+use crewmux_health::compaction::{Book, Enforcer, PreparationState, Threshold};
 use serde_json::Value;
 
 use crate::state::App;
@@ -19,10 +20,18 @@ pub(crate) use http::routes;
 pub(crate) use persist::{load, save};
 pub(crate) use spool::drain_spools;
 
+#[derive(Clone)]
+pub(crate) struct CompactPlan {
+    instruction: String,
+    used_percent: Option<u8>,
+    threshold: Threshold,
+}
+
 pub(crate) struct Runtime {
     book: Book,
     enforcer: Enforcer,
     preps: BTreeMap<String, PreparationState>,
+    plans: BTreeMap<String, CompactPlan>,
 }
 
 impl Runtime {
@@ -31,7 +40,16 @@ impl Runtime {
             book: Book::new(),
             enforcer: Enforcer::new(),
             preps: BTreeMap::new(),
+            plans: BTreeMap::new(),
         }
+    }
+
+    fn plan(&self, session: &str) -> Option<&CompactPlan> {
+        self.plans.get(session)
+    }
+
+    fn set_plan(&mut self, session: &str, plan: CompactPlan) {
+        self.plans.insert(session.to_owned(), plan);
     }
 
     fn prep(&self, session: &str) -> PreparationState {
@@ -79,5 +97,7 @@ async fn tick(app: &App) -> Result<(), crate::error::Error> {
     if changed {
         save(app).await?;
     }
+    map::publish(app).await?;
+    trigger::deliver_prepared(app).await?;
     apply::deliver_due(app).await
 }

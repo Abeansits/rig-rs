@@ -167,6 +167,9 @@ fn parse_turns(path: &Path, tail: &[u8], start: usize) -> Result<Vec<UserTurn>, 
             msg: err.to_string(),
         })?;
         if let Some(text) = user_text(&value) {
+            if ignored_compact_record(&value, &text) {
+                continue;
+            }
             turns.push(UserTurn {
                 text,
                 at: TranscriptCursor(u64::try_from(line_at).unwrap_or(u64::MAX)),
@@ -174,6 +177,24 @@ fn parse_turns(path: &Path, tail: &[u8], start: usize) -> Result<Vec<UserTurn>, 
         }
     }
     Ok(turns)
+}
+
+fn ignored_compact_record(value: &serde_json::Value, text: &str) -> bool {
+    if value
+        .get("isCompactSummary")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        return true;
+    }
+    if value.get("subtype").and_then(serde_json::Value::as_str) == Some("compact_boundary") {
+        return true;
+    }
+    if text.contains("<local-command-stdout") {
+        return true;
+    }
+    text.contains("<command-name>/compact</command-name>")
+        || text.contains("<command-name>/compact ")
 }
 
 fn user_text(value: &serde_json::Value) -> Option<String> {

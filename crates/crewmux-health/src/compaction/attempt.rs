@@ -274,6 +274,18 @@ impl Book {
         }
     }
 
+    /// Enter already happened and the transcript check failed. Do not resend.
+    pub fn mark_failed(&mut self, id: &AttemptId, reason: &str) {
+        if let Some(attempt) = self.by_id_mut(id)
+            && matches!(
+                attempt.state,
+                AttemptState::Completed { .. } | AttemptState::RestoreSent
+            )
+        {
+            attempt.state = AttemptState::Failed(reason.to_owned());
+        }
+    }
+
     /// Attempts for one seat, oldest first.
     #[must_use]
     pub fn for_seat(&self, seat_key: &str) -> Vec<&Attempt> {
@@ -377,52 +389,17 @@ impl Book {
         now_ms: u64,
     ) -> ApplyEffect {
         let mut effect = ApplyEffect::default();
-        for attempt in &mut self.attempts {
-            if attempt.seat_key != seat_key || !attempt.seat_open() {
-                continue;
-            }
-            let Some(known) = attempt.session_id.as_deref() else {
-                continue;
-            };
-            if known != session_id {
-                effect.ignored_session_mismatch = true;
-                effect.log.push(format!(
-                    "ignored compaction signal for session {session_id}; attempt {} is {known}",
-                    attempt.id.as_str()
-                ));
-                continue;
-            }
-            if let Signal::Post { trigger, .. } = signal
-                && trigger != attempt.trigger
-            {
-                effect.log.push(format!(
-                    "ignored post-compact trigger mismatch on {}",
-                    attempt.id.as_str()
-                ));
-                continue;
-            }
-            match signal {
-                Signal::Start => attempt.saw_compact_start = true,
-                Signal::Post { sha, len, .. } => {
-                    attempt.saw_post_compact = true;
-                    attempt.summary_sha = Some(sha);
-                    attempt.summary_len = Some(len);
-                }
-            }
-            if attempt.saw_compact_start && attempt.saw_post_compact {
-                let Some(sha) = attempt.summary_sha else {
-                    continue;
-                };
-                attempt.state = AttemptState::Completed { summary_sha: sha };
-                attempt.completed_ms = Some(now_ms);
-                let len = attempt.summary_len.unwrap_or(0);
-                effect.marker = Some(marker_of(attempt, true));
-                effect.log.push(format!(
-                    "attempt {} completed summary {} len {len}",
-                    attempt.id.as_str(),
-                    hex(&sha)
-                ));
-            }
+        let Some(index) = newest_match(&self.attempts, seat_key, session_id, signal) else {
+            log_unmatched(&self.attempts, seat_key, session_id, signal, &mut effect);
+            return effect;
+        };
+        apply_signal(&mut self.attempts, index, signal, now_ms, &mut effect);
+        if self
+            .attempts
+            .get(index)
+            .is_some_and(|attempt| matches!(attempt.state, AttemptState::Completed { .. }))
+        {
+            supersede_older(&mut self.attempts, index);
         }
         effect
     }
@@ -555,6 +532,127 @@ fn marker_of(attempt: &Attempt, confirmed: bool) -> RestoreMarker {
         session_id: attempt.session_id.clone().unwrap_or_default(),
         transcript_path: attempt.transcript_path.clone(),
         cwd: attempt.cwd.clone(),
+    }
+}
+
+fn newest_match(
+    attempts: &[Attempt],
+    seat_key: &str,
+    session_id: &str,
+    signal: Signal,
+) -> Option<usize> {
+    attempts
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, attempt)| {
+            accepts(attempt, seat_key, session_id, signal).then_some(index)
+        })
+}
+
+fn accepts(attempt: &Attempt, seat_key: &str, session_id: &str, signal: Signal) -> bool {
+    if attempt.seat_key != seat_key || !attempt.seat_open() {
+        return false;
+    }
+    let Some(known) = attempt.session_id.as_deref() else {
+        return false;
+    };
+    if known != session_id {
+        return false;
+    }
+    if let Signal::Post { trigger, .. } = signal
+        && trigger != attempt.trigger
+    {
+        return false;
+    }
+    true
+}
+
+fn apply_signal(
+    attempts: &mut [Attempt],
+    index: usize,
+    signal: Signal,
+    now_ms: u64,
+    effect: &mut ApplyEffect,
+) {
+    let Some(attempt) = attempts.get_mut(index) else {
+        return;
+    };
+    match signal {
+        Signal::Start => attempt.saw_compact_start = true,
+        Signal::Post { sha, len, .. } => {
+            attempt.saw_post_compact = true;
+            attempt.summary_sha = Some(sha);
+            attempt.summary_len = Some(len);
+        }
+    }
+    if !(attempt.saw_compact_start && attempt.saw_post_compact) {
+        return;
+    }
+    let Some(sha) = attempt.summary_sha else {
+        return;
+    };
+    attempt.state = AttemptState::Completed { summary_sha: sha };
+    attempt.completed_ms = Some(now_ms);
+    let len = attempt.summary_len.unwrap_or(0);
+    effect.marker = Some(marker_of(attempt, true));
+    effect.log.push(format!(
+        "attempt {} completed summary {} len {len}",
+        attempt.id.as_str(),
+        hex(&sha)
+    ));
+}
+
+fn supersede_older(attempts: &mut [Attempt], newest: usize) {
+    let Some(keeper) = attempts.get(newest) else {
+        return;
+    };
+    let seat = keeper.seat_key.clone();
+    let session = keeper.session_id.clone();
+    let trigger = keeper.trigger;
+    for (index, attempt) in attempts.iter_mut().enumerate() {
+        if index >= newest
+            || attempt.seat_key != seat
+            || attempt.trigger != trigger
+            || attempt.session_id != session
+            || !attempt.seat_open()
+        {
+            continue;
+        }
+        attempt.state = AttemptState::Failed("superseded".to_owned());
+    }
+}
+
+fn log_unmatched(
+    attempts: &[Attempt],
+    seat_key: &str,
+    session_id: &str,
+    signal: Signal,
+    effect: &mut ApplyEffect,
+) {
+    for attempt in attempts {
+        if attempt.seat_key != seat_key || !attempt.seat_open() {
+            continue;
+        }
+        let Some(known) = attempt.session_id.as_deref() else {
+            continue;
+        };
+        if known != session_id {
+            effect.ignored_session_mismatch = true;
+            effect.log.push(format!(
+                "ignored compaction signal for session {session_id}; attempt {} is {known}",
+                attempt.id.as_str()
+            ));
+            continue;
+        }
+        if let Signal::Post { trigger, .. } = signal
+            && trigger != attempt.trigger
+        {
+            effect.log.push(format!(
+                "ignored post-compact trigger mismatch on {}",
+                attempt.id.as_str()
+            ));
+        }
     }
 }
 

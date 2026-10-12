@@ -80,7 +80,11 @@ fn assert_hooks(body: &str) {
         assert!(command.contains("RIG_SEAT_KEY="), "{command}");
         assert!(command.contains("RIG_HOME="), "{command}");
         assert!(command.contains("RIG_RUN_ID="), "{command}");
-        assert!(command.contains(&format!("rig hook {event}")), "{command}");
+        assert!(command.contains(&format!(" hook {event}")), "{command}");
+        assert!(
+            command.contains('/'),
+            "hook command must use an absolute rig path: {command}"
+        );
     }
 }
 

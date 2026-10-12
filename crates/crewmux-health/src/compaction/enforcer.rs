@@ -302,12 +302,8 @@ impl Enforcer {
         prep: &PreparationState,
         now_ms: u64,
     ) -> EnforcerOutcome {
-        if prep.active
-            && !matches!(prep.status, PrepStatus::Stopped | PrepStatus::CompactSent)
-            && prep.mode == PrepMode::Manual
-            && prep.attempt_id != input.attempt_id
-        {
-            return self.fail_manual(&input.session, EnforcerSkipReason::AlreadyInProgress);
+        if manual_blocked(prep, input) {
+            return EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress);
         }
         if let Some(reason) = runtime_and_usage(input) {
             return self.fail_manual(&input.session, reason);
@@ -533,6 +529,16 @@ pub fn gated_submit(ready: bool, outcome: &EnforcerOutcome) -> Option<String> {
         | EnforcerOutcome::SendRestore(text) => Some(text.clone()),
         EnforcerOutcome::Skip(_) => None,
     }
+}
+
+fn manual_blocked(prep: &PreparationState, input: &EnforcerInput) -> bool {
+    if !prep.active || prep.mode != PrepMode::Manual || prep.status == PrepStatus::Stopped {
+        return false;
+    }
+    if prep.attempt_id != input.attempt_id || prep.status == PrepStatus::CompactSent {
+        return true;
+    }
+    input.used_percent.is_none()
 }
 
 fn runtime_and_usage(input: &EnforcerInput) -> Option<EnforcerSkipReason> {
