@@ -1720,7 +1720,7 @@
 "packages/daemon/test/health-summary.test.ts > aggregates node sessionStatus across rigs","12","ported","node_summary_counts_session_status","",""
 "packages/daemon/test/health-summary.test.ts > returns zeros when no context usage rows exist","12","ported","context_summary_is_zero_without_samples","",""
 "packages/daemon/test/health-summary.test.ts > classifies usedPercentage into urgency buckets (critical ≥80, warning ≥60, low otherwise)","12","ported","context_summary_buckets_urgency","",""
-"packages/daemon/test/health-summary.test.ts > classifies samples older than 300s as stale","12","ported","context_summary_marks_stale_after_300s","",""
+"packages/daemon/test/health-summary.test.ts > classifies samples older than 300s as stale","12","ported","context_summary_marks_stale_at_600s","","freshness window is 600s"
 "packages/daemon/test/classifier-lease-manager.test.ts > acquire is idempotent for the same classifier session (returns existing lease unchanged)","12","ported","acquire_is_idempotent_for_the_same_session","",""
 "packages/daemon/test/classifier-lease-manager.test.ts > acquire by a different session when one is active throws lease_held (409)","12","ported","second_session_is_lease_held","",""
 "packages/daemon/test/classifier-lease-manager.test.ts > heartbeat extends expires_at and updates last_heartbeat","12","ported","heartbeat_extends_the_ttl","",""

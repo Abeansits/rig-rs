@@ -262,7 +262,11 @@ async fn stream_lease_and_classify_round_trip() {
     assert_eq!(list[0]["id"], "item-1");
     assert_eq!(list[0]["streamItemId"], "item-1");
 
-    let again = serde_json::to_vec(&json!({"id": "item-1", "body": "other"})).expect("bytes");
+    let changed = serde_json::to_vec(&json!({"id": "item-1", "body": "other"})).expect("bytes");
+    let (status, body) = call(&harness.sock, "POST", "/api/stream/emit", Some(&changed)).await;
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("different body"));
+    let again = serde_json::to_vec(&json!({"id": "item-1", "body": "hello"})).expect("bytes");
     let (status, body) = call(&harness.sock, "POST", "/api/stream/emit", Some(&again)).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(value(status, &body)["body"], "hello");

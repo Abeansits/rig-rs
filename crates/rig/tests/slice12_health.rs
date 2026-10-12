@@ -23,6 +23,16 @@ fn health_json_prints_the_list_schema() {
     let usage: serde_json::Value = serde_json::from_str(&out).expect("usage");
     assert_eq!(usage["samples"].as_array().expect("samples").len(), 0);
 
+    let spec = env.write_spec(
+        "seat.yaml",
+        "name: rig\nseats:\n  - name: seat\n    runtime: stub\n    cwd: /tmp\n",
+    );
+    let (code, _, err) = stdout(
+        env.rig()
+            .args(["up", spec.to_str().expect("utf8"), "--json"]),
+    );
+    assert_eq!(code, 0, "{err}");
+
     let socket = crewmux_api::daemon_socket(&env.rig_home);
     let sample =
         serde_json::to_vec(&json!({"seat": "seat@rig", "usedTokens": 99, "tokenLimit": 100}))
