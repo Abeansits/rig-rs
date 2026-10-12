@@ -172,6 +172,12 @@ async fn health_routes_match_the_typescript_shapes() {
 #[tokio::test]
 async fn context_sample_projects_a_warning_and_rejects_a_zero_limit() {
     let harness = boot().await;
+    crate::launch::bring_up(
+        &harness.app,
+        "name: rig\nseats:\n  - name: seat\n    runtime: stub\n    cwd: /tmp\n",
+    )
+    .await
+    .expect("up");
     let sample = json!({"seat": "seat@rig", "usedTokens": 97, "tokenLimit": 100});
     let bytes = serde_json::to_vec(&sample).expect("bytes");
     let (status, body) = call(&harness.sock, "POST", "/api/usage/sample", Some(&bytes)).await;
@@ -182,11 +188,49 @@ async fn context_sample_projects_a_warning_and_rejects_a_zero_limit() {
     assert_eq!(list["records"][0]["severity"], "warning");
     assert_eq!(list["records"][0]["schema"], "openrig.health/v0alpha1");
 
-    let zero = json!({"seat": "other@rig", "usedTokens": 1, "tokenLimit": 0});
+    let zero = json!({"seat": "seat@rig", "usedTokens": 1, "tokenLimit": 0});
     let bytes = serde_json::to_vec(&zero).expect("bytes");
     let (status, body) = call(&harness.sock, "POST", "/api/usage/sample", Some(&bytes)).await;
     assert_eq!(status, 400, "{body}");
     assert!(!body.contains("\"evaluated\":0"));
+
+    let unknown = json!({"seat": "missing@rig", "usedTokens": 1, "tokenLimit": 10});
+    let bytes = serde_json::to_vec(&unknown).expect("bytes");
+    let (status, body) = call(&harness.sock, "POST", "/api/usage/sample", Some(&bytes)).await;
+    assert_eq!(status, 404, "{body}");
+    assert!(body.contains("seat not found"));
+}
+
+#[tokio::test]
+async fn a_bad_usage_row_does_not_fail_the_read() {
+    let harness = boot().await;
+    crate::launch::bring_up(
+        &harness.app,
+        "name: rig\nseats:\n  - name: seat\n    runtime: stub\n    cwd: /tmp\n",
+    )
+    .await
+    .expect("up");
+    let store = std::sync::Arc::clone(&harness.app.store);
+    tokio::task::spawn_blocking(move || {
+        store.write(|conn| {
+            conn.execute(
+                "INSERT INTO context_usage (seat, used_tokens, token_limit, sampled_at_ms)
+                 VALUES ('not a seat', 1, 2, 1)",
+                [],
+            )?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("join")
+    .expect("row");
+    let sample = json!({"seat": "seat@rig", "usedTokens": 97, "tokenLimit": 100});
+    let bytes = serde_json::to_vec(&sample).expect("bytes");
+    let (status, body) = call(&harness.sock, "POST", "/api/usage/sample", Some(&bytes)).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = call(&harness.sock, "GET", "/api/health", None).await;
+    let list = value(status, &body);
+    assert_eq!(list["records"][0]["detector"], "context.pressure");
 }
 
 #[tokio::test]

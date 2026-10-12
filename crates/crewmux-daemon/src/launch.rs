@@ -325,6 +325,7 @@ async fn store_started(
     if let Some(event) = &event {
         events.push(event_value(event, Some(&name)));
     }
+    crate::lineage::record(app, &updated, &applied.pane).await?;
     Ok(updated)
 }
 

@@ -164,15 +164,26 @@ CREATE TABLE context_usage (
 );
 ";
 
-/// Rig tables, the queue, chat, then health, stream, and classifier leases.
+const LINEAGE: &str = "
+CREATE TABLE pane_lineage (
+    seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    pid INTEGER NOT NULL,
+    command TEXT NOT NULL,
+    session_id TEXT,
+    runtime TEXT NOT NULL
+);
+";
+
+/// Rig tables, the queue, chat, health, then the pane lineage recorded at launch.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
         M::up(QUEUE_SCHEMA),
         M::up(CHAT),
         M::up(HEALTH),
+        M::up(LINEAGE),
     ]),
-    len: 4,
+    len: 5,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

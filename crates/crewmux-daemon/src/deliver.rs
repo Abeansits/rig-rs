@@ -127,6 +127,7 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
     let seat = crate::query::find_address(app, target).await?;
     let address = address_of(app, &seat).await?;
     let pane = pane_of(&seat)?;
+    crate::lineage::ensure(app, &seat, &pane).await?;
     let runtime = seat.runtime;
     let shown = Shown {
         display: PasteDisplay::for_runtime(runtime),

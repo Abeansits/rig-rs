@@ -46,6 +46,11 @@ pub fn stream_emit(conn: &Connection, item: &NewStream) -> Result<Emitted, Error
     if let Some(id) = item.id.as_deref().filter(|id| !id.is_empty())
         && let Some(existing) = stream_get(conn, id)?
     {
+        if existing.body != item.body {
+            return Err(Error::Health(crewmux_health::Error::Rejected(
+                "stream item id already exists with a different body".into(),
+            )));
+        }
         return Ok(Emitted {
             item: existing,
             created: false,

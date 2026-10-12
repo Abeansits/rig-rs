@@ -145,14 +145,16 @@ pub fn usage_upsert(conn: &Connection, row: &UsageRow) -> Result<(), Error> {
 
 /// Every context sample, ordered by seat.
 ///
+/// A row that cannot be read is skipped. The rest of the table is still returned.
+///
 /// # Errors
 ///
-/// Returns [`Error`] when the query fails.
+/// Returns [`Error`] when the query cannot be prepared.
 pub fn usage_list(conn: &Connection) -> Result<Vec<UsageRow>, Error> {
     let mut stmt = conn.prepare(
         "SELECT seat, used_tokens, token_limit, sampled_at_ms FROM context_usage ORDER BY seat",
     )?;
-    let rows = stmt.query_map([], |row| {
+    let mapped = stmt.query_map([], |row| {
         Ok(UsageRow {
             seat: row.get(0)?,
             used_tokens: row.get(1)?,
@@ -160,7 +162,7 @@ pub fn usage_list(conn: &Connection) -> Result<Vec<UsageRow>, Error> {
             sampled_at_ms: row.get(3)?,
         })
     })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    Ok(mapped.flatten().collect())
 }
 
 /// Seat lifecycle tokens, ordered by id.

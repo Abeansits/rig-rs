@@ -1,3 +1,5 @@
+// Derived from openrig packages/daemon/test/health-detectors.test.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
+
 //! Health projection behavior. Case titles in the ledger name the TypeScript tests these cover.
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -164,6 +166,7 @@ fn coverage_limit_reports_omitted_lineages() {
         .map(|index| TransitionNote {
             lineage_id: QItemId::new(format!("row-{index}")).expect("id"),
             note: "wake-attempt: 1/3 outcome=failed".to_owned(),
+            next_action: false,
         })
         .collect();
     let (observations, coverage) = wake_from_notes(&notes, 40, at());
@@ -313,6 +316,7 @@ fn failed_wake_without_escalation_is_a_finding() {
     let notes = vec![TransitionNote {
         lineage_id: QItemId::new("row-a").expect("id"),
         note: "wake-attempt: 1/3 outcome=failed".into(),
+        next_action: false,
     }];
     let (observations, _) = wake_from_notes(&notes, 100, at());
     let projected = project(
@@ -341,10 +345,12 @@ fn escalated_wake_is_quiet() {
         TransitionNote {
             lineage_id: QItemId::new("row-a").expect("id"),
             note: "wake-attempt: 1/3 outcome=failed".into(),
+            next_action: true,
         },
         TransitionNote {
             lineage_id: QItemId::new("row-a").expect("id"),
             note: "escalation-rung: orchestrator".into(),
+            next_action: true,
         },
     ];
     let (observations, _) = wake_from_notes(&notes, 100, at());
@@ -397,6 +403,49 @@ fn redundant_wakes_subtract_rescues() {
         *existing_next_action = false;
     }
     assert_eq!(project_one(missing_action), []);
+}
+
+#[test]
+fn redundant_wake_storm_fires_when_a_next_action_is_recorded() {
+    let id = QItemId::new("row-a").expect("id");
+    let notes: Vec<TransitionNote> = (1..=4)
+        .map(|n| TransitionNote {
+            lineage_id: id.clone(),
+            note: format!("wake-attempt: {n}/4 outcome=sent"),
+            next_action: true,
+        })
+        .collect();
+    let (observations, coverage) = wake_from_notes(&notes, 100, at());
+    assert_eq!(coverage.evaluated, 1);
+    let fired = project_one(observations[0].clone());
+    assert_eq!(fired[0].detector, DetectorId::RedundantWakeStorm);
+
+    let quiet: Vec<TransitionNote> = (1..=4)
+        .map(|n| TransitionNote {
+            lineage_id: id.clone(),
+            note: format!("wake-attempt: {n}/4 outcome=sent"),
+            next_action: false,
+        })
+        .collect();
+    let (observations, coverage) = wake_from_notes(&quiet, 100, at());
+    assert_eq!(coverage.evaluated, 1);
+    assert_eq!(project_one(observations[0].clone()), []);
+
+    let quoted = vec![TransitionNote {
+        lineage_id: id,
+        note: "wake-attempt: 1/3 the log quoted 'outcome=failed'".into(),
+        next_action: true,
+    }];
+    let (observations, _) = wake_from_notes(&quoted, 100, at());
+    let HealthObservation::WakeLineage {
+        failed, wake_count, ..
+    } = &observations[0]
+    else {
+        panic!("wake observation");
+    };
+    assert!(!*failed);
+    assert_eq!(*wake_count, 1);
+    assert_eq!(project_one(observations[0].clone()), []);
 }
 
 #[expect(
@@ -498,11 +547,15 @@ fn context_summary_buckets_urgency() {
 }
 
 #[test]
-fn context_summary_marks_stale_after_300s() {
+fn context_summary_marks_stale_at_600s() {
     let samples = [
         ContextFact {
             used_percentage: Some(50),
             age_seconds: Some(1),
+        },
+        ContextFact {
+            used_percentage: Some(50),
+            age_seconds: Some(599),
         },
         ContextFact {
             used_percentage: Some(50),
@@ -514,7 +567,7 @@ fn context_summary_marks_stale_after_300s() {
         },
     ];
     let summary = context_summary(&samples);
-    assert_eq!(summary.by_freshness.get("fresh").copied(), Some(1));
+    assert_eq!(summary.by_freshness.get("fresh").copied(), Some(2));
     assert_eq!(summary.by_freshness.get("stale").copied(), Some(1));
     assert_eq!(summary.by_freshness.get("none").copied(), Some(1));
     assert_eq!(summary.stale, 1);

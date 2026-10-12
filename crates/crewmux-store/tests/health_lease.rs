@@ -175,7 +175,7 @@ fn stream_emit_is_idempotent_and_list_hides_archived() {
         })
         .expect("emit");
     assert!(first.created);
-    let second = store
+    let conflict = store
         .write(|conn| {
             stream_emit(
                 conn,
@@ -188,7 +188,22 @@ fn stream_emit_is_idempotent_and_list_hides_archived() {
                 },
             )
         })
-        .expect("again");
+        .expect_err("different body");
+    assert!(conflict.to_string().contains("different body"));
+    let second = store
+        .write(|conn| {
+            stream_emit(
+                conn,
+                &NewStream {
+                    id: Some("item-1".into()),
+                    kind: "note".into(),
+                    body: "one".into(),
+                    source: "alice@rig".into(),
+                    at_ms: 11,
+                },
+            )
+        })
+        .expect("same body");
     assert!(!second.created);
     assert_eq!(second.item.body, "one");
     store
@@ -279,4 +294,29 @@ fn same_session_acquire_after_ttl_issues_a_new_lease() {
         })
         .expect("state");
     assert_eq!(state, "expired");
+}
+
+#[test]
+fn another_session_does_not_take_a_stale_lease_without_evaluate() {
+    let store = open!();
+    let lease = store
+        .write(|conn| lease_acquire(conn, "alice@rig", clock(1_000)))
+        .expect("acquire");
+    let expires = lease.expires_at_ms;
+    let held = store
+        .write(move |conn| lease_acquire(conn, "bob@rig", clock(expires)))
+        .expect_err("exact expiry is still held");
+    assert!(held.to_string().contains("lease_held"));
+    let stale = store
+        .write(move |conn| lease_acquire(conn, "bob@rig", clock(expires.saturating_add(1))))
+        .expect_err("stale without evaluate");
+    assert!(stale.to_string().contains("lease_held"));
+    let same = store
+        .write(move |conn| lease_acquire(conn, "alice@rig", clock(expires)))
+        .expect("holder at the expiry instant");
+    assert_eq!(same.id, lease.id);
+    let marked = store
+        .write(move |conn| lease_evaluate(conn, expires))
+        .expect("evaluate at equality");
+    assert_eq!(marked, 0);
 }

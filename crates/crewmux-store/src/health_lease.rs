@@ -31,7 +31,9 @@ struct Row {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Health`] with `lease_held` when another session is inside the TTL.
+/// Returns [`Error::Health`] with `lease_held` when another session holds the
+/// active row, including after the TTL. `lease_evaluate` marks that row expired
+/// before anyone else can acquire it. `now == expires_at` is still inside the TTL.
 pub fn lease_acquire(
     conn: &Connection,
     holder: &str,
@@ -66,7 +68,7 @@ pub fn lease_heartbeat(
     if row.state != "active" {
         return Err(Error::Health(crewmux_health::Error::LeaseNotActive));
     }
-    if clock.now_ms >= row.expires_at_ms {
+    if clock.now_ms > row.expires_at_ms {
         mark(&tx, &row.id, "expired")?;
         tx.commit()?;
         return Err(Error::Health(crewmux_health::Error::LeaseExpired));
@@ -112,7 +114,7 @@ pub fn lease_reclaim(
     let Some(row) = load_active(&tx)? else {
         return Err(Error::Health(crewmux_health::Error::NoActiveLease));
     };
-    if if_dead && row.expires_at_ms > now_ms {
+    if if_dead && row.expires_at_ms >= now_ms {
         return Err(Error::Health(crewmux_health::Error::LeaseStillActive));
     }
     mark(&tx, &row.id, "reclaimed")?;
@@ -136,13 +138,13 @@ fn gate(conn: &Connection, holder: &str, now_ms: i64) -> Result<Option<Classifie
     let Some(row) = load_active(conn)? else {
         return Ok(None);
     };
-    if row.expires_at_ms > now_ms {
-        if row.holder == holder {
-            return lease_from(row).map(Some);
-        }
+    if row.holder != holder {
         return Err(Error::Health(crewmux_health::Error::LeaseHeld {
             holder: row.holder,
         }));
+    }
+    if row.expires_at_ms >= now_ms {
+        return lease_from(row).map(Some);
     }
     mark(conn, &row.id, "expired")?;
     Ok(None)

@@ -124,6 +124,26 @@ impl FakeMux {
         self.inner.lock().await.hooks.contaminate = enabled;
     }
 
+    /// Replace the pane process the next delivery check will see.
+    pub async fn set_pane_process(
+        &self,
+        session: &str,
+        pid: Option<u32>,
+        command: &str,
+        argv: Option<&str>,
+    ) {
+        let mut guard = self.inner.lock().await;
+        let name = canonical_session_name(session);
+        let Some(info) = guard.sessions.get_mut(&name) else {
+            return;
+        };
+        info.pid = pid;
+        command.clone_into(&mut info.current_cmd);
+        if let Some(argv) = argv {
+            info.argv = Some(argv.to_owned());
+        }
+    }
+
     /// Record the paste argv but leave the screen unchanged, so the payload is missing.
     pub async fn swallow_paste(&self, enabled: bool) {
         self.inner.lock().await.hooks.swallow = enabled;
@@ -301,6 +321,7 @@ fn seat(spec: &SessionSpec, session: &str, pane_id: &str) -> PaneInfo {
         session: session.to_owned(),
         pid: Some(1),
         current_cmd,
+        argv: Some(spec.argv.join(" ")),
         dead: false,
         dead_status: None,
         size: spec.geometry,

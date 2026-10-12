@@ -70,38 +70,40 @@ mod tests {
         let listener = UnixListener::bind(&path).expect("bind");
         let cancel = CancellationToken::new();
         let task = tokio::spawn(serve(listener, fixture, cancel.clone()));
-        // The accept task may not have been polled yet. A first connect can
-        // see a broken pipe; retry off the worker until the listener is up.
         tokio::task::yield_now().await;
 
         let socket = path.clone();
-        let got = retry(move || Client::over_uds(&socket).hydrate()).await;
+        let got = dial_retry(move || Client::over_uds(&socket).hydrate()).await;
         assert_eq!(got.seats.len(), 1);
         assert_eq!(got.seats[0].name.as_str(), "alpha");
         assert_eq!(got.seats[0].state, crewmux_api::SeatState::Ready);
 
-        let info = retry(move || Client::over_uds(&path).attach_argv("alpha")).await;
+        let info = dial_retry(move || Client::over_uds(&path).attach_argv("alpha")).await;
         assert_eq!(info, vec!["tmux".to_owned(), "attach".to_owned()]);
 
         cancel.cancel();
         task.await.expect("server task").expect("serve");
     }
 
-    async fn retry<T>(op: impl Fn() -> Result<T, crewmux_api::Error> + Send + Sync + 'static) -> T
+    /// Retry only a failed dial. A POST that already reached the handler is not sent again.
+    async fn dial_retry<T>(
+        op: impl Fn() -> Result<T, crewmux_api::Error> + Send + Sync + 'static,
+    ) -> T
     where
         T: Send + 'static,
     {
         let op = std::sync::Arc::new(op);
         let mut last = String::new();
-        for _ in 0..8 {
+        for _ in 0..3 {
             let op = std::sync::Arc::clone(&op);
             match tokio::task::spawn_blocking(move || op()).await {
                 Ok(Ok(value)) => return value,
-                Ok(Err(err)) => last = err.to_string(),
-                Err(err) => last = err.to_string(),
+                Ok(Err(crewmux_api::Error::Connect { source, .. })) => last = source.to_string(),
+                Ok(Err(err)) => panic!("exchange: {err}"),
+                Err(err) => panic!("join: {err}"),
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        panic!("exchange: {last}");
+        panic!("dial: {last}");
     }
 }

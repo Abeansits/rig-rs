@@ -211,6 +211,9 @@ async fn store_sample(app: &App, body: &[u8]) -> Result<Value, Error> {
             crewmux_health::Error::Rejected(err.to_string()),
         ))
     })?;
+    if !seat_exists(app, &parsed.seat).await? {
+        return Err(rejected("seat not found"));
+    }
     let row = UsageRow {
         seat: parsed.seat,
         used_tokens: parsed.used_tokens.map(i64::from),
@@ -231,6 +234,19 @@ struct SampleBody {
     seat: String,
     used_tokens: Option<u32>,
     token_limit: Option<u32>,
+}
+
+async fn seat_exists(app: &App, seat: &str) -> Result<bool, Error> {
+    let seats = crate::db::read(&app.store, |conn| crewmux_core::SeatRepo::list_all(conn)).await?;
+    for seat_row in &seats {
+        if seat_row.name.as_str() == seat {
+            return Ok(true);
+        }
+        if crate::query::address_of(app, seat_row).await? == seat {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn usage_json(row: &UsageRow) -> Value {

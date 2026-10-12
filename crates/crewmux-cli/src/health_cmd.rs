@@ -1,3 +1,5 @@
+// Derived from openrig packages/cli/src/commands/health.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
+
 //! `rig health`, `rig stream`, and `rig usage`.
 
 use std::io::Read;

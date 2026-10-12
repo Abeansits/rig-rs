@@ -15,6 +15,7 @@ mod http;
 mod hub;
 mod inbox_http;
 mod launch;
+mod lineage;
 mod notify;
 mod paste_check;
 mod persist;

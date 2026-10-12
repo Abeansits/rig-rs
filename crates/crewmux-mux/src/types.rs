@@ -171,6 +171,11 @@ pub struct PaneInfo {
     pub pid: Option<u32>,
     /// Foreground command name.
     pub current_cmd: String,
+    /// Full argv when this multiplexer recorded the launch command.
+    ///
+    /// tmux `list-panes` does not include argv, so a real pane leaves this
+    /// empty and the caller reads `/proc/<pid>/cmdline`.
+    pub argv: Option<String>,
     /// `pane_dead`.
     pub dead: bool,
     /// `pane_dead_status`, when tmux reported one.

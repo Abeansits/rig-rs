@@ -80,26 +80,31 @@ fn sse(app: &App, last: Option<u64>, tail: Tail) -> Response {
     let hub = std::sync::Arc::clone(&app.hub);
     let cancel = app.cancel.clone();
     app.tasks.spawn(async move {
-        let replay = replay(&hub, last, tail).await;
-        for event in replay {
-            if tx.send(format_sse(&event)).await.is_err() {
+        // Subscribe first so a publish during replay stays in the live channel.
+        let mut live = hub.subscribe();
+        let replayed = replay(&hub, last, tail).await;
+        let mut covered = 0u64;
+        for event in &replayed {
+            covered = covered.max(event.id);
+            if tx.send(format_sse(event)).await.is_err() {
                 return;
             }
         }
-        let mut live = hub.subscribe();
         loop {
             tokio::select! {
                 () = cancel.cancelled() => break,
                 event = live.recv() => {
                     match event {
-                        Ok(event) if passes(tail, event.kind) => {
+                        Ok(event) if passes(tail, event.kind) && event.id > covered => {
+                            covered = event.id;
                             if tx.send(format_sse(&event)).await.is_err() {
                                 break;
                             }
                         }
                         Ok(_) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            let gap = StreamEvent { id: 0, kind: StreamKind::Gap, payload: None };
+                            let gap = gap_event(hub.head());
+                            covered = covered.max(gap.id);
                             if tx.send(format_sse(&gap)).await.is_err() {
                                 break;
                             }
@@ -119,28 +124,52 @@ fn sse(app: &App, last: Option<u64>, tail: Tail) -> Response {
 }
 
 async fn ws_pump(mut socket: WebSocket, app: App, last: Option<u64>, tail: Tail) {
-    for event in replay(&app.hub, last, tail).await {
-        let text = serde_json::to_string(&event).unwrap_or_default();
-        if socket.send(Message::Text(text.into())).await.is_err() {
+    let mut live = app.hub.subscribe();
+    let replayed = replay(&app.hub, last, tail).await;
+    let mut covered = 0u64;
+    for event in &replayed {
+        covered = covered.max(event.id);
+        if send_ws(&mut socket, event).await.is_err() {
             return;
         }
     }
-    let mut live = app.hub.subscribe();
     loop {
         tokio::select! {
             () = app.cancel.cancelled() => break,
             event = live.recv() => {
-                let Ok(event) = event else { break };
-                if !passes(tail, event.kind) {
-                    continue;
-                }
-                let text = serde_json::to_string(&event).unwrap_or_default();
-                if socket.send(Message::Text(text.into())).await.is_err() {
-                    break;
+                match event {
+                    Ok(event) if passes(tail, event.kind) && event.id > covered => {
+                        covered = event.id;
+                        if send_ws(&mut socket, &event).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        let gap = gap_event(app.hub.head());
+                        covered = covered.max(gap.id);
+                        if send_ws(&mut socket, &gap).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         }
     }
+}
+
+fn gap_event(head: u64) -> StreamEvent {
+    StreamEvent {
+        id: head,
+        kind: StreamKind::Gap,
+        payload: None,
+    }
+}
+
+async fn send_ws(socket: &mut WebSocket, event: &StreamEvent) -> Result<(), axum::Error> {
+    let text = serde_json::to_string(event).unwrap_or_default();
+    socket.send(Message::Text(text.into())).await
 }
 
 async fn replay(hub: &crate::hub::EventHub, last: Option<u64>, tail: Tail) -> Vec<StreamEvent> {
@@ -300,5 +329,13 @@ mod tests {
         let resumed = replay(&hub, Some(emitted.id), Tail::Stream).await;
         assert_eq!(resumed, []);
         assert_eq!(queue.kind, StreamKind::QueueChanged);
+    }
+
+    #[test]
+    fn a_lag_gap_uses_the_hub_head() {
+        let gap = super::gap_event(4);
+        assert_eq!(gap.kind, StreamKind::Gap);
+        assert_eq!(gap.id, 4);
+        assert_ne!(gap.id, 0);
     }
 }

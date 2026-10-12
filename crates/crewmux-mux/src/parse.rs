@@ -56,6 +56,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Result<PaneInfo, MuxError> {
         session,
         pid,
         current_cmd,
+        argv: None,
         dead,
         dead_status,
         size: Geometry { cols, rows },

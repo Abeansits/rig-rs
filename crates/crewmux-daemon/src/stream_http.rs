@@ -313,7 +313,7 @@ fn hold(
     lease_id: &str,
     now: i64,
 ) -> Result<(), crewmux_store::Error> {
-    if lease.state != LeaseState::Active || now >= lease.expires_at_ms {
+    if lease.state != LeaseState::Active || now > lease.expires_at_ms {
         return Err(crewmux_health::Error::LeaseNotActive.into());
     }
     if lease.id != lease_id {

@@ -52,11 +52,11 @@ pub struct ContextSummary {
     pub critical: u32,
     /// Samples at or above 60% and below 80%.
     pub warning: u32,
-    /// Samples older than 300s.
+    /// Samples at least 600s old.
     pub stale: u32,
 }
 
-const FRESHNESS_SECONDS: u64 = 300;
+const FRESHNESS_SECONDS: u64 = 600;
 const CRITICAL_PERCENT: u32 = 80;
 const WARNING_PERCENT: u32 = 60;
 
@@ -83,7 +83,7 @@ pub fn node_summary(nodes: &[NodeFact]) -> NodeSummary {
     }
 }
 
-/// Roll up context samples. Urgency is 80 / 60. Freshness is 300s.
+/// Roll up context samples. Urgency is 80 / 60. Freshness is 600s.
 #[must_use]
 pub fn context_summary(samples: &[ContextFact]) -> ContextSummary {
     let mut by_urgency = zeros(&["critical", "warning", "low", "unknown"]);
@@ -106,7 +106,7 @@ pub fn context_summary(samples: &[ContextFact]) -> ContextSummary {
         }
         match sample.age_seconds {
             None => bump(&mut by_freshness, "none"),
-            Some(age) if age > FRESHNESS_SECONDS => {
+            Some(age) if age >= FRESHNESS_SECONDS => {
                 bump(&mut by_freshness, "stale");
                 stale = stale.saturating_add(1);
             }

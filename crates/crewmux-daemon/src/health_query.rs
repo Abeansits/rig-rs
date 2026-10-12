@@ -127,6 +127,7 @@ async fn wake_notes(app: &App) -> Vec<TransitionNote> {
             notes.push(TransitionNote {
                 lineage_id: item.id.clone(),
                 note: transition.note,
+                next_action: !item.body.is_empty(),
             });
         }
     }
@@ -154,7 +155,9 @@ impl HealthSource for ContextSrc<'_> {
             .map_err(|err| crewmux_health::Error::Rejected(err.to_string()))?;
         let mut samples = Vec::new();
         for row in rows {
-            samples.push(sample(row)?);
+            if let Ok(sample) = sample(row) {
+                samples.push(sample);
+            }
         }
         Ok(bounded(context_observations(&samples, 200)))
     }

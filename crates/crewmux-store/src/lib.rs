@@ -5,6 +5,7 @@ mod error;
 mod health_lease;
 mod health_rows;
 mod health_stream;
+mod lineage;
 mod migrate;
 mod queue;
 mod repo;
@@ -23,6 +24,7 @@ pub use health_stream::{
     Emitted, NewStream, attempt_count, attempt_insert, stream_archive, stream_emit, stream_get,
     stream_list,
 };
+pub use lineage::{PaneLineage, lineage_get, lineage_put};
 pub use migrate::MIGRATIONS;
 pub use queue::{archive_terminal, insert_receipt, load_book, max_receipt_cursor, replace_book};
 pub use repo::{Db, clear_rig};
