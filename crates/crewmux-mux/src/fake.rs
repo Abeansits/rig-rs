@@ -134,6 +134,14 @@ impl FakeMux {
         self.inner.lock().await.script_stubs = true;
     }
 
+    /// Put a ready `stub>` prompt back. Repeated pastes otherwise see the last payload.
+    pub async fn show_stub_prompt(&self, session: &str) {
+        let session = canonical_session_name(session);
+        let screen = Capture::new("stub-agent\nstub> \n".to_owned(), (0, 0));
+        let mut guard = self.inner.lock().await;
+        guard.screens.insert(session, screen);
+    }
+
     fn arm_stub(&self, session: &str, pane_id: &str, plan: &crate::fake_script::StubPlan) {
         if plan.ready_after_ms > 0 {
             let inner = Arc::clone(&self.inner);

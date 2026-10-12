@@ -25,6 +25,7 @@ fn outbound(targets: &[&str], body: &str) -> Outbound {
         interact: false,
         reason: None,
         verify: false,
+        track_direct: true,
     }
 }
 

@@ -1,0 +1,5 @@
+---
+source: crates/rig/tests/slice8_cli.rs
+expression: out.trim()
+---
+{"classes":{"attention_required":0,"not_ready":0,"ready":0,"ready_with_caveats":0,"unknown":1},"remediations":[{"action":"start the daemon","execution_safe":false}],"seats":[]}

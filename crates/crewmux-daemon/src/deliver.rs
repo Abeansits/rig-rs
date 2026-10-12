@@ -26,6 +26,17 @@ use crate::state::App;
 
 const REASON_REQUIRED: &str = "--dangerously-interact requires --reason explaining why the prompt is being driven. No text was sent.";
 
+async fn stopped_before_paste(
+    app: &App,
+    outbound: &Outbound,
+    address: &str,
+) -> Result<bool, Error> {
+    if !outbound.track_direct {
+        return Ok(false);
+    }
+    crate::direct::crash_before_paste(app, address, &outbound.body).await
+}
+
 struct PasteRoute {
     bracketed: bool,
     display: PasteDisplay,
@@ -40,6 +51,10 @@ struct Shown {
 }
 
 /// One `rig send` or `rig broadcast`.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "send flags are independent: broadcast, interact, verify, and direct-row tracking"
+)]
 pub(crate) struct Outbound {
     pub from: String,
     pub targets: Vec<String>,
@@ -51,6 +66,8 @@ pub(crate) struct Outbound {
     /// Retained so `rig send --verify` stays on the wire. Rendering is required
     /// for every send, whether or not the flag is set.
     pub verify: bool,
+    /// Record a direct-delivery row. Restore re-sends set this false.
+    pub track_direct: bool,
 }
 
 pub(crate) async fn deliver(app: &App, outbound: Outbound) -> Result<Value, Error> {
@@ -158,6 +175,9 @@ async fn not_ready(
     else {
         return Err(Error::Message(REASON_REQUIRED.to_owned()));
     };
+    if stopped_before_paste(app, outbound, address).await? {
+        return Ok(json!({"seat": address, "outcome": "crashed_before_paste"}));
+    }
     paste_and_check(
         app,
         outbound,
@@ -189,6 +209,9 @@ async fn guarded(
     let second = verdict(app, address, pane, Instant::now()).await?;
     if !matches!(second.0.verdict, GuardVerdict::Deliver) {
         return receipt_row(app, outbound, address, &second.0, None).await;
+    }
+    if stopped_before_paste(app, outbound, address).await? {
+        return Ok(json!({"seat": address, "outcome": "crashed_before_paste"}));
     }
     paste_and_check(
         app,
@@ -324,6 +347,9 @@ async fn stored(
     .await
     .map_err(crate::state::join_err)?;
     inserted.map_err(|err| Error::Message(format!("receipt: {err}")))?;
+    if outbound.track_direct && outcome == DeliveryOutcome::Delivered {
+        crate::direct::note_pasted(app, address, &outbound.body).await?;
+    }
     if let Ok(destination) = SessionRef::new(address) {
         crate::inbox_http::record(
             app,

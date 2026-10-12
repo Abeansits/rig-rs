@@ -24,6 +24,7 @@ enum Msg {
 pub struct Store {
     tx: Sender<Msg>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    path: std::path::PathBuf,
 }
 
 impl Store {
@@ -37,10 +38,11 @@ impl Store {
     /// or an I/O or SQLite error when the file cannot be opened.
     pub fn open(path: &Path) -> Result<Self, Error> {
         let path = path.to_path_buf();
+        let writer_path = path.clone();
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
-            let mut conn = match prepare(&path) {
+            let mut conn = match prepare(&writer_path) {
                 Ok(conn) => conn,
                 Err(err) => {
                     drop(ready_tx.send(Err(err)));
@@ -59,6 +61,7 @@ impl Store {
             Ok(Ok(())) => Ok(Self {
                 tx,
                 thread: Mutex::new(Some(thread)),
+                path,
             }),
             Ok(Err(err)) => Err(err),
             Err(_) => Err(Error::Closed),
@@ -87,6 +90,52 @@ impl Store {
         f: impl FnOnce(&Connection) -> Result<T, Error> + Send + 'static,
     ) -> Result<T, Error> {
         self.call(move |conn| f(conn))
+    }
+
+    /// Copy the database with the SQLite backup API on a new connection.
+    ///
+    /// This does not use the writer thread and does not run `wal_checkpoint`
+    /// on it. `between` runs on the maintenance connection between pages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Backup`] for an in-memory database or a backup failure.
+    pub fn backup_maintenance(&self, dest: &Path, mut between: impl FnMut()) -> Result<(), Error> {
+        if self.path == Path::new(":memory:") {
+            return Err(Error::Backup(
+                "snapshots use the backup API on a file database, never the writer connection"
+                    .to_owned(),
+            ));
+        }
+        if let Some(parent) = dest.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        let src = Connection::open(&self.path)?;
+        src.busy_timeout(Duration::from_millis(5000))?;
+        let mut destination = Connection::open(dest)?;
+        let backup = rusqlite::backup::Backup::new(&src, &mut destination)
+            .map_err(|err| Error::Backup(format!("maintenance backup: {err}")))?;
+        loop {
+            match backup.step(1) {
+                Ok(rusqlite::backup::StepResult::Done) => break,
+                Ok(_) => between(),
+                Err(err) => return Err(Error::Backup(format!("maintenance backup: {err}"))),
+            }
+        }
+        Ok(())
+    }
+
+    /// `PRAGMA user_version` of a database file, without migrating it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when the file cannot be opened or the pragma cannot be read.
+    pub fn file_user_version(path: &Path) -> Result<i64, Error> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        Ok(version)
     }
 
     /// `PRAGMA user_version`.

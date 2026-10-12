@@ -61,6 +61,11 @@ pub(crate) struct App {
     queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueWrite>>>>,
     /// Next snapshot write fails at this `replace_book` hook, then the hook clears.
     persist_crash: Arc<tokio::sync::Mutex<Option<&'static str>>>,
+    /// In-process direct-delivery phase. `before`, `ack`, or absent.
+    ///
+    /// The file hook under `$RIG_HOME/direct-phase` is for the binary. Tests
+    /// cannot use `std::env::set_var`, so they set this instead.
+    direct_phase: Arc<tokio::sync::Mutex<Option<&'static str>>>,
 }
 
 /// One queue snapshot for the writer, plus the callers waiting on that commit.
@@ -107,7 +112,19 @@ impl App {
             persist_tx,
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
             persist_crash: Arc::new(tokio::sync::Mutex::new(None)),
+            direct_phase: Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+
+    /// Drive the direct-delivery crash phase for in-process tests.
+    #[cfg(test)]
+    pub(crate) async fn set_direct_phase(&self, phase: Option<&'static str>) {
+        *self.direct_phase.lock().await = phase;
+    }
+
+    /// The in-process phase, when a test set one.
+    pub(crate) async fn direct_phase(&self) -> Option<&'static str> {
+        *self.direct_phase.lock().await
     }
 
     /// Fail the next queue snapshot at the store's `before-commit` hook.
