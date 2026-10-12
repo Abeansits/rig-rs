@@ -271,11 +271,9 @@ async fn send_prepared(app: &App, seat: &Seat) -> Result<(), Error> {
                     )
             });
         if !open {
-            guard.book.request(
-                &seat.id.to_string(),
-                AttemptId(prep.attempt_id),
-                now_ms(),
-            );
+            guard
+                .book
+                .request(&seat.id.to_string(), AttemptId(prep.attempt_id), now_ms());
         }
         text
     };
