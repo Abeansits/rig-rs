@@ -2,6 +2,7 @@
 
 use axum::Json;
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::routing::{get, post};
 use tokio::net::UnixListener;
@@ -25,7 +26,9 @@ async fn seats(State(fixture): State<Fixture>) -> Json<serde_json::Value> {
     Json(fixture.body)
 }
 
-async fn attach(State(fixture): State<Fixture>) -> Json<serde_json::Value> {
+async fn attach(State(fixture): State<Fixture>, _body: Bytes) -> Json<serde_json::Value> {
+    // Read the POST body before responding. The client writes headers and then
+    // the payload; answering first closes the socket under the second write.
     Json(serde_json::json!({"argv": fixture.argv}))
 }
 
