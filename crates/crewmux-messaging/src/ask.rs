@@ -7,6 +7,8 @@
 use crewmux_types::SeatId;
 use serde::{Deserialize, Serialize};
 
+use crate::paste_display::{PasteDisplay, transcript_hit};
+
 /// What `rig ask` searched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AskQuery {
@@ -22,6 +24,8 @@ pub struct AskQuery {
     pub text: String,
     /// When false, L1 returns guidance instead of an empty success.
     pub transcripts_enabled: bool,
+    /// How this seat's transcript shows a paste. Exact when the runtime is unknown.
+    pub display: PasteDisplay,
 }
 
 /// One hit.
@@ -114,7 +118,7 @@ fn search_seat(query: &AskQuery, corpus: &AskCorpus) -> AskResult {
         .seat_generations
         .iter()
         .find_map(|(generation, text)| {
-            line_hit(text, &query.text).map(|line| Evidence {
+            transcript_hit(query.display, text, &query.text).map(|line| Evidence {
                 source: format!("seat {name} gen {generation}"),
                 text: line,
             })

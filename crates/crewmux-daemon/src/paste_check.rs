@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use crewmux_messaging::{PasteDisplay, claude_visible, expand_tabs};
 use crewmux_mux::{CaptureRange, PaneRef};
 
 use crate::composer::{ComposerParser, anchored_region, composer_empty};
@@ -29,8 +30,34 @@ pub(crate) enum PasteHit {
 ///
 /// `before` and `after` are pane captures. Only the parser's composer region
 /// is compared, so output above the prompt cannot look like a dirty paste.
+/// Claude is clean when the pane shows `<pasted_content>` with tabs expanded
+/// to four spaces, and also when the bytes landed unchanged. Codex stays exact:
+/// a rewritten paste is not the payload.
 #[must_use]
-pub(crate) fn classify_paste(before: &str, after: &str, payload: &str) -> PasteHit {
+pub(crate) fn classify_for(
+    display: PasteDisplay,
+    before: &str,
+    after: &str,
+    payload: &str,
+) -> PasteHit {
+    if display.is_claude() {
+        let visible = claude_visible(payload);
+        let hit = classify_against(before, after, &visible);
+        if hit != PasteHit::Missing {
+            return hit;
+        }
+        let expanded = expand_tabs(payload);
+        if expanded != visible && expanded != payload {
+            let hit = classify_against(before, after, &expanded);
+            if hit != PasteHit::Missing {
+                return hit;
+            }
+        }
+    }
+    classify_against(before, after, payload)
+}
+
+fn classify_against(before: &str, after: &str, payload: &str) -> PasteHit {
     let parser = ComposerParser::Stub;
     // Width comes from the whole pane. The composer region starts mid-row, so
     // it no longer contains the padded rows that show where a wrap joins.
@@ -97,6 +124,7 @@ pub(crate) async fn pasted_screen(
     before: &str,
     payload: &str,
     range: CaptureRange,
+    display: PasteDisplay,
 ) -> Result<String, Error> {
     let mut after = app.mux.capture(pane, range).await?.text;
     if exact_append(before, &after, payload) {
@@ -114,7 +142,7 @@ pub(crate) async fn pasted_screen(
         let text = composer_text(before, &after);
         let stable = text == seen;
         seen = text;
-        if stable && settled(started.elapsed(), before, &after, payload) {
+        if stable && settled(started.elapsed(), before, &after, payload, display) {
             return Ok(after);
         }
     }
@@ -123,11 +151,17 @@ pub(crate) async fn pasted_screen(
 /// The stub treats a newline as Enter only after a 40ms gap. Returning sooner
 /// delivers the key while the paste is still one burst, and the prompt is not
 /// redrawn. Missing means the paste may still be landing.
-fn settled(elapsed: Duration, before: &str, after: &str, payload: &str) -> bool {
+fn settled(
+    elapsed: Duration,
+    before: &str,
+    after: &str,
+    payload: &str,
+    display: PasteDisplay,
+) -> bool {
     if elapsed < Duration::from_millis(150) {
         return false;
     }
-    match classify_paste(before, after, payload) {
+    match classify_for(display, before, after, payload) {
         PasteHit::Clean | PasteHit::Contaminated => true,
         PasteHit::Missing => false,
     }
@@ -306,7 +340,13 @@ fn grid_width(lines: &[&str]) -> Option<usize> {
 mod tests {
     use crewmux_mux::CaptureRange;
 
-    use super::{PasteHit, classify_paste, clear_passes, history_range};
+    use crewmux_messaging::PasteDisplay;
+
+    use super::{PasteHit, classify_for, clear_passes, history_range};
+
+    fn classify_paste(before: &str, after: &str, payload: &str) -> PasteHit {
+        classify_for(PasteDisplay::Exact, before, after, payload)
+    }
 
     fn payload() -> &'static str {
         "From: operator@host\nTo: one@pair\n---\nhello\n---\nreply-line"
@@ -451,6 +491,63 @@ mod tests {
             history_range(&modest),
             CaptureRange::JoinedHistory(rows) if (48..500).contains(&rows)
         ));
+    }
+
+    #[test]
+    fn claude_accepts_a_wrapped_paste_and_codex_stays_byte_exact() {
+        let before = "stub> \n";
+        let payload = "col\tvalue\nnext";
+        let wrapped = "stub> \n<pasted_content>\ncol    value\nnext\n</pasted_content>";
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, before, wrapped, payload),
+            PasteHit::Clean
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, wrapped, payload),
+            PasteHit::Missing
+        );
+        let exact = format!("{before}{payload}");
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, before, &exact, payload),
+            PasteHit::Clean
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, &exact, payload),
+            PasteHit::Clean
+        );
+        let expanded = "stub> \ncol    value\nnext";
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, before, expanded, payload),
+            PasteHit::Clean
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, expanded, payload),
+            PasteHit::Missing
+        );
+        let noisy = format!("{wrapped}\nNOISE");
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, before, &noisy, payload),
+            PasteHit::Contaminated
+        );
+        let tags_only = "alpha\nbeta";
+        let tagged = "stub> \n<pasted_content>\nalpha\nbeta\n</pasted_content>";
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, before, tagged, tags_only),
+            PasteHit::Clean
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, tagged, tags_only),
+            PasteHit::Contaminated
+        );
+        let plain = "col\tvalue";
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "stub> ", "stub> col    value", plain),
+            PasteHit::Clean
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, "stub> ", "stub> col    value", plain),
+            PasteHit::Missing
+        );
     }
 
     #[test]

@@ -7,7 +7,8 @@ use std::time::{Duration, Instant, SystemTime};
 use crewmux_adapters::{Readiness, classify};
 use crewmux_core::DomainEvent;
 use crewmux_messaging::{
-    DeliveryOutcome, DeliveryReceipt, OutboxRecord, SessionRef, obligation_fingerprint, wrap_pane,
+    DeliveryOutcome, DeliveryReceipt, OutboxRecord, PasteDisplay, SessionRef,
+    obligation_fingerprint, wrap_pane,
 };
 use crewmux_mux::{
     CaptureRange, ComposerState, GuardConfig, GuardVerdict, Key, PasteOpts, evaluate,
@@ -19,11 +20,16 @@ use crate::composer::{ComposerParser, classify_stub, stub_drafting};
 use crate::error::Error;
 use crate::launch::now_ts;
 use crate::notify::emit;
-use crate::paste_check::{PasteHit, classify_paste, clear_composer, history_range, pasted_screen};
+use crate::paste_check::{PasteHit, classify_for, clear_composer, history_range, pasted_screen};
 use crate::query::{address_of, live_seats, pane_of};
 use crate::state::App;
 
 const REASON_REQUIRED: &str = "--dangerously-interact requires --reason explaining why the prompt is being driven. No text was sent.";
+
+struct PasteRoute {
+    bracketed: bool,
+    display: PasteDisplay,
+}
 
 /// One `rig send` or `rig broadcast`.
 pub(crate) struct Outbound {
@@ -113,12 +119,13 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
     let seat = crate::query::find_address(app, target).await?;
     let address = address_of(app, &seat).await?;
     let pane = pane_of(&seat)?;
+    let display = PasteDisplay::for_runtime(seat.runtime);
     let shot = app.mux.capture(&pane, CaptureRange::Visible).await?;
     let readiness = classify(&shot.text);
     if readiness != Readiness::Ready {
-        return not_ready(app, outbound, &address, &pane, &shot.text, &readiness).await;
+        return not_ready(app, outbound, &address, &pane, &readiness, display).await;
     }
-    guarded(app, outbound, &address, &pane, true).await
+    guarded(app, outbound, &address, &pane, true, display).await
 }
 
 async fn not_ready(
@@ -126,8 +133,8 @@ async fn not_ready(
     outbound: &Outbound,
     address: &str,
     pane: &crewmux_mux::PaneRef,
-    _screen: &str,
     readiness: &Readiness,
+    display: PasteDisplay,
 ) -> Result<Value, Error> {
     if !outbound.interact {
         return Err(Error::Message(refusal(address, &reason_text(readiness))));
@@ -139,7 +146,18 @@ async fn not_ready(
     else {
         return Err(Error::Message(REASON_REQUIRED.to_owned()));
     };
-    paste_and_check(app, outbound, address, pane, false, reason).await
+    paste_and_check(
+        app,
+        outbound,
+        address,
+        pane,
+        reason,
+        PasteRoute {
+            bracketed: false,
+            display,
+        },
+    )
+    .await
 }
 
 async fn guarded(
@@ -148,6 +166,7 @@ async fn guarded(
     address: &str,
     pane: &crewmux_mux::PaneRef,
     bracketed: bool,
+    display: PasteDisplay,
 ) -> Result<Value, Error> {
     let now = Instant::now();
     let first = verdict(app, address, pane, now).await?;
@@ -158,7 +177,15 @@ async fn guarded(
     if !matches!(second.0.verdict, GuardVerdict::Deliver) {
         return receipt_row(app, outbound, address, &second.0, None).await;
     }
-    paste_and_check(app, outbound, address, pane, bracketed, "").await
+    paste_and_check(
+        app,
+        outbound,
+        address,
+        pane,
+        "",
+        PasteRoute { bracketed, display },
+    )
+    .await
 }
 
 async fn verdict(
@@ -191,8 +218,8 @@ async fn paste_and_check(
     outbound: &Outbound,
     address: &str,
     pane: &crewmux_mux::PaneRef,
-    bracketed: bool,
     interact_reason: &str,
+    route: PasteRoute,
 ) -> Result<Value, Error> {
     let payload = wrap_pane(&outbound.from, address, &outbound.body);
     // History, joined. The composer region of this capture is the draft at
@@ -200,15 +227,15 @@ async fn paste_and_check(
     let range = history_range(&payload);
     let before = app.mux.capture(pane, range).await?;
     let opts = PasteOpts {
-        bracketed,
+        bracketed: route.bracketed,
         preserve_lf: true,
     };
     tracing::debug!(verify = outbound.verify, seat = address, "paste");
     app.mux.paste(pane, &payload, opts).await?;
-    let after = pasted_screen(app, pane, &before.text, &payload, range).await?;
+    let after = pasted_screen(app, pane, &before.text, &payload, range, route.display).await?;
     let mut degraded = ComposerParser::Stub.state(&before.text, None) == ComposerState::Unknown;
     let lines = payload.lines().count();
-    let outcome = match classify_paste(&before.text, &after, &payload) {
+    let outcome = match classify_for(route.display, &before.text, &after, &payload) {
         PasteHit::Clean => {
             app.mux.send_keys(pane, &[Key::Enter]).await?;
             DeliveryOutcome::Delivered

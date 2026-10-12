@@ -3,7 +3,7 @@
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::response::Response;
-use crewmux_messaging::{AskCorpus, AskQuery, search};
+use crewmux_messaging::{AskCorpus, AskQuery, PasteDisplay, search};
 use crewmux_types::SeatId;
 use serde::Deserialize;
 use serde_json::json;
@@ -29,6 +29,13 @@ pub(crate) async fn ask(State(app): State<App>, body: Bytes) -> Response {
         Ok(corpus) => corpus,
         Err(err) => return fail(Error::Message(err.to_string())),
     };
+    let display = match parsed.seat.as_deref() {
+        Some(name) => match crate::query::find_seat(&app, name).await {
+            Ok(seat) => PasteDisplay::for_runtime(seat.runtime),
+            Err(_) => PasteDisplay::Exact,
+        },
+        None => PasteDisplay::Exact,
+    };
     let query = AskQuery {
         rig: parsed.rig.unwrap_or_default(),
         seat: parsed
@@ -39,6 +46,7 @@ pub(crate) async fn ask(State(app): State<App>, body: Bytes) -> Response {
         session_token: parsed.session,
         text: parsed.text,
         transcripts_enabled: enabled,
+        display,
     };
     let result = search(&query, &corpus);
     match serde_json::to_value(&result) {
