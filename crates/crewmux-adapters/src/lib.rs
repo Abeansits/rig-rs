@@ -1,6 +1,10 @@
 //! Agent runtime adapters. Slice 1 ships the trait and the stub runtime.
 
 mod adapter;
+mod budget;
+pub mod claude;
+pub mod codex;
+pub mod dialog;
 mod error;
 mod readiness;
 mod registry;
@@ -8,6 +12,10 @@ mod stub;
 mod types;
 
 pub use adapter::{AgentAdapter, SeatIo};
+pub use budget::{BudgetOverrides, LaunchBudget};
+pub use claude::ClaudeAdapter;
+pub use codex::CODEX_DIALOGS;
+pub use dialog::{AnswerPolicy, DialogDriver, DriveOutcome, EscalateReason, MuxPane, SeatContext};
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};
 pub use registry::AdapterRegistry;

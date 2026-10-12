@@ -39,6 +39,7 @@ crewmux-adapters = { path = "crates/crewmux-adapters" }
 crewmux-provider = { path = "crates/crewmux-provider" }
 crewmux-messaging = { path = "crates/crewmux-messaging" }
 crewmux-durability = { path = "crates/crewmux-durability" }
+crewmux-transcript = { path = "crates/crewmux-transcript" }
 crewmux-orchestration = { path = "crates/crewmux-orchestration" }
 crewmux-health = { path = "crates/crewmux-health" }
 crewmux-integrations = { path = "crates/crewmux-integrations" }
@@ -80,6 +81,13 @@ predicates = "3.1.4"
 # signal-hook lets `rig chatroom watch` exit 0 on SIGINT without an unsafe handler.
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 signal-hook = "0.4.5"
+# Slice 2. Versions come from `cargo add` (crates.io, 2026-10-12), then hoisted.
+# uuid: Claude `--session-id` values are UUID v4.
+# sha2: ADR-0009 delivery fingerprints.
+# unicode-normalization: ADR-0009 common NFC step.
+sha2 = "0.11.0"
+unicode-normalization = "0.1.25"
+uuid = { version = "1.28.0", features = ["v4"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

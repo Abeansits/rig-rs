@@ -15,7 +15,6 @@ crewmux-spec.workspace = true
 crewmux-types.workspace = true
 crewmux-adapters.workspace = true
 crewmux-messaging.workspace = true
-crewmux-durability.workspace = true
 crewmux-orchestration.workspace = true
 crewmux-health.workspace = true
 crewmux-integrations.workspace = true
@@ -33,6 +32,7 @@ rustix = { workspace = true, features = ["fs", "process"] }
 tokio-stream.workspace = true
 
 [dev-dependencies]
+crewmux-transcript.workspace = true
 rusqlite.workspace = true
 
 [features]

@@ -9,7 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use crewmux_api::{
     AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
-    Healthz, ListSeats, RigDown,
+    Healthz, ListSeats, RigDown, SubmitRequest, SubmitSeat,
 };
 use serde_json::{Value, json};
 
@@ -24,6 +24,7 @@ pub(crate) fn router(app: App) -> Router {
         .route(CreateRigUp::PATH, post(up))
         .route(ListSeats::PATH, get(ps))
         .route(CaptureSeat::PATH, post(capture_seat))
+        .route(SubmitSeat::PATH, post(submit_seat))
         .route(AttachInfo::PATH, post(attach))
         .route(RigDown::PATH, post(rig_down))
         .route(crate::events::PATH, get(crate::events::events))
@@ -89,6 +90,18 @@ async fn capture_seat(State(app): State<App>, body: Bytes) -> Response {
         Err(err) => return fail(Error::Message(err.to_string())),
     };
     match capture(&app, &request.seat, request.lines).await {
+        Ok(value) => ok(value),
+        Err(err) => fail(err),
+    }
+}
+
+async fn submit_seat(State(app): State<App>, body: Bytes) -> Response {
+    app.touch();
+    let request: SubmitRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(err) => return fail(Error::Message(err.to_string())),
+    };
+    match crate::submit::submit_text(&app, &request.seat, &request.text).await {
         Ok(value) => ok(value),
         Err(err) => fail(err),
     }

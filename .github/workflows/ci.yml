@@ -157,6 +157,8 @@ jobs:
         run: cargo run -p xtask --locked -- ledger check
       - name: lint-mux (crewmux-mux human-client / shell ban)
         run: cargo run -p xtask --locked -- lint-mux
+      - name: lint-blind-enter (no blind Enter outside submit and the dialog driver)
+        run: cargo run -p xtask --locked -- lint-blind-enter
 
   coverage:
     name: coverage (informational)

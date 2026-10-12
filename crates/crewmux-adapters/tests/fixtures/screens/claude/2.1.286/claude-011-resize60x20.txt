@@ -1,0 +1,20 @@
+▝▜██████▀  Haiku 4.5 · Claude Pro
+ ▝▝   ▝▝   ~/openrig-spikes-scratch/proj/claude-f1
+
+  Opus 5.5 is now your default model and it draws down usage
+  faster than Sonnet 5. Switch anytime with /model.
+  1 more notice hidden
+
+────────────────────────────────────────────────────────────
+  Try the new fullscreen renderer?
+
+  · Flicker-free output
+  · Mouse support — click to move your cursor or expand
+  results
+  · Selected text auto-copies to your clipboard
+
+  ❯ 1. Yes, try it
+    2. Not now
+
+  Enter to confirm · Esc to cancel
+

@@ -30,7 +30,7 @@ pub use dirs::{create_private, open_private};
 pub use endpoint::{
     AskSeat, AttachInfo, AttachRequest, BroadcastSend, CaptureRequest, CaptureSeat, CreateRigUp,
     DownRequest, Endpoint, Healthz, ListSeats, QueueClaim, QueueCollection, QueueFallback,
-    QueueHandoff, QueueShow, RigDown, SendMessage, UnclaimItem, Whoami,
+    QueueHandoff, QueueShow, RigDown, SendMessage, SubmitRequest, SubmitSeat, UnclaimItem, Whoami,
 };
 pub use error::Error;
 pub use model::{ActivityItem, HealthItem, HealthSummary, LauncherConfig, SeatView, Snapshot};

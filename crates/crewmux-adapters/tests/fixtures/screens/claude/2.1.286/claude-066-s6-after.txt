@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.286
+▝▜██████▀  Haiku 4.5 · Claude Pro
+ ▝▝   ▝▝   ~/openrig-spikes-scratch/proj/claude-f1
+
+
+❯ S62604ed Use the rig MCP server. First say how many tools it exposes. Then call its seat_send tool with seat="cc",
+  prio="high", opts=[{"key":"a","value":1}] and quote the tool output verbatim.
+
+⏺ I can see 17 tools exposed by the rig MCP server from the deferred tools list.
+
+  Now let me load the schema for mcp__rig__seat_send and call it:
+
+  Called rig
+
+⏺ The rig MCP server exposes 17 tools.
+
+  Tool output:
+  seat_send ok Args { seat: "cc", prio: Some(High), tags: None, opts: Some([Opt { key: "a", value: Some(1) }]),
+  timeout_ms: None }
+
+✻ Baked for 9s · done 1:32 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                       Update available! Run: brew upgrade claude-code
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

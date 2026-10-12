@@ -1,0 +1,11 @@
+● Ready.
+
+✻ Crunched for 2s
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+  unfinished second line
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+  ✘ Auto-update failed: no write permission to npm prefix · Run claude doctor
+  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and re…

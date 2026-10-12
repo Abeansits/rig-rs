@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crewmux_adapters::{AdapterRegistry, StubAdapter};
+use crewmux_adapters::{AdapterRegistry, ClaudeAdapter, StubAdapter};
 use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
 use crewmux_store::Store;
 use tokio_util::sync::CancellationToken;
@@ -43,6 +43,11 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     registry.register(Arc::new(StubAdapter::new(
         Arc::clone(&mux),
         stub_bin.clone(),
+    )));
+    registry.register(Arc::new(ClaudeAdapter::new(
+        Arc::clone(&mux),
+        home.join("seats"),
+        user_home(&home),
     )));
     let loaded = {
         let store = Arc::clone(&store);
@@ -153,6 +158,10 @@ fn remove_if_present(path: &Path) -> Result<(), Error> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+fn user_home(rig_home: &Path) -> std::path::PathBuf {
+    std::env::var_os("HOME").map_or_else(|| rig_home.to_path_buf(), std::path::PathBuf::from)
 }
 
 async fn reap(app: App) {

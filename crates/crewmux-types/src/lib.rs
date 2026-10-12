@@ -5,6 +5,7 @@
 //! slice 1b re-exports it from `crewmux-mux`.
 
 mod chat;
+mod dialog;
 mod doctor;
 mod error;
 mod id;
@@ -18,6 +19,7 @@ pub use chat::{
     ChatCursor, ChatId, MAX_CURSOR_LEN, MAX_SEAT_TOKEN_LEN, MAX_SENDER_LEN, MAX_TOPIC_LEN,
     SEAT_ID_ENV, SEAT_ID_HEADER, SEAT_TOKEN_ENV, SEAT_TOKEN_HEADER, SenderRef, TopicId,
 };
+pub use dialog::{ComposerState, DialogId};
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
 pub use id::{MAX_NAME_LEN, QItemId, RigId, RigName, SeatId, SeatName, SessionId};
@@ -37,7 +39,7 @@ pub enum Key {
     Escape,
     /// Control-C.
     CtrlC,
-    /// Kill the current line. Clears a paste that failed verification.
+    /// Control-U. Clears the composer line. It is not Enter.
     CtrlU,
     /// Drop a whole draft and redraw the prompt. Used when line clears cannot
     /// bring a tall buffer paste back to an empty composer.

@@ -14,4 +14,19 @@ pub enum Error {
     /// Reading or writing the stub process failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// The pane is not a ready composer, so nothing was pasted.
+    #[error("seat is not ready for input")]
+    NotReady,
+    /// The composer after the paste was not the payload. Enter was not sent.
+    #[error("composer did not show the paste")]
+    PasteMismatch,
+    /// The transcript did not show exactly one matching new user turn.
+    #[error("transcript did not confirm the delivery")]
+    NotVerified,
+    /// The new user turn merged the paste with other text.
+    #[error("transcript turn merged the paste with other text")]
+    Contaminated,
+    /// A per-seat provider file could not be written.
+    #[error(transparent)]
+    Provider(#[from] crewmux_provider::ProviderError),
 }

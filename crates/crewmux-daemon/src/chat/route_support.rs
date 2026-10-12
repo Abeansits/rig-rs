@@ -68,6 +68,8 @@ pub(super) async fn boot() -> Harness {
                 .await,
         );
     });
+    let ready = exchange(&sock, "GET", "/healthz", None, Vec::new()).await;
+    assert_eq!(ready.status, 200, "chat harness did not accept");
     Harness {
         app,
         mux,
@@ -148,33 +150,63 @@ pub(super) async fn exchange(
     let sock = sock.to_path_buf();
     let method = method.to_owned();
     let path = path.to_owned();
+    let mut last = String::new();
+    for attempt in 0..8 {
+        match once(
+            sock.clone(),
+            method.clone(),
+            path.clone(),
+            body.clone(),
+            headers.clone(),
+        )
+        .await
+        {
+            Ok(response) => return response,
+            Err(err) if method == "GET" || transient(&err) => {
+                last = err.to_string();
+                // The accept task may not have been polled yet.
+                if attempt < 7 {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            }
+            Err(err) => panic!("http: {err}"),
+        }
+    }
+    panic!("http: {last}")
+}
+
+async fn once(
+    sock: PathBuf,
+    method: String,
+    path: String,
+    body: Option<Vec<u8>>,
+    headers: Vec<(String, String)>,
+) -> Result<crewmux_api::Response, crewmux_api::Error> {
     tokio::task::spawn_blocking(move || {
         let client = Client::over_uds(sock);
         let view: Vec<(&str, &str)> = headers
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))
             .collect();
-        let mut last = String::new();
-        for _ in 0..8 {
-            match client.request_with_headers(&method, &path, body.as_deref(), &view) {
-                Ok(response) => return response,
-                Err(err) if method == "GET" || refused(&err) => last = err.to_string(),
-                Err(err) => panic!("http: {err}"),
-            }
-        }
-        panic!("http: {last}");
+        client.request_with_headers(&method, &path, body.as_deref(), &view)
     })
     .await
     .expect("join")
 }
 
-fn refused(err: &crewmux_api::Error) -> bool {
+fn transient(err: &crewmux_api::Error) -> bool {
     let (crewmux_api::Error::Connect { source, .. } | crewmux_api::Error::Exchange { source, .. }) =
         err
     else {
         return false;
     };
-    source.kind() == std::io::ErrorKind::ConnectionRefused
+    matches!(
+        source.kind(),
+        std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::UnexpectedEof
+    )
 }
 
 pub(super) fn json(body: &str) -> Value {

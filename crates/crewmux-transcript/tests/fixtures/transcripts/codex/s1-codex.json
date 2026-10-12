@@ -1,0 +1,106 @@
+{
+  "note": "Synthetic stand-ins reconstructed as byte-exact Codex rows. The original Mac payloads are not in this repo.",
+  "runtime": "codex",
+  "rows": [
+    {
+      "sent": "codex line 0\nstill 0",
+      "stored": "codex line 0\nstill 0"
+    },
+    {
+      "sent": "codex single 1",
+      "stored": "codex single 1"
+    },
+    {
+      "sent": "codex single 2",
+      "stored": "codex single 2"
+    },
+    {
+      "sent": "keep\tthe tab",
+      "stored": "keep\tthe tab"
+    },
+    {
+      "sent": "codex single 4",
+      "stored": "codex single 4"
+    },
+    {
+      "sent": "codex line 5\nstill 5",
+      "stored": "codex line 5\nstill 5"
+    },
+    {
+      "sent": "codex single 6",
+      "stored": "codex single 6"
+    },
+    {
+      "sent": "codex single 7",
+      "stored": "codex single 7"
+    },
+    {
+      "sent": "codex single 8",
+      "stored": "codex single 8"
+    },
+    {
+      "sent": "codex single 9",
+      "stored": "codex single 9"
+    },
+    {
+      "sent": "codex line 10\nstill 10",
+      "stored": "codex line 10\nstill 10"
+    },
+    {
+      "sent": "codex single 11",
+      "stored": "codex single 11"
+    },
+    {
+      "sent": "codex single 12",
+      "stored": "codex single 12"
+    },
+    {
+      "sent": "codex single 13",
+      "stored": "codex single 13"
+    },
+    {
+      "sent": "codex single 14",
+      "stored": "codex single 14"
+    },
+    {
+      "sent": "codex line 15\nstill 15",
+      "stored": "codex line 15\nstill 15"
+    },
+    {
+      "sent": "codex single 16",
+      "stored": "codex single 16"
+    },
+    {
+      "sent": "codex single 17",
+      "stored": "codex single 17"
+    },
+    {
+      "sent": "codex single 18",
+      "stored": "codex single 18"
+    },
+    {
+      "sent": "codex single 19",
+      "stored": "codex single 19"
+    },
+    {
+      "sent": "codex line 20\nstill 20",
+      "stored": "codex line 20\nstill 20"
+    },
+    {
+      "sent": "codex single 21",
+      "stored": "codex single 21"
+    },
+    {
+      "sent": "codex single 22",
+      "stored": "codex single 22"
+    },
+    {
+      "sent": "codex single 23",
+      "stored": "codex single 23"
+    },
+    {
+      "sent": "codex single 24",
+      "stored": "codex single 24"
+    }
+  ]
+}

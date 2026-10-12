@@ -23,6 +23,7 @@ mod send_http;
 mod serve;
 mod settle;
 mod state;
+mod submit;
 mod taps;
 mod transcripts;
 mod view;
