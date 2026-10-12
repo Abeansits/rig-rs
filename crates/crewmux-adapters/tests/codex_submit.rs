@@ -4,6 +4,7 @@
 mod support;
 
 use std::fs;
+use std::io::Write;
 use std::sync::Arc;
 
 use crewmux_adapters::{AgentAdapter, ResumeToken, SubmitMode};
@@ -154,17 +155,21 @@ async fn partial_last_line_is_skipped_until_it_completes() {
         let Some((head, tail)) = line.split_at_checked(mid) else {
             return;
         };
-        fs::write(&path, {
-            let mut bytes = fs::read(&path).unwrap_or_default();
-            bytes.extend(head.as_bytes());
-            bytes
-        })
-        .expect("partial");
+        // Append only. A rewrite truncates the file, and the submit poller
+        // can observe an empty file and treat it as malformed.
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("rollout");
+        file.write_all(head.as_bytes()).expect("partial");
+        drop(file);
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-        let mut bytes = fs::read(&path).unwrap_or_default();
-        bytes.extend(tail.as_bytes());
-        bytes.push(b'\n');
-        fs::write(&path, bytes).expect("complete");
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("rollout");
+        file.write_all(tail.as_bytes()).expect("tail");
+        file.write_all(b"\n").expect("newline");
     });
     let receipt = seat
         .submit(&binding, body, SubmitMode::Enter)
