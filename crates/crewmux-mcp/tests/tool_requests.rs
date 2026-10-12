@@ -133,11 +133,29 @@ async fn agent_send_returns_daemon_json() {
     assert_eq!(sent["to"], "dev-impl@my-rig");
     assert_eq!(sent["body"], "hello");
     assert_eq!(sent["verify"], true);
-    assert_eq!(sent["from"], SEAT);
+    assert!(sent.get("from").is_none());
     assert!(sent.get("dangerously_interact").is_none());
     assert!(hits[0].headers.contains("X-Rig-Seat-Id"));
     assert!(hits[0].headers.contains(SEAT));
     assert!(hits[0].headers.contains("X-Rig-Seat-Token"));
+}
+
+#[tokio::test]
+async fn agent_send_rejects_unknown_arguments() {
+    let daemon = FakeDaemon::start(vec![script(200, r#"{"ok":true}"#)]);
+    let session = Session::start(harness::operator(daemon.path())).await;
+    let result = session
+        .call(
+            "agent_send",
+            json!({"session": "dev", "text": "hi", "nope": true}),
+        )
+        .await
+        .expect("call");
+    assert_eq!(result.is_error, Some(true));
+    let text = harness::text_of(&result);
+    assert!(text.contains("failed to deserialize parameters"), "{text}");
+    assert!(text.contains("unknown field"), "{text}");
+    assert!(daemon.hits().is_empty());
 }
 
 #[tokio::test]

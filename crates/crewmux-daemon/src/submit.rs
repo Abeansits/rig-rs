@@ -11,6 +11,9 @@ use crate::state::App;
 pub(crate) async fn submit_text(app: &App, name: &str, text: &str) -> Result<Value, Error> {
     let seat = find_seat(app, name).await?;
     let binding = binding_for(&seat)?;
+    // Claude and Codex both paste from this route. The check and the paste
+    // are not atomic; that window matches the TypeScript sender.
+    crate::lineage::ensure(app, &seat, &binding.pane).await?;
     let adapter = app
         .registry
         .get(seat.runtime)
@@ -42,9 +45,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crewmux_adapters::{AdapterRegistry, ClaudeAdapter};
+    use crewmux_adapters::{AdapterRegistry, ClaudeAdapter, CodexAdapter};
     use crewmux_core::{Rig, RigRepo, Seat, SeatRepo, SeatState, Timestamp};
-    use crewmux_mux::{Capture, FakeMux, Multiplexer};
+    use crewmux_mux::{Capture, FakeMux, Multiplexer, SessionSpec};
     use crewmux_types::{RigId, RigName, RuntimeKind, SeatId, SeatName};
     use tokio_util::sync::CancellationToken;
 
@@ -90,7 +93,28 @@ mod tests {
         std::fs::write(seat_dir.join("claude-session-id"), session).expect("id");
         let path = crewmux_transcript::transcript_path(&home, &cwd, session).expect("path");
         watch_transcript(Arc::clone(&mux), path.clone());
-        seed(&store, rig, seat, cwd.clone()).await;
+        seed(
+            &store,
+            rig,
+            seat,
+            cwd.clone(),
+            "claude",
+            RuntimeKind::ClaudeCode,
+        )
+        .await;
+        let spec = SessionSpec::new("seat__rig", cwd);
+        let pane = mux.create_session(&spec).await.expect("pane");
+        mux.set_pane_process(
+            &pane.session,
+            Some(1),
+            "claude",
+            Some(&format!("claude --session-id {session}")),
+        )
+        .await;
+        let loaded = crate::query::find_seat(&app, "claude").await.expect("seat");
+        crate::lineage::record(&app, &loaded, &pane)
+            .await
+            .expect("lineage");
         let value = submit_text(&app, "claude", "hello").await.expect("submit");
         assert_eq!(value["bytes"], 5);
         assert!(path.is_file(), "transcript was not written");
@@ -126,12 +150,58 @@ mod tests {
         });
     }
 
+    #[tokio::test]
+    async fn submit_text_refuses_codex_at_a_shell() {
+        let root =
+            std::env::temp_dir().join(format!("rig-daemon-submit-codex-{}", std::process::id()));
+        drop(std::fs::remove_dir_all(&root));
+        std::fs::create_dir_all(root.join("work")).expect("work");
+        let mux = Arc::new(FakeMux::new());
+        let shared = share(&mux);
+        let mut registry = AdapterRegistry::new();
+        registry.register(Arc::new(CodexAdapter::new(Arc::clone(&shared))));
+        let store =
+            Arc::new(crewmux_store::Store::open(std::path::Path::new(":memory:")).expect("db"));
+        let app = App::assemble(
+            Arc::clone(&store),
+            shared,
+            Arc::new(registry),
+            None,
+            CancellationToken::new(),
+            root.clone(),
+        );
+        let seat = SeatId::new();
+        let rig = RigId::new();
+        let cwd = root.join("work");
+        seed(&store, rig, seat, cwd.clone(), "codex", RuntimeKind::Codex).await;
+        let spec = SessionSpec::new("seat__rig", cwd);
+        let pane = mux.create_session(&spec).await.expect("pane");
+        mux.set_pane_process(&pane.session, Some(1), "codex", Some("codex"))
+            .await;
+        let loaded = crate::query::find_seat(&app, "codex").await.expect("seat");
+        crate::lineage::record(&app, &loaded, &pane)
+            .await
+            .expect("lineage");
+        mux.set_pane_process(&pane.session, Some(1), "bash", Some("bash"))
+            .await;
+        let before = mux.recorded().await.len();
+        let err = submit_text(&app, "codex", "hello")
+            .await
+            .expect_err("shell");
+        assert!(err.to_string().contains("lineage:bare_shell"), "{err}");
+        assert_eq!(mux.recorded().await.len(), before);
+        drop(std::fs::remove_dir_all(&root));
+    }
+
     async fn seed(
         store: &Arc<crewmux_store::Store>,
         rig: RigId,
         seat: SeatId,
         cwd: std::path::PathBuf,
+        name: &str,
+        runtime: RuntimeKind,
     ) {
+        let name = name.to_owned();
         write(store, move |db| {
             RigRepo::upsert(
                 db,
@@ -146,8 +216,8 @@ mod tests {
                 &Seat {
                     id: seat,
                     rig_id: rig,
-                    name: SeatName::new("claude").expect("seat"),
-                    runtime: RuntimeKind::ClaudeCode,
+                    name: SeatName::new(name).expect("seat"),
+                    runtime,
                     cwd: Some(cwd),
                     model: None,
                     state: SeatState::Ready,

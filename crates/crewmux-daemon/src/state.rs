@@ -241,6 +241,7 @@ impl App {
                 .spawn(crate::persist::queue_writer(self.clone(), rx));
         }
         self.tasks.spawn(crate::transcripts::run(self.clone()));
+        self.tasks.spawn(crate::health_watch::run(self.clone()));
     }
 
     /// Remember the highest receipt cursor already stored. The next id is one past it.

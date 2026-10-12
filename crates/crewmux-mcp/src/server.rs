@@ -146,7 +146,7 @@ impl RigMcp {
     /// Deliver text through `POST /api/send`.
     #[tool(
         name = "agent_send",
-        description = "Deliver text to a seat through POST /api/send. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout."
+        description = "Deliver text to a seat through POST /api/send. The sender is the seat-token headers, not a body from field. A replaced pane is refused before paste. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout."
     )]
     async fn agent_send(
         &self,

@@ -39,6 +39,9 @@ pub enum Error {
     /// A chat write or history query failed.
     #[error(transparent)]
     Chat(#[from] crewmux_core::chat::ChatError),
+    /// A health, lease, stream, or classification rule failed.
+    #[error(transparent)]
+    Health(#[from] crewmux_health::Error),
     /// The snapshot backup could not run on the maintenance connection.
     #[error("{0}")]
     Backup(String),
@@ -59,6 +62,7 @@ impl Error {
             | Self::Domain(_)
             | Self::Event(_)
             | Self::CrashHook(_)
+            | Self::Health(_)
             | Self::Backup(_) => crewmux_core::chat::ChatError::Store(rendered),
         }
     }

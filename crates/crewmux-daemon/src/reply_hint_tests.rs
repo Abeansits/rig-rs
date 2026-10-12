@@ -1,4 +1,4 @@
-//! A seat id in `from` is rewritten to `seat@rig` on the reply hint only.
+//! A seat id in `from` is rewritten to `seat@rig` on the From line and the reply hint.
 
 use crewmux_core::SeatRepo;
 use serde_json::Value;
@@ -35,14 +35,13 @@ async fn reply_hint_uses_the_seat_address() {
     };
     deliver(&app, message).await.expect("send");
     let text = screen(&app).await;
+    assert!(text.contains("From: dev-impl@dev-pair-stub"), "{text}");
+    assert!(!text.contains(&format!("From: {ulid}")), "{text}");
     assert!(
         text.contains("↩ Reply: rig send dev-impl@dev-pair-stub \"...\""),
         "{text}"
     );
-    assert!(
-        !text.contains(&format!("↩ Reply: rig send {ulid}")),
-        "{text}"
-    );
+    assert!(!text.contains(&ulid), "{text}");
     deliver(
         &app,
         Outbound {
@@ -60,6 +59,7 @@ async fn reply_hint_uses_the_seat_address() {
     .await
     .expect("operator");
     let text = screen(&app).await;
+    assert!(text.contains("From: operator@host"), "{text}");
     assert!(
         text.contains("↩ Reply: rig send operator@host \"...\""),
         "{text}"

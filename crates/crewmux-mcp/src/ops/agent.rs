@@ -2,8 +2,8 @@
 
 //! Agent tools. `agent_send` posts to `POST /api/send`.
 //!
-//! That route delivers the text. A respawned stub in the same pane still receives
-//! it, so this module does not claim a lineage check.
+//! The daemon reads the sender from the seat-token headers and runs
+//! `lineage::ensure` before paste. This module does not paste itself.
 
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
@@ -63,7 +63,6 @@ pub(crate) async fn agent_send(ctx: &Ctx, args: AgentSendArgs) -> CallToolResult
         "to": args.session,
         "body": args.text,
         "verify": args.verify.unwrap_or(false),
-        "from": ctx.caller.sender_label(),
     });
     let Ok(bytes) = json_body(&body) else {
         return local_error(&json!({"error": "could not encode agent_send"}));

@@ -169,8 +169,19 @@ pub struct PaneInfo {
     ///
     /// `None` when tmux omits `#{pane_pid}` for a dead remain-on-exit pane.
     pub pid: Option<u32>,
+    /// Process start token when this multiplexer already knows it.
+    ///
+    /// Real tmux does not report start time. `None` means the caller reads
+    /// the operating system. A fake pane sets a stable token so tests do not
+    /// depend on `/proc`.
+    pub started_ticks: Option<u64>,
     /// Foreground command name.
     pub current_cmd: String,
+    /// Full argv when this multiplexer recorded the launch command.
+    ///
+    /// tmux `list-panes` does not include argv, so a real pane leaves this
+    /// empty and the caller reads `/proc/<pid>/cmdline`.
+    pub argv: Option<String>,
     /// `pane_dead`.
     pub dead: bool,
     /// `pane_dead_status`, when tmux reported one.

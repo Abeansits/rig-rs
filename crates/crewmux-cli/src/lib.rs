@@ -12,6 +12,7 @@ mod doctor_facts;
 mod doctor_fixture;
 mod doctor_live;
 mod error;
+mod health_cmd;
 mod herdr_probe;
 pub mod output;
 mod paths;
@@ -137,6 +138,12 @@ enum Commands {
     Whoami,
     /// Per-rig chatroom: send, history, watch, topic, and clear.
     Chatroom(chatroom::ChatroomArgs),
+    /// Health findings.
+    Health(health_cmd::HealthArgs),
+    /// Operator stream and the classifier lease.
+    Stream(health_cmd::StreamArgs),
+    /// Context usage samples.
+    Usage(health_cmd::UsageArgs),
     /// Capture or inspect a rig snapshot.
     Snapshot(slice8::SnapshotArgs),
     /// Relaunch a rig and reconcile in-flight deliveries.
@@ -189,6 +196,9 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Unclaim(args) => slice4::unclaim(&args),
         Commands::Whoami => slice4::whoami(),
         Commands::Chatroom(args) => chatroom::run(&args),
+        Commands::Health(args) => health_cmd::health(&args),
+        Commands::Stream(args) => health_cmd::stream(&args),
+        Commands::Usage(args) => health_cmd::usage(&args),
         Commands::Snapshot(args) => slice8::snapshot(&args),
         Commands::Restore(args) => slice8::restore(&args),
         Commands::RestoreCheck(args) => slice8::restore_check(&args),

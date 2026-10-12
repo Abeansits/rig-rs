@@ -5,6 +5,7 @@
       "inputSchema": {
         "$defs": {
           "EdgeArg": {
+            "additionalProperties": false,
             "description": "One pod-local edge on `agent_add`.",
             "properties": {
               "from": {
@@ -29,6 +30,7 @@
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "edges": {
             "description": "Optional pod-local edges.",
@@ -72,6 +74,7 @@
       "description": "List seats for rigId. Resolves the id or name with GET /api/rigs/summary, then returns that rig's seats from GET /api/seats.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "rigId": {
             "description": "Rig id or name. Resolved through `GET /api/rigs/summary`, then filtered in `GET /api/seats`.",
@@ -89,6 +92,7 @@
       "description": "Read one seat's live screen through POST /api/seats/capture. rig and pod are refused.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "lines": {
             "description": "Capture line budget. Omitted uses the daemon default.",
@@ -129,9 +133,10 @@
       "name": "agent_read_screen"
     },
     {
-      "description": "Deliver text to a seat through POST /api/send. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout.",
+      "description": "Deliver text to a seat through POST /api/send. The sender is the seat-token headers, not a body from field. A replaced pane is refused before paste. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "force": {
             "description": "Accepted only so `force` plus `waitForIdleSeconds` can be rejected locally.",
@@ -176,6 +181,7 @@
       "description": "Resolve rigName via GET /api/rigs/summary, then GET /api/rigs/{id}/chat/history?limit=20. Two daemon calls. This is history, not a stream.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "rigName": {
             "description": "Rig name resolved through `GET /api/rigs/summary`.",
@@ -193,6 +199,7 @@
       "description": "Resolve rigName via GET /api/rigs/summary, then POST /api/rigs/{id}/chat/send. Optional sender is accepted and not forwarded. Seat headers are forwarded when this process is a seat.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "body": {
             "description": "Message body.",
@@ -223,6 +230,7 @@
       "description": "GET /healthz and return that body. It has status and pid, and no version field. When the socket is down, returns {\"running\": false} and does not start the daemon.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "type": "object"
       },
       "name": "daemon_health"
@@ -231,6 +239,7 @@
       "description": "List rigs from GET /api/rigs/summary.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "type": "object"
       },
       "name": "rig_list"
@@ -239,6 +248,7 @@
       "description": "Post the YAML file at sourceRef to POST /api/rigs/up. plan, autoApprove, and targetRoot are refused when set to change bring-up. A file that is not a rig spec is rejected without quoting its contents.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "autoApprove": {
             "description": "`true` is refused. The daemon bring-up has no auto-approve flag.",
@@ -277,6 +287,7 @@
       "description": "Stop one rig via POST /api/rigs/down with {\"rig\": rigId}. snapshot true creates a snapshot first and does not stop if that fails. delete and force are refused.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "delete": {
             "description": "`true` is refused. The daemon `down` route does not delete the rig record.",
@@ -315,6 +326,7 @@
       "description": "Create a snapshot via POST /api/snapshot/create with {\"rig\": rigId}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "rigId": {
             "description": "Rig id sent as `{\"rig\": ...}`.",
@@ -332,6 +344,7 @@
       "description": "List snapshots via POST /api/snapshot/list with {\"rig\": rigId}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "rigId": {
             "description": "Rig id sent as `{\"rig\": ...}`.",
@@ -349,6 +362,7 @@
       "description": "Restore via POST /api/restore with {\"rig\": rigId, \"snapshot\": snapshotId}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "rigId": {
             "description": "Rig id sent as `{\"rig\": ...}`.",
@@ -371,6 +385,7 @@
       "description": "Check that agent YAML is a mapping with a non-empty name. This is not a full AgentSpec schema. No daemon call. Result is {valid, errors}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "yaml": {
             "description": "YAML text.",
@@ -388,6 +403,7 @@
       "description": "Validate RigSpec YAML locally with crewmux-spec. No daemon call. Result is {valid, errors}.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
         "properties": {
           "yaml": {
             "description": "YAML text.",

@@ -31,15 +31,6 @@ impl Caller {
         caller_from_pair(id.as_deref(), token.as_deref())
     }
 
-    /// Seat id text for `from`, or `operator`.
-    #[must_use]
-    pub fn sender_label(&self) -> String {
-        match self {
-            Self::Seat { id, .. } => id.to_string(),
-            Self::Operator => "operator".to_owned(),
-        }
-    }
-
     /// `X-Rig-Seat-Id` and `X-Rig-Seat-Token` when this is a seat.
     #[must_use]
     pub fn headers(&self) -> Vec<(String, String)> {

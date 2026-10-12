@@ -6,11 +6,12 @@ use serde_json::Value;
 
 /// No arguments.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct NoArgs {}
 
 /// `rig_start`. `sourceRef` is required. Flags that would change bring-up are refused.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RigStartArgs {
     /// Path to a rig spec YAML file.
     #[serde(rename = "sourceRef")]
@@ -27,6 +28,7 @@ pub(crate) struct RigStartArgs {
 
 /// `rig_stop`. `snapshot` creates a snapshot before stop. `delete` and `force` are refused.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RigStopArgs {
     /// Rig id or name the daemon `down` route understands.
     #[serde(rename = "rigId")]
@@ -41,6 +43,7 @@ pub(crate) struct RigStopArgs {
 
 /// `agent_read_screen`. One seat. `rig` and `pod` are refused.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ReadScreenArgs {
     /// Seat or session name. Required unless `rig` or `pod` is set, and those are refused.
     #[serde(default)]
@@ -57,6 +60,7 @@ pub(crate) struct ReadScreenArgs {
 
 /// `agent_list`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AgentListArgs {
     /// Rig id or name. Resolved through `GET /api/rigs/summary`, then filtered in `GET /api/seats`.
     #[serde(rename = "rigId")]
@@ -65,6 +69,7 @@ pub(crate) struct AgentListArgs {
 
 /// `agent_send`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AgentSendArgs {
     /// Target session name.
     pub session: String,
@@ -81,6 +86,7 @@ pub(crate) struct AgentSendArgs {
 
 /// One pod-local edge on `agent_add`.
 #[derive(Debug, Deserialize, JsonSchema, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct EdgeArg {
     /// Source member id.
     pub from: String,
@@ -92,6 +98,7 @@ pub(crate) struct EdgeArg {
 
 /// `agent_add`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AgentAddArgs {
     /// Rig id, percent-encoded into the path.
     #[serde(rename = "rigId")]
@@ -110,6 +117,7 @@ pub(crate) struct AgentAddArgs {
 
 /// `chat_send`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ChatSendArgs {
     /// Rig name resolved through `GET /api/rigs/summary`.
     #[serde(rename = "rigName")]
@@ -123,6 +131,7 @@ pub(crate) struct ChatSendArgs {
 
 /// `chat_read`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ChatReadArgs {
     /// Rig name resolved through `GET /api/rigs/summary`.
     #[serde(rename = "rigName")]
@@ -131,6 +140,7 @@ pub(crate) struct ChatReadArgs {
 
 /// Snapshot create or list.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SnapshotRigArgs {
     /// Rig id sent as `{"rig": ...}`.
     #[serde(rename = "rigId")]
@@ -139,6 +149,7 @@ pub(crate) struct SnapshotRigArgs {
 
 /// `snapshot_restore`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SnapshotRestoreArgs {
     /// Rig id sent as `{"rig": ...}`.
     #[serde(rename = "rigId")]
@@ -150,6 +161,7 @@ pub(crate) struct SnapshotRestoreArgs {
 
 /// `spec_validate_rig` and `spec_validate_agent`.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct YamlArgs {
     /// YAML text.
     pub yaml: String,

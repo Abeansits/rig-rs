@@ -5,6 +5,7 @@ use crewmux_api::{
     AskSeat, BroadcastSend, Endpoint, QueueClaim, QueueCollection, QueueHandoff, QueueShow,
     SendMessage, UnclaimItem, Whoami,
 };
+use crewmux_types::{SEAT_ID_ENV, SEAT_ID_HEADER, SEAT_TOKEN_ENV, SEAT_TOKEN_HEADER};
 use serde_json::{Value, json};
 
 use crate::autostart::ensure_daemon;
@@ -81,7 +82,7 @@ pub(crate) struct SendArgs {
     pub to: Option<String>,
     /// Message body. Also accepted as a positional when `--to` is set.
     pub body: Option<String>,
-    /// Sender session. Defaults to `operator@host`.
+    /// Ignored. The daemon derives the sender from the seat token.
     #[arg(long)]
     pub from: Option<String>,
     /// Every seat in this rig.
@@ -109,7 +110,7 @@ pub(crate) struct BroadcastArgs {
     /// Limit to one rig.
     #[arg(long)]
     pub rig: Option<String>,
-    /// Sender session.
+    /// Ignored. The daemon derives the sender from the seat token.
     #[arg(long)]
     pub from: Option<String>,
     /// Print the daemon JSON.
@@ -185,6 +186,7 @@ pub(crate) fn queue(args: &QueueArgs) -> Result<i32, Error> {
 }
 
 pub(crate) fn send(args: &SendArgs) -> Result<i32, Error> {
+    let _ = args.from.as_deref();
     let body = args
         .body
         .clone()
@@ -192,13 +194,12 @@ pub(crate) fn send(args: &SendArgs) -> Result<i32, Error> {
     let payload = json!({
         "to": args.to,
         "body": body,
-        "from": args.from,
         "rig": args.rig,
         "dangerously_interact": args.dangerously_interact,
         "reason": args.reason,
         "verify": args.verify,
     });
-    call(
+    call_seated(
         SendMessage::METHOD,
         SendMessage::PATH,
         Some(&payload),
@@ -207,8 +208,9 @@ pub(crate) fn send(args: &SendArgs) -> Result<i32, Error> {
 }
 
 pub(crate) fn broadcast(args: &BroadcastArgs) -> Result<i32, Error> {
-    let payload = json!({"body": args.body, "rig": args.rig, "from": args.from, "all": true});
-    call(
+    let _ = args.from.as_deref();
+    let payload = json!({"body": args.body, "rig": args.rig, "all": true});
+    call_seated(
         BroadcastSend::METHOD,
         BroadcastSend::PATH,
         Some(&payload),
@@ -270,13 +272,43 @@ pub(crate) fn whoami() -> Result<i32, Error> {
 }
 
 fn call(method: &str, path: &str, body: Option<&Value>, json: bool) -> Result<i32, Error> {
+    call_with(method, path, body, json, &[])
+}
+
+fn call_seated(method: &str, path: &str, body: Option<&Value>, json: bool) -> Result<i32, Error> {
+    let headers = seat_headers();
+    let view: Vec<(&str, &str)> = headers
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect();
+    call_with(method, path, body, json, &view)
+}
+
+fn seat_headers() -> Vec<(&'static str, String)> {
+    let id = std::env::var(SEAT_ID_ENV).ok();
+    let token = std::env::var(SEAT_TOKEN_ENV).ok();
+    match (id, token) {
+        (None, None) => Vec::new(),
+        (Some(id), Some(token)) => vec![(SEAT_ID_HEADER, id), (SEAT_TOKEN_HEADER, token)],
+        (Some(id), None) => vec![(SEAT_ID_HEADER, id), (SEAT_TOKEN_HEADER, String::new())],
+        (None, Some(token)) => vec![(SEAT_ID_HEADER, String::new()), (SEAT_TOKEN_HEADER, token)],
+    }
+}
+
+fn call_with(
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    json: bool,
+    headers: &[(&str, &str)],
+) -> Result<i32, Error> {
     let client = ensure_daemon()?;
     let bytes = match body {
         Some(value) => Some(serde_json::to_vec(value).map_err(|err| Error::Json(err.to_string()))?),
         None => None,
     };
     let response = client
-        .request(method, path, bytes.as_deref())
+        .request_with_headers(method, path, bytes.as_deref(), headers)
         .map_err(|err| Error::Unreachable(err.to_string()))?;
     if response.status != 200 {
         return failed_http(response.status, &response.body, json);

@@ -1,0 +1,1 @@
+/tmp/claude-pin/package/bin/claude.exe
