@@ -99,7 +99,21 @@ fn ensure_rs(bin: &Path, home: &HermeticHome) -> Result<(), Error> {
     let mut child = command
         .spawn()
         .map_err(|source| io_err("spawn rig daemon run", source))?;
+    // macOS has no `/proc`, and SIP hides another process's environment, so
+    // the pid scan below cannot see this child. The file is what `finish`
+    // kills. The command line is checked again so a recycled pid is left alone.
+    remember_pid(&rig_home, child.id())?;
     wait_health(&socket, &mut child, &err_path)
+}
+
+fn remember_pid(rig_home: &Path, pid: u32) -> Result<(), Error> {
+    let path = rig_home.join("run/harness.pid");
+    std::fs::write(path, pid.to_string()).map_err(|source| io_err("record daemon pid", source))
+}
+
+fn spawned_pid(rig_home: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(rig_home.join("run/harness.pid")).ok()?;
+    text.trim().parse().ok()
 }
 
 fn ensure_ts(node: &Path, pkg: &Path, port: u16, home: &HermeticHome) -> Result<(), Error> {
@@ -210,9 +224,24 @@ fn signal(pid: u32, name: &str) {
     );
 }
 
-/// Process ids of `rig daemon run` whose environment names this `RIG_HOME`.
+/// Process ids of `rig daemon run` for this `RIG_HOME`.
+///
+/// Linux matches `/proc/<pid>/environ`. That directory is absent on macOS, so
+/// a daemon this harness spawned is also taken from `run/harness.pid` while
+/// `ps` still shows `daemon run`.
 #[must_use]
 pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
+    let mut pids = pids_from_proc(rig_home);
+    if let Some(pid) = spawned_pid(rig_home)
+        && !pids.contains(&pid)
+        && command_line(pid).is_some_and(|cmd| is_daemon_run(&cmd))
+    {
+        pids.push(pid);
+    }
+    pids
+}
+
+fn pids_from_proc(rig_home: &Path) -> Vec<u32> {
     let home = rig_home.display().to_string();
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
@@ -239,6 +268,47 @@ pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
         }
     }
     pids
+}
+
+fn command_line(pid: u32) -> Option<Vec<u8>> {
+    let dir = PathBuf::from(format!("/proc/{pid}"));
+    if dir.is_dir() {
+        let bytes = std::fs::read(dir.join("cmdline")).unwrap_or_default();
+        if bytes.is_empty() { None } else { Some(bytes) }
+    } else {
+        ps_command_line(pid)
+    }
+}
+
+fn ps_command_line(pid: u32) -> Option<Vec<u8>> {
+    let pid_text = pid.to_string();
+    let mut command = Command::new("ps");
+    command
+        .args(["-ww", "-p", &pid_text, "-o", "args="])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let child = command.spawn().ok()?;
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    cmdline_from_ps_text(&text)
+}
+
+/// `ps -o args=` is space-separated. A zombie is `<defunct>` and is not a daemon.
+fn cmdline_from_ps_text(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim();
+    if text.is_empty() || text.contains("<defunct>") {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    for arg in text.split_whitespace() {
+        bytes.extend_from_slice(arg.as_bytes());
+        bytes.push(0);
+    }
+    if bytes.is_empty() { None } else { Some(bytes) }
 }
 
 fn is_daemon_run(cmdline: &[u8]) -> bool {
@@ -286,7 +356,7 @@ pub(crate) fn free_port() -> Result<u16, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{env_eq, is_daemon_run};
+    use super::{cmdline_from_ps_text, env_eq, is_daemon_run};
 
     #[test]
     fn daemon_match_is_the_exact_home_and_argv() {
@@ -304,5 +374,18 @@ mod tests {
         assert!(!env_eq(env, "RIG_HOME", "/tmp"));
         assert!(!env_eq(env, "RIG_HOME", "/tmp/scratch-other"));
         assert!(!env_eq(env, "HOME", "/tmp/scratch/nested"));
+    }
+
+    #[test]
+    fn ps_text_matches_a_shebang_daemon_and_skips_a_zombie() {
+        let cmd = cmdline_from_ps_text("python3 /var/folders/xx/rig daemon run\n");
+        assert!(cmd.as_deref().is_some_and(is_daemon_run));
+        let env_shebang =
+            cmdline_from_ps_text("/usr/bin/env python3 /tmp/rigrs-bin/rig daemon run");
+        assert!(env_shebang.as_deref().is_some_and(is_daemon_run));
+        assert!(cmdline_from_ps_text("  <defunct>  ").is_none());
+        assert!(cmdline_from_ps_text("").is_none());
+        let status = cmdline_from_ps_text("python3 /tmp/rig daemon status");
+        assert!(status.is_some_and(|cmd| !is_daemon_run(&cmd)));
     }
 }
