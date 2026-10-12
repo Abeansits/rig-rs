@@ -112,19 +112,58 @@ impl Store {
         {
             std::fs::create_dir_all(parent)?;
         }
-        let src = Connection::open(&self.path)?;
-        src.busy_timeout(Duration::from_millis(5000))?;
-        let mut destination = Connection::open(dest)?;
-        let backup = rusqlite::backup::Backup::new(&src, &mut destination)
-            .map_err(|err| Error::Backup(format!("maintenance backup: {err}")))?;
-        loop {
-            match backup.step(1) {
-                Ok(rusqlite::backup::StepResult::Done) => break,
-                Ok(_) => between(),
-                Err(err) => return Err(Error::Backup(format!("maintenance backup: {err}"))),
-            }
+        let tmp = temp_beside(dest)?;
+        let copied = copy_backup(&self.path, &tmp, &mut between);
+        if let Err(err) = copied {
+            drop(std::fs::remove_file(&tmp));
+            return Err(err);
+        }
+        if let Err(err) = Self::integrity_check(&tmp) {
+            drop(std::fs::remove_file(&tmp));
+            return Err(err);
+        }
+        sync_file(&tmp)?;
+        std::fs::rename(&tmp, dest)?;
+        if let Some(parent) = dest.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            sync_dir(parent)?;
         }
         Ok(())
+    }
+
+    /// `PRAGMA integrity_check`. Anything other than `ok` is refused.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Backup`] when the file is unreadable or the check fails.
+    pub fn integrity_check(path: &Path) -> Result<(), Error> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|err| Error::Backup(format!("integrity_check: {err}")))?;
+        let mut stmt = conn
+            .prepare("PRAGMA integrity_check")
+            .map_err(|err| Error::Backup(format!("integrity_check: {err}")))?;
+        let mut rows = stmt
+            .query([])
+            .map_err(|err| Error::Backup(format!("integrity_check: {err}")))?;
+        let mut saw_ok = false;
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| Error::Backup(format!("integrity_check: {err}")))?
+        {
+            let text: String = row
+                .get(0)
+                .map_err(|err| Error::Backup(format!("integrity_check: {err}")))?;
+            if text != "ok" {
+                return Err(Error::Backup(format!("integrity_check: {text}")));
+            }
+            saw_ok = true;
+        }
+        if saw_ok {
+            Ok(())
+        } else {
+            Err(Error::Backup("integrity_check returned no rows".to_owned()))
+        }
     }
 
     /// `PRAGMA user_version` of a database file, without migrating it.
@@ -212,5 +251,59 @@ fn private_db_files(path: &Path) -> Result<(), Error> {
             Err(err) => return Err(err.into()),
         }
     }
+    Ok(())
+}
+
+fn copy_backup(src_path: &Path, dest: &Path, between: &mut impl FnMut()) -> Result<(), Error> {
+    let src = Connection::open(src_path)?;
+    src.busy_timeout(Duration::from_millis(5000))?;
+    let mut destination = Connection::open(dest)?;
+    let backup = rusqlite::backup::Backup::new(&src, &mut destination)
+        .map_err(|err| Error::Backup(format!("maintenance backup: {err}")))?;
+    let mut retries = 0u32;
+    loop {
+        match backup.step(1) {
+            Ok(rusqlite::backup::StepResult::Done) => return Ok(()),
+            Ok(_) => {
+                retries = 0;
+                between();
+            }
+            Err(err) if sqlite_busy(&err) && retries < 20 => {
+                retries = retries.saturating_add(1);
+                std::thread::park_timeout(Duration::from_millis(25));
+            }
+            Err(err) => return Err(Error::Backup(format!("maintenance backup: {err}"))),
+        }
+    }
+}
+
+fn sqlite_busy(err: &rusqlite::Error) -> bool {
+    let rusqlite::Error::SqliteFailure(code, _) = err else {
+        return false;
+    };
+    matches!(
+        code.code,
+        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+    )
+}
+
+fn temp_beside(dest: &Path) -> Result<std::path::PathBuf, Error> {
+    let Some(name) = dest.file_name().and_then(|name| name.to_str()) else {
+        return Err(Error::Backup("snapshot path has no file name".to_owned()));
+    };
+    let mut tmp = dest.to_path_buf();
+    tmp.set_file_name(format!(".{name}.tmp"));
+    Ok(tmp)
+}
+
+fn sync_file(path: &Path) -> Result<(), Error> {
+    let file = std::fs::File::open(path)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn sync_dir(path: &Path) -> Result<(), Error> {
+    let dir = std::fs::File::open(path)?;
+    dir.sync_all()?;
     Ok(())
 }

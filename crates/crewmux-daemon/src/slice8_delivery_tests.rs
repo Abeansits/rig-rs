@@ -6,6 +6,7 @@ use std::sync::Arc;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
+use crewmux_core::{RigRepo, SeatRepo};
 use crewmux_types::LaunchPosture;
 use crewmux_types::QItemId;
 use serde_json::Value;
@@ -16,6 +17,76 @@ use crate::slice8_harness::{
 use crate::state::App;
 
 const SECRET: &str = "obligation-secret-xyz";
+
+#[tokio::test]
+async fn failed_resend_stays_unacked() {
+    let rig = rig().await;
+    up(&rig.app, &spec("solo", &[("alpha", "/tmp")])).await;
+    rig.app.set_direct_phase(Some("before")).await;
+    let sent = send(&rig.app, "alpha@solo", "lost-body").await;
+    assert_eq!(sent.get("status").and_then(Value::as_str), Some("ok"));
+    kill_sessions(&rig.app).await;
+    break_cwd(&rig.app, "solo").await;
+    let first = restore(&rig.app, "solo", LaunchPosture::Auto).await;
+    assert!(plan_has(&first, "re_send"), "{first}");
+    assert!(!plan_has(&first, "ack"), "{first}");
+    let text = screens(&rig.app).await;
+    assert!(!text.contains("lost-body"), "{text}");
+    let second = restore(&rig.app, "solo", LaunchPosture::Auto).await;
+    assert!(plan_has(&second, "re_send"), "{second}");
+    assert!(!plan_has(&second, "ack"), "{second}");
+    let text = screens(&rig.app).await;
+    assert!(!text.contains("lost-body"), "{text}");
+}
+
+#[tokio::test]
+async fn startup_file_is_recorded_on_the_startup_channel() {
+    let rig = rig().await;
+    let dir = rig.home.join("startup");
+    std::fs::create_dir_all(&dir).expect("startup dir");
+    std::fs::write(dir.join("alpha.txt"), "boot-line\n").expect("startup");
+    up(&rig.app, &spec("solo", &[("alpha", "/tmp")])).await;
+    let rows = direct_rows(&rig.app, "solo").await;
+    assert!(
+        rows.iter()
+            .any(|row| row.channel == "startup" && row.body == "boot-line"),
+        "{rows:?}"
+    );
+}
+
+fn plan_has(body: &Value, kind: &str) -> bool {
+    body.get("reconcile")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| rows.iter().any(|row| row.get(kind).is_some()))
+}
+
+async fn break_cwd(app: &App, name: &str) {
+    let name = crewmux_types::RigName::new(name).expect("name");
+    crate::db::write(&app.store, move |conn| {
+        let rig = conn
+            .get_by_name(&name)?
+            .ok_or_else(|| crewmux_core::Error::RigNotFound(name.to_string()))?;
+        for mut seat in conn.list_by_rig(&rig.id)? {
+            seat.cwd = Some(std::path::PathBuf::from("/no/such/rig-slice8-cwd"));
+            SeatRepo::upsert(conn, &seat)?;
+        }
+        Ok(())
+    })
+    .await
+    .expect("cwd");
+}
+
+async fn direct_rows(app: &App, name: &str) -> Vec<crewmux_store::DirectRow> {
+    let (rig_id, _) = crate::snapshot::load_rig(app, name).await.expect("rig");
+    let id = rig_id.to_string();
+    let store = Arc::clone(&app.store);
+    tokio::task::spawn_blocking(move || {
+        store.read(move |conn| crewmux_store::list_direct(conn, &id))
+    })
+    .await
+    .expect("join")
+    .expect("rows")
+}
 
 #[tokio::test]
 async fn direct_crash_histogram_is_one_each() {
@@ -70,7 +141,14 @@ async fn direct_crash_histogram_is_one_each() {
         let count = count_body(&rig.home, &body);
         *hist.entry(count).or_insert(0u32) += 1;
     }
-    assert_eq!(hist.get(&1).copied(), Some(18), "{hist:?}");
+    let missing: Vec<_> = (0..18)
+        .filter(|index| count_body(&rig.home, &format!("m{index:02}")) == 0)
+        .collect();
+    assert_eq!(
+        hist.get(&1).copied(),
+        Some(18),
+        "{hist:?} missing {missing:?}"
+    );
 }
 
 #[tokio::test]
@@ -186,14 +264,26 @@ struct ItemView {
 }
 
 fn count_body(home: &std::path::Path, body: &str) -> usize {
-    let dir = home.join("transcripts").join("stub");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    let root = home.join("transcripts");
+    let Ok(seats) = std::fs::read_dir(&root) else {
         return 0;
     };
     let mut count = 0usize;
-    for entry in entries.flatten() {
-        let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
-        count += text.matches(body).count();
+    for seat in seats.flatten() {
+        let Ok(files) = std::fs::read_dir(seat.path()) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let plain = file
+                .path()
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"));
+            if !plain {
+                continue;
+            }
+            let contents = std::fs::read_to_string(file.path()).unwrap_or_default();
+            count += contents.matches(body).count();
+        }
     }
     count
 }

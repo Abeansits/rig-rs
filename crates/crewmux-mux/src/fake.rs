@@ -400,6 +400,21 @@ impl Multiplexer for FakeMux {
         if keys.iter().any(|key| matches!(key, Key::CtrlU)) && guard.replay.is_empty() {
             clear_composer(&mut guard, pane);
         }
+        if guard.script_stubs && keys.iter().any(|key| matches!(key, Key::Enter)) {
+            let session = canonical_session_name(&pane.session);
+            if let Some(screen) = guard.screens.get(&session).cloned() {
+                let mut text = screen.text;
+                if !text.ends_with("stub> \n") {
+                    if !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    text.push_str("stub> \n");
+                }
+                let next = Capture::new(text, (0, 0));
+                guard.capture = next.clone();
+                guard.screens.insert(session, next);
+            }
+        }
         if guard.replay.len() > 1 {
             guard.replay.pop_front();
         }
@@ -432,6 +447,15 @@ impl Multiplexer for FakeMux {
             }
         }
         self.own_write.send_replace(Some(Instant::now()));
+        if let Some(id) = pane.pane_id.as_deref() {
+            if text.ends_with('\n') {
+                self.inject_output(id, text).await;
+            } else {
+                let mut owned = text.to_owned();
+                owned.push('\n');
+                self.inject_output(id, &owned).await;
+            }
+        }
         Ok(receipt)
     }
 

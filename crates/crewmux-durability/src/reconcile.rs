@@ -111,15 +111,7 @@ pub fn plan_reconcile(
             .cmp(&right.delivered_at)
             .then_with(|| left.id.as_str().cmp(right.id.as_str()))
     });
-    let mut index = 0;
-    while index < pending.len() {
-        let end = group_end(&pending, index);
-        let Some(group) = pending.get(index..end) else {
-            break;
-        };
-        actions.extend(plan_group(group, probe)?);
-        index = end;
-    }
+    actions.extend(plan_pending(&pending, probe)?);
     Ok(actions)
 }
 
@@ -138,56 +130,115 @@ struct Pending {
     cursor: Option<u64>,
 }
 
-fn group_end(pending: &[Pending], start: usize) -> usize {
-    let Some(first) = pending.get(start) else {
-        return start;
-    };
-    let mut end = start.saturating_add(1);
-    while pending
-        .get(end)
-        .is_some_and(|item| item.seat == first.seat && item.fingerprint == first.fingerprint)
-    {
-        end = end.saturating_add(1);
+fn plan_pending(
+    pending: &[Pending],
+    probe: &dyn TranscriptProbe,
+) -> Result<Vec<ReconcileAction>, Error> {
+    let mut actions = Vec::new();
+    for group in buckets(pending) {
+        actions.extend(plan_bucket(&group, probe)?);
     }
-    end
+    Ok(actions)
 }
 
-fn plan_group(
-    group: &[Pending],
+/// Every pending row with this seat and fingerprint, including ones a different
+/// body sat between. Adjacent-only grouping acks both copies of X in X, Y, X.
+fn buckets(pending: &[Pending]) -> Vec<Vec<&Pending>> {
+    let mut keys = Vec::new();
+    let mut groups: Vec<Vec<&Pending>> = Vec::new();
+    for item in pending {
+        let found =
+            keys.iter()
+                .position(|(seat, fingerprint): &(crewmux_types::SeatId, String)| {
+                    *seat == item.seat && fingerprint == &item.fingerprint
+                });
+        if let Some(index) = found {
+            if let Some(group) = groups.get_mut(index) {
+                group.push(item);
+            }
+            continue;
+        }
+        keys.push((item.seat, item.fingerprint.clone()));
+        groups.push(vec![item]);
+    }
+    groups
+}
+
+fn plan_bucket(
+    group: &[&Pending],
     probe: &dyn TranscriptProbe,
 ) -> Result<Vec<ReconcileAction>, Error> {
     let Some(first) = group.first() else {
         return Ok(Vec::new());
     };
-    let cursor = group.iter().filter_map(|item| item.cursor).min();
-    let after = cursor.map(TranscriptCursor);
+    let floor = group_floor(group);
     let turns = probe
-        .user_turns_after(&first.seat, after)
+        .user_turns_after(&first.seat, Some(TranscriptCursor(floor)))
         .map_err(|err| Error::Probe(err.to_string()))?;
-    let runtime = probe.runtime(&first.seat);
-    let mut equal = 0usize;
-    let mut composite = false;
-    for turn in &turns {
-        match relate(runtime, &first.body, &turn.text) {
-            TurnMatch::Equal => equal = equal.saturating_add(1),
-            TurnMatch::Composite => composite = true,
-            TurnMatch::Different => {}
-        }
-    }
+    let classified = classify(probe.runtime(&first.seat), &first.body, &turns);
+    let mut used = vec![false; classified.len()];
     let mut actions = Vec::new();
-    for (index, item) in group.iter().enumerate() {
-        if index < equal {
-            actions.push(ReconcileAction::Ack(item.id.clone()));
-        } else if composite {
-            actions.push(ReconcileAction::Escalate(
-                item.id.clone(),
-                "contaminated user turn".to_owned(),
-            ));
-        } else {
-            actions.push(ReconcileAction::ReSend(item.id.clone()));
-        }
+    for item in group {
+        actions.push(action_for(item, &classified, &mut used));
     }
     Ok(actions)
+}
+
+fn group_floor(group: &[&Pending]) -> u64 {
+    if group.iter().any(|item| item.cursor.is_none()) {
+        return 0;
+    }
+    group
+        .iter()
+        .filter_map(|item| item.cursor)
+        .min()
+        .unwrap_or(0)
+}
+
+fn classify(
+    runtime: crewmux_types::RuntimeKind,
+    body: &str,
+    turns: &[crewmux_transcript::UserTurn],
+) -> Vec<(u64, TurnMatch)> {
+    let mut classified = Vec::new();
+    for turn in turns {
+        let kind = relate(runtime, body, &turn.text);
+        if kind != TurnMatch::Different {
+            classified.push((turn.at.0, kind));
+        }
+    }
+    classified
+}
+
+fn action_for(item: &Pending, turns: &[(u64, TurnMatch)], used: &mut [bool]) -> ReconcileAction {
+    let floor = item.cursor.unwrap_or(0);
+    if take_equal(turns, used, floor) {
+        return ReconcileAction::Ack(item.id.clone());
+    }
+    if turns
+        .iter()
+        .any(|(at, kind)| *at >= floor && *kind == TurnMatch::Composite)
+    {
+        return ReconcileAction::Escalate(item.id.clone(), "contaminated user turn".to_owned());
+    }
+    ReconcileAction::ReSend(item.id.clone())
+}
+
+fn take_equal(turns: &[(u64, TurnMatch)], used: &mut [bool], floor: u64) -> bool {
+    for (index, (at, kind)) in turns.iter().enumerate() {
+        if *at < floor || *kind != TurnMatch::Equal {
+            continue;
+        }
+        let Some(slot) = used.get_mut(index) else {
+            continue;
+        };
+        if *slot {
+            continue;
+        }
+        *slot = true;
+        return true;
+    }
+    false
 }
 
 fn relate(runtime: crewmux_types::RuntimeKind, body: &str, turn: &str) -> TurnMatch {
@@ -414,5 +465,73 @@ mod tests {
         )
         .expect("plan");
         assert!(matches!(actions.first(), Some(ReconcileAction::ReSend(_))));
+    }
+
+    #[test]
+    fn interleaved_copies_are_counted_once_per_occurrence() {
+        let seat = SeatId::new();
+        let probe = MapProbe {
+            seat,
+            turns: vec![turn("X", 5)],
+            runtime: RuntimeKind::Stub,
+        };
+        let actions = plan_reconcile(
+            &[
+                direct("x1", seat, "X", Some(1), Some(0)),
+                direct("y1", seat, "Y", Some(2), Some(0)),
+                direct("x2", seat, "X", Some(3), Some(0)),
+            ],
+            &probe,
+        )
+        .expect("plan");
+        let ack = actions.iter().filter(|action| match action {
+            ReconcileAction::Ack(id) => id.as_str() == "x1",
+            ReconcileAction::ReSend(_)
+            | ReconcileAction::ReNudge(_)
+            | ReconcileAction::Escalate(_, _) => false,
+        });
+        assert_eq!(ack.count(), 1, "{actions:?}");
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            ReconcileAction::ReSend(id) if id.as_str() == "x2"
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            ReconcileAction::ReSend(id) if id.as_str() == "y1"
+        )));
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(action, ReconcileAction::Ack(_)))
+                .count(),
+            1,
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn each_row_consumes_a_turn_after_its_own_cursor() {
+        let seat = SeatId::new();
+        let probe = MapProbe {
+            seat,
+            turns: vec![turn("X", 50)],
+            runtime: RuntimeKind::Stub,
+        };
+        let actions = plan_reconcile(
+            &[
+                direct("late", seat, "X", Some(1), Some(100)),
+                direct("early", seat, "X", Some(2), Some(0)),
+            ],
+            &probe,
+        )
+        .expect("plan");
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            ReconcileAction::ReSend(id) if id.as_str() == "late"
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            ReconcileAction::Ack(id) if id.as_str() == "early"
+        )));
     }
 }

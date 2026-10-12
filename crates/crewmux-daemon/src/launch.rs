@@ -36,6 +36,7 @@ pub(crate) async fn bring_up(app: &App, yaml: &str) -> Result<Value, Error> {
     crate::settle::settle(app, &mut up.seats, &mut up.events).await?;
     let rig_id = up.rig_id;
     let seats = read(&app.store, move |conn| conn.list_by_rig(&rig_id)).await?;
+    crate::direct::record_startup(app, &seats).await?;
     Ok(json!({
         "status": status_of(&seats),
         "rig": up.rig_name,
@@ -254,10 +255,12 @@ async fn launch_one(
     if let Some(script) = crate::resume::script_for(app, seat.name.as_str()) {
         env.insert("RIG_STUB_SCRIPT".to_owned(), script);
     }
-    env.insert(
-        "RIG_STUB_POSTURE".to_owned(),
-        crewmux_durability::posture_token(extra.posture).to_owned(),
-    );
+    if extra.resume.is_some() || extra.posture != crewmux_types::LaunchPosture::Auto {
+        env.insert(
+            "RIG_STUB_POSTURE".to_owned(),
+            crewmux_durability::posture_token(extra.posture).to_owned(),
+        );
+    }
     if let Some(path) = &extra.replay {
         env.insert("RIG_STUB_REPLAY".to_owned(), path.display().to_string());
     }

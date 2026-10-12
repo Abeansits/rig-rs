@@ -82,6 +82,89 @@ fn next_generation(dir: &std::path::Path, cap: u64) -> std::io::Result<u64> {
     }
 }
 
+/// Byte length of the plain pane transcript. A missing directory is `0`.
+pub(crate) fn plain_bytes(home: &std::path::Path, seat: &str) -> std::io::Result<Vec<u8>> {
+    let dir = home.join("transcripts").join(seat);
+    let mut files = generation_paths(&dir)?;
+    files.sort_by_key(|(generation, _)| *generation);
+    let mut out = Vec::new();
+    for (_, path) in files {
+        match std::fs::read(&path) {
+            Ok(chunk) => out.extend(chunk),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(out)
+}
+
+pub(crate) fn plain_len(home: &std::path::Path, seat: &str) -> std::io::Result<u64> {
+    let bytes = plain_bytes(home, seat)?;
+    Ok(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+}
+
+pub(crate) async fn len_of(home: &std::path::Path, seat: &str) -> std::io::Result<u64> {
+    let home = home.to_path_buf();
+    let seat = seat.to_owned();
+    match tokio::task::spawn_blocking(move || plain_len(&home, &seat)).await {
+        Ok(result) => result,
+        Err(_) => Err(std::io::Error::other("transcript length task stopped")),
+    }
+}
+
+/// Wait until `needle` appears at or after `before` in the plain transcript.
+pub(crate) async fn wait_for_paste(home: &std::path::Path, seat: &str, before: u64, needle: &str) {
+    let home = home.to_path_buf();
+    let seat = seat.to_owned();
+    let needle = needle.to_owned();
+    for _ in 0..100 {
+        let found = {
+            let home = home.clone();
+            let seat = seat.clone();
+            let needle = needle.clone();
+            tokio::task::spawn_blocking(move || landed(&home, &seat, before, &needle)).await
+        };
+        if found.ok().and_then(Result::ok).unwrap_or(false) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+fn landed(home: &std::path::Path, seat: &str, before: u64, needle: &str) -> std::io::Result<bool> {
+    if needle.is_empty() {
+        return Ok(true);
+    }
+    let bytes = plain_bytes(home, seat)?;
+    let start = usize::try_from(before).unwrap_or(0).min(bytes.len());
+    let tail = bytes.get(start..).unwrap_or(&[]);
+    Ok(String::from_utf8_lossy(tail).contains(needle))
+}
+
+fn generation_paths(dir: &std::path::Path) -> std::io::Result<Vec<(u64, std::path::PathBuf)>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(text) = name.to_str() else {
+            continue;
+        };
+        let Some(stem) = text.strip_suffix(".txt") else {
+            continue;
+        };
+        let Ok(generation) = stem.parse::<u64>() else {
+            continue;
+        };
+        files.push((generation, entry.path()));
+    }
+    Ok(files)
+}
+
 fn strip_ansi(input: &str) -> String {
     let mut out = String::new();
     let mut chars = input.chars().peekable();

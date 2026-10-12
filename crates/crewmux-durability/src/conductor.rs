@@ -43,6 +43,81 @@ pub fn kernel_first(rigs: &[(RigId, bool)]) -> Vec<(RigId, bool)> {
     kernel
 }
 
+/// The next rig in a crash-cart walk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CartNext {
+    /// Rig to restore, or to record as not attempted.
+    pub rig: RigId,
+    /// Kernel rigs are ordered first.
+    pub kernel: bool,
+    /// False once cancel has been observed after an earlier rig.
+    pub run: bool,
+}
+
+/// Shared cancel state. [`conduct`] and the daemon both walk this.
+///
+/// Cancel is recorded after the in-flight rig returns. That rig finishes.
+/// Later rigs are [`RigRestoreOutcome::NotAttempted`].
+#[derive(Clone, Debug, Default)]
+pub struct CartWalk {
+    index: usize,
+    stop: bool,
+    cancelled_before: Option<RigId>,
+    rigs: Vec<CartRig>,
+}
+
+impl CartWalk {
+    /// An empty walk.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The rig at the current index, when one remains.
+    #[must_use]
+    pub fn next(&self, ordered: &[(RigId, bool)]) -> Option<CartNext> {
+        let (rig, kernel) = ordered.get(self.index)?;
+        Some(CartNext {
+            rig: *rig,
+            kernel: *kernel,
+            run: !self.stop,
+        })
+    }
+
+    /// Record `outcome` for the current rig. `cancelled` stops the fleet afterwards.
+    pub fn record(
+        &mut self,
+        ordered: &[(RigId, bool)],
+        outcome: RigRestoreOutcome,
+        cancelled: bool,
+    ) {
+        let Some((rig, kernel)) = ordered.get(self.index) else {
+            return;
+        };
+        if self.stop && self.cancelled_before.is_none() {
+            self.cancelled_before = Some(*rig);
+        }
+        self.rigs.push(CartRig {
+            rig: *rig,
+            outcome,
+            kernel: *kernel,
+        });
+        if cancelled {
+            self.stop = true;
+        }
+        self.index = self.index.saturating_add(1);
+    }
+
+    /// The finished run.
+    #[must_use]
+    pub fn into_run(self) -> CrashCartRun {
+        CrashCartRun {
+            rigs: self.rigs,
+            cancelled_before: self.cancelled_before,
+        }
+    }
+}
+
 /// Restore `ordered` one at a time.
 ///
 /// `cancelled` is polled after a rig finishes. The in-flight rig completes.
@@ -52,34 +127,17 @@ pub fn conduct(
     mut restore: impl FnMut(&RigId) -> RigRestoreOutcome,
     mut cancelled: impl FnMut() -> bool,
 ) -> CrashCartRun {
-    let mut rigs = Vec::new();
-    let mut cancelled_before = None;
-    let mut stop = false;
-    for (rig, kernel) in ordered {
-        if stop {
-            if cancelled_before.is_none() {
-                cancelled_before = Some(*rig);
-            }
-            rigs.push(CartRig {
-                rig: *rig,
-                outcome: RigRestoreOutcome::NotAttempted,
-                kernel: *kernel,
-            });
-            continue;
-        }
-        rigs.push(CartRig {
-            rig: *rig,
-            outcome: restore(rig),
-            kernel: *kernel,
-        });
-        if cancelled() {
-            stop = true;
-        }
+    let mut walk = CartWalk::new();
+    while let Some(step) = walk.next(ordered) {
+        let outcome = if step.run {
+            restore(&step.rig)
+        } else {
+            RigRestoreOutcome::NotAttempted
+        };
+        let stop = if step.run { cancelled() } else { true };
+        walk.record(ordered, outcome, stop);
     }
-    CrashCartRun {
-        rigs,
-        cancelled_before,
-    }
+    walk.into_run()
 }
 
 #[cfg(test)]

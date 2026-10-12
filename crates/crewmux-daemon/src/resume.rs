@@ -77,13 +77,6 @@ pub(crate) fn replay_path(home: &Path, seat: &SeatId) -> PathBuf {
     home.join("resume").join(format!("{seat}.replay"))
 }
 
-/// Agent jsonl used for delivery fingerprints. Not the pane transcript writer.
-pub(crate) fn agent_transcript(home: &Path, seat: &SeatId) -> PathBuf {
-    home.join("transcripts")
-        .join("stub")
-        .join(format!("{seat}.jsonl"))
-}
-
 /// Mint the stub resume file and store the posture.
 ///
 /// # Errors

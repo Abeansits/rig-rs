@@ -10,18 +10,18 @@ use crewmux_durability::{
     TruthReconcile, clamp_posture, launch_waves, plan_reconcile, reconcile_runtime_truth,
     renudge_text, rollup,
 };
-use crewmux_transcript::user_turns_after;
 use crewmux_types::{LaunchPosture, ReadinessCode, RigId, SeatId};
 use serde_json::{Value, json};
 
 use crate::deliver::{Outbound, deliver};
-use crate::direct::{HomeProbe, append_turn};
+use crate::direct::{HomeProbe, delivery_confirmed};
 use crate::error::Error;
 use crate::launch::{now_ts, relaunch};
 use crate::notify::emit;
-use crate::resume::{LaunchExtra, agent_transcript, recorded_posture, replay_path, resume_path};
-use crate::snapshot::{load_rig, verify_stored};
+use crate::resume::{LaunchExtra, recorded_posture, replay_path, resume_path};
+use crate::snapshot::load_rig;
 use crate::state::{App, join_err};
+use crate::turns::envelope_turns;
 
 /// Restore one rig.
 ///
@@ -34,8 +34,11 @@ pub(crate) async fn restore_rig(
     snapshot: Option<&str>,
     requested: LaunchPosture,
 ) -> Result<Value, Error> {
+    if app.take_cancel_on_restore() {
+        app.request_cart_cancel();
+    }
     if let Some(id) = snapshot {
-        verify_stored(app, rig_name, id).await?;
+        crate::snapshot::apply(app, rig_name, id).await?;
     }
     let (rig_id, seats) = load_rig(app, rig_name).await?;
     let edges = edges_of(app, &rig_id).await?;
@@ -186,16 +189,18 @@ async fn discover(app: &App, seat: &Seat, rig_name: &str) -> Result<Option<Resum
 }
 
 async fn write_replay(app: &App, seat: &Seat) -> Result<Option<PathBuf>, Error> {
-    let src = agent_transcript(&app.home, &seat.id);
+    let name = seat.name.as_str().to_owned();
+    let home = app.home.clone();
     let dest = replay_path(&app.home, &seat.id);
-    let wrote = tokio::task::spawn_blocking(move || replay_file(&src, &dest))
+    let wrote = tokio::task::spawn_blocking(move || replay_file(&home, &name, &dest))
         .await
         .map_err(join_err)??;
     Ok(wrote.then_some(replay_path(&app.home, &seat.id)))
 }
 
-fn replay_file(src: &std::path::Path, dest: &std::path::Path) -> Result<bool, Error> {
-    let turns = user_turns_after(src, 0).map_err(|err| Error::Message(err.to_string()))?;
+fn replay_file(home: &std::path::Path, seat: &str, dest: &std::path::Path) -> Result<bool, Error> {
+    let bytes = crate::transcripts::plain_bytes(home, seat)?;
+    let turns = envelope_turns(&bytes, 0);
     if turns.is_empty() {
         return Ok(false);
     }
@@ -402,8 +407,13 @@ async fn resend(app: &App, rig_name: &str, seats: &[Seat], id: &str) -> Result<(
         return Ok(());
     };
     let address = format!("{seat}@{rig_name}", seat = seat.name.as_str());
-    drop(deliver(app, pointer_outbound(&address, &row.body)).await);
-    append_turn(&app.home, &seat.id, &row.body).await?;
+    let report = deliver(app, pointer_outbound(&address, &row.body)).await;
+    let Ok(report) = report else {
+        return Ok(());
+    };
+    if !delivery_confirmed(&report) {
+        return Ok(());
+    }
     let id = id.to_owned();
     let at = now_ms_i64();
     let store = Arc::clone(&app.store);

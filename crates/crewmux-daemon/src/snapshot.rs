@@ -26,6 +26,7 @@ use crate::state::{App, join_err, now_ms};
 ///
 /// Returns [`Error`] when the rig is missing or the backup fails.
 pub(crate) async fn create(app: &App, rig_name: &str) -> Result<Value, Error> {
+    segment("rig", rig_name)?;
     let (rig_id, seats) = load_rig(app, rig_name).await?;
     let id = SnapshotId::new();
     let dir = snap_dir(&app.home, rig_name, &id.to_string());
@@ -48,11 +49,21 @@ pub(crate) async fn create(app: &App, rig_name: &str) -> Result<Value, Error> {
 ///
 /// Returns [`Error`] when the directory cannot be read.
 pub(crate) async fn list(app: &App, rig_name: &str) -> Result<Value, Error> {
+    segment("rig", rig_name)?;
     let dir = app.home.join("snapshots").join(rig_name);
     let ids = tokio::task::spawn_blocking(move || read_ids(&dir))
         .await
         .map_err(join_err)??;
-    Ok(json!({"rig": rig_name, "snapshots": ids}))
+    let mut kept = Vec::new();
+    for id in ids {
+        if segment("snapshot", &id).is_err() {
+            continue;
+        }
+        if verify_stored(app, rig_name, &id).await.is_ok() {
+            kept.push(id);
+        }
+    }
+    Ok(json!({"rig": rig_name, "snapshots": kept}))
 }
 
 /// Show one snapshot, refusing a bad hash or a newer schema.
@@ -74,7 +85,71 @@ pub(crate) async fn verify_stored(app: &App, rig_name: &str, id: &str) -> Result
     load_verified(app, rig_name, id).await.map(|_| ())
 }
 
+/// Copy the snapshot's rows into the live store and rewrite resume files.
+///
+/// # Errors
+///
+/// Returns [`Error`] when the snapshot is refused or the copy fails.
+pub(crate) async fn apply(app: &App, rig_name: &str, id: &str) -> Result<(), Error> {
+    load_verified(app, rig_name, id).await?;
+    let db_path = snap_dir(&app.home, rig_name, id).join("rig.db");
+    let rig = rig_name.to_owned();
+    let store = Arc::clone(&app.store);
+    tokio::task::spawn_blocking(move || {
+        store.write(move |conn| crewmux_store::import_rig(conn, &db_path, &rig))
+    })
+    .await
+    .map_err(join_err)??;
+    write_tokens(app, rig_name).await?;
+    let store = Arc::clone(&app.store);
+    let book = tokio::task::spawn_blocking(move || store.read(crewmux_store::load_book))
+        .await
+        .map_err(join_err)??;
+    *app.queue.lock().await = book;
+    Ok(())
+}
+
+async fn write_tokens(app: &App, rig_name: &str) -> Result<(), Error> {
+    let (_, seats) = load_rig(app, rig_name).await?;
+    for seat in seats {
+        let id = seat.id.to_string();
+        let store = Arc::clone(&app.store);
+        let row = tokio::task::spawn_blocking(move || {
+            store.read(move |conn| crewmux_store::load_seat_restore(conn, &id))
+        })
+        .await
+        .map_err(join_err)??;
+        let path = crate::resume::resume_path(&app.home, &seat.id);
+        let value = row.and_then(|row| row.resume_value);
+        write_token(&path, value.as_deref()).await?;
+    }
+    Ok(())
+}
+
+async fn write_token(path: &std::path::Path, value: Option<&str>) -> Result<(), Error> {
+    let path = path.to_path_buf();
+    let value = value.map(str::to_owned);
+    tokio::task::spawn_blocking(move || match value.as_deref() {
+        Some(text) if !text.is_empty() => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, text)?;
+            Ok(())
+        }
+        _ => match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(Error::from(err)),
+        },
+    })
+    .await
+    .map_err(join_err)?
+}
+
 async fn load_verified(app: &App, rig_name: &str, id: &str) -> Result<SnapshotManifest, Error> {
+    segment("rig", rig_name)?;
+    segment("snapshot", id)?;
     let dir = snap_dir(&app.home, rig_name, id);
     let manifest_path = dir.join("manifest.json");
     let db_path = dir.join("rig.db");
@@ -86,7 +161,26 @@ async fn load_verified(app: &App, rig_name: &str, id: &str) -> Result<SnapshotMa
     let supported = u32::try_from(MIGRATIONS.len()).unwrap_or(u32::MAX);
     verify_snapshot(&manifest, &sha256_hex(&bytes), file_schema, supported)
         .map_err(|err| Error::Message(err.to_string()))?;
+    let checked = db_path.clone();
+    tokio::task::spawn_blocking(move || crewmux_store::Store::integrity_check(&checked))
+        .await
+        .map_err(join_err)??;
     Ok(manifest)
+}
+
+fn segment(kind: &str, value: &str) -> Result<(), Error> {
+    let bad = value.is_empty()
+        || value == "."
+        || value == ".."
+        || value
+            .bytes()
+            .any(|byte| byte == b'/' || byte == b'\\' || byte == 0);
+    if bad {
+        return Err(Error::Message(format!(
+            "{kind} {value:?} is not a single path segment"
+        )));
+    }
+    Ok(())
 }
 
 #[expect(
@@ -250,9 +344,36 @@ async fn read_file(path: PathBuf) -> Result<Vec<u8>, Error> {
 }
 
 async fn write_file(path: PathBuf, text: String) -> Result<(), Error> {
-    tokio::task::spawn_blocking(move || std::fs::write(&path, text).map_err(Error::from))
+    tokio::task::spawn_blocking(move || write_atomic(&path, text.as_bytes()))
         .await
         .map_err(join_err)?
+}
+
+fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), Error> {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Err(Error::Message("snapshot path has no file name".to_owned()));
+    };
+    let mut tmp = path.to_path_buf();
+    tmp.set_file_name(format!(".{name}.tmp"));
+    let write = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&tmp)?;
+        std::io::Write::write_all(&mut file, bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        if let Some(parent) = path.parent() {
+            let dir = std::fs::File::open(parent)?;
+            dir.sync_all()?;
+        }
+        Ok(())
+    })();
+    if write.is_err() {
+        drop(std::fs::remove_file(&tmp));
+    }
+    write
 }
 
 fn read_ids(dir: &std::path::Path) -> Result<Vec<String>, Error> {

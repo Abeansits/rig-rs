@@ -286,6 +286,145 @@ async fn crash_cart_orders_kernel_cancel_and_a_failed_rig() {
     assert_eq!(row_outcome(rows, "fleet"), "fully_restored");
 }
 
+#[tokio::test]
+async fn restore_snapshot_brings_back_the_resume_token() {
+    let rig = rig().await;
+    up(&rig.app, &spec("pair", &[("one", "/tmp")])).await;
+    let created = crate::snapshot::create(&rig.app, "pair")
+        .await
+        .expect("snap");
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("id")
+        .to_owned();
+    let one = seat(&rig.app, "one").await;
+    let token = crate::resume::resume_path(&rig.home, &one.id);
+    std::fs::remove_file(&token).expect("token");
+    let seat_id = one.id.to_string();
+    let store = Arc::clone(&rig.app.store);
+    tokio::task::spawn_blocking(move || {
+        store.write(move |conn| {
+            conn.execute(
+                "DELETE FROM seat_restore WHERE seat_id = ?1",
+                rusqlite::params![seat_id],
+            )?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("join")
+    .expect("delete");
+    kill_sessions(&rig.app).await;
+    let body = crate::restore::restore_rig(&rig.app, "pair", Some(&id), LaunchPosture::Auto)
+        .await
+        .expect("restore");
+    assert_eq!(seat_field(&body, "one", "outcome"), "resumed");
+    let text = std::fs::read_to_string(&token).expect("rewritten");
+    assert!(text.starts_with("stub-"), "{text}");
+}
+
+#[tokio::test]
+async fn list_omits_a_corrupt_snapshot() {
+    let rig = rig().await;
+    up(&rig.app, &spec("pair", &[("one", "/tmp")])).await;
+    let created = crate::snapshot::create(&rig.app, "pair")
+        .await
+        .expect("snap");
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("id")
+        .to_owned();
+    let listed = crate::snapshot::list(&rig.app, "pair").await.expect("list");
+    assert!(snapshot_ids(&listed).iter().any(|value| value == &id));
+    let path = rig
+        .home
+        .join("snapshots")
+        .join("pair")
+        .join(&id)
+        .join("rig.db");
+    let mut bytes = std::fs::read(&path).expect("bytes");
+    let last = bytes.last_mut().expect("byte");
+    *last ^= 0xff;
+    std::fs::write(&path, bytes).expect("corrupt");
+    let listed = crate::snapshot::list(&rig.app, "pair").await.expect("list");
+    assert!(
+        snapshot_ids(&listed).iter().all(|value| value != &id),
+        "{listed}"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_ids_and_rig_names_reject_dot_dot() {
+    let rig = rig().await;
+    let rig_err = crate::snapshot::create(&rig.app, "../etc")
+        .await
+        .expect_err("rig");
+    assert!(rig_err.to_string().contains("path segment"), "{rig_err}");
+    let id_err = crate::snapshot::show(&rig.app, "pair", "..")
+        .await
+        .expect_err("id");
+    assert!(id_err.to_string().contains("path segment"), "{id_err}");
+    let restore_err =
+        crate::restore::restore_rig(&rig.app, "pair", Some("../x"), LaunchPosture::Auto)
+            .await
+            .expect_err("restore");
+    assert!(
+        restore_err.to_string().contains("path segment"),
+        "{restore_err}"
+    );
+}
+
+#[tokio::test]
+async fn cancel_raised_during_the_in_flight_rig_skips_later_rigs() {
+    let rig = rig().await;
+    up(&rig.app, &spec("fleet", &[("oseat", "/tmp")])).await;
+    up(&rig.app, &spec("kernel", &[("kseat", "/tmp")])).await;
+    mark_kernel(&rig.app, "kernel").await;
+    rig.app.arm_cancel_on_restore();
+    let cancelled = crate::cart::crash_cart(&rig.app, false)
+        .await
+        .expect("cart");
+    let rows = cancelled
+        .get("rigs")
+        .and_then(Value::as_array)
+        .expect("rigs");
+    assert_eq!(
+        rows.first()
+            .and_then(|row| row.get("rig"))
+            .and_then(Value::as_str),
+        Some("kernel")
+    );
+    assert_ne!(
+        rows.first()
+            .and_then(|row| row.get("outcome"))
+            .and_then(Value::as_str),
+        Some("not_attempted")
+    );
+    assert_eq!(
+        rows.get(1)
+            .and_then(|row| row.get("outcome"))
+            .and_then(Value::as_str),
+        Some("not_attempted")
+    );
+    assert_eq!(
+        cancelled.get("cancelled_before").and_then(Value::as_str),
+        Some("fleet")
+    );
+}
+
+fn snapshot_ids(body: &Value) -> Vec<String> {
+    body.get("snapshots")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn row_outcome<'a>(rows: &'a [Value], name: &str) -> &'a str {
     rows.iter()
         .find(|row| row.get("rig").and_then(Value::as_str) == Some(name))

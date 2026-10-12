@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crewmux_adapters::AdapterRegistry;
@@ -66,6 +66,10 @@ pub(crate) struct App {
     /// The file hook under `$RIG_HOME/direct-phase` is for the binary. Tests
     /// cannot use `std::env::set_var`, so they set this instead.
     direct_phase: Arc<tokio::sync::Mutex<Option<&'static str>>>,
+    /// Set while a crash-cart rig is running. Later rigs are not attempted.
+    cart_cancel: Arc<AtomicBool>,
+    /// The next `restore_rig` raises [`Self::cart_cancel`] and still finishes.
+    cancel_on_restore: Arc<AtomicBool>,
 }
 
 /// One queue snapshot for the writer, plus the callers waiting on that commit.
@@ -113,7 +117,35 @@ impl App {
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
             persist_crash: Arc::new(tokio::sync::Mutex::new(None)),
             direct_phase: Arc::new(tokio::sync::Mutex::new(None)),
+            cart_cancel: Arc::new(AtomicBool::new(false)),
+            cancel_on_restore: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Stop the fleet after the rig that is currently restoring.
+    pub(crate) fn request_cart_cancel(&self) {
+        self.cart_cancel.store(true, Ordering::SeqCst);
+    }
+
+    /// A new crash-cart starts with cancel clear unless the caller asks again.
+    pub(crate) fn clear_cart_cancel(&self) {
+        self.cart_cancel.store(false, Ordering::SeqCst);
+    }
+
+    /// Whether a crash-cart cancel arrived, including during the in-flight rig.
+    pub(crate) fn cart_cancel_requested(&self) -> bool {
+        self.cart_cancel.load(Ordering::SeqCst)
+    }
+
+    /// The next restore raises the crash-cart cancel flag as that rig starts.
+    #[cfg(test)]
+    pub(crate) fn arm_cancel_on_restore(&self) {
+        self.cancel_on_restore.store(true, Ordering::SeqCst);
+    }
+
+    /// Take the one-shot "cancel during this restore" arm.
+    pub(crate) fn take_cancel_on_restore(&self) -> bool {
+        self.cancel_on_restore.swap(false, Ordering::SeqCst)
     }
 
     /// Drive the direct-delivery crash phase for in-process tests.

@@ -471,14 +471,27 @@ mod tmux_it {
     }
 
     fn count_turns(live: &Live, body: &str) -> usize {
-        let dir = live.rig_home.join("transcripts").join("stub");
-        let Ok(entries) = std::fs::read_dir(dir) else {
+        let root = live.rig_home.join("transcripts");
+        let Ok(seats) = std::fs::read_dir(root) else {
             return 0;
         };
-        entries
-            .flatten()
-            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
-            .map(|text| text.matches(body).count())
-            .sum()
+        let mut count = 0usize;
+        for seat in seats.flatten() {
+            let Ok(files) = std::fs::read_dir(seat.path()) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let plain = file
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"));
+                if !plain {
+                    continue;
+                }
+                let contents = std::fs::read_to_string(file.path()).unwrap_or_default();
+                count += contents.matches(body).count();
+            }
+        }
+        count
     }
 }

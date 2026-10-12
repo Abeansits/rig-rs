@@ -15,7 +15,7 @@ pub use check::{
     ConfidenceBreakdown, ConfidenceClass, Remediation, RestoreCheckReport, SeatCheck, SeatSignal,
     mutating_actions, restore_check,
 };
-pub use conductor::{CartRig, CrashCartRun, conduct, kernel_first};
+pub use conductor::{CartNext, CartRig, CartWalk, CrashCartRun, conduct, kernel_first};
 pub use error::Error;
 pub use manifest::{SeatSnapshot, SnapshotManifest, StoredResume, sha256_hex, verify_snapshot};
 pub use occupant::{OccupantResolution, OccupantRow, OccupantState, resolve_active_occupant};

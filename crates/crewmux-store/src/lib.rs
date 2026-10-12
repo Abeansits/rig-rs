@@ -3,6 +3,7 @@
 mod chat;
 mod durability;
 mod error;
+mod import;
 mod migrate;
 mod queue;
 mod repo;
@@ -15,6 +16,7 @@ pub use durability::{
     put_seat_restore, rigs_kernel, set_direct_acked, set_direct_delivered,
 };
 pub use error::Error;
+pub use import::import_rig;
 pub use migrate::MIGRATIONS;
 pub use queue::{archive_terminal, insert_receipt, load_book, max_receipt_cursor, replace_book};
 pub use repo::{Db, clear_rig};
