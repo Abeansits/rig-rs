@@ -251,6 +251,7 @@ pub(crate) fn code_name(code: &ReadinessCode) -> String {
         ReadinessCode::UnknownMenu => "unknown_menu".to_owned(),
         ReadinessCode::UnrecognisedScreen => "unrecognised_screen".to_owned(),
         ReadinessCode::FullscreenRenderer => "fullscreen_renderer".to_owned(),
+        ReadinessCode::PromptDraft => "prompt_draft".to_owned(),
         ReadinessCode::Other(other) => other.clone(),
     }
 }

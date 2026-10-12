@@ -17,6 +17,9 @@ pub enum Error {
     /// The pane is not a ready composer, so nothing was pasted.
     #[error("seat is not ready for input")]
     NotReady,
+    /// The composer after the paste was not the payload. Enter was not sent.
+    #[error("composer did not show the paste")]
+    PasteMismatch,
     /// The transcript did not show exactly one matching new user turn.
     #[error("transcript did not confirm the delivery")]
     NotVerified,

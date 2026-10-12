@@ -62,21 +62,38 @@ pub fn normalize_for(runtime: DeliveryRuntime, text: &str) -> String {
 /// Compare using the runtime that stored the turn.
 #[must_use]
 pub fn match_for(runtime: DeliveryRuntime, sent: &str, stored: &str) -> DeliveryMatch {
-    let several = pasted_openings(stored) > 1 || pasted_openings(sent) > 1;
-    if runtime == DeliveryRuntime::Claude && several {
+    let sent_norm = normalize_for(runtime, sent);
+    let stored_norm = normalize_for(runtime, stored);
+    if sent_norm == stored_norm {
+        return DeliveryMatch::Equal;
+    }
+    if runtime == DeliveryRuntime::Claude
+        && wrapper_lines(stored) > 1
+        && !sent_norm.is_empty()
+        && stored_norm.contains(&sent_norm)
+    {
         return DeliveryMatch::Composite;
     }
-    if fingerprint(runtime, sent) == fingerprint(runtime, stored) {
-        DeliveryMatch::Equal
-    } else {
-        DeliveryMatch::Different
-    }
+    DeliveryMatch::Different
 }
 
-/// Count of `<pasted_content` openings. More than one in a turn is composite.
+/// Opening wrapper lines. A literal `<pasted_content` inside a sentence is not one.
 #[must_use]
 pub fn pasted_openings(text: &str) -> usize {
-    text.matches("<pasted_content").count()
+    wrapper_lines(text)
+}
+
+fn wrapper_lines(text: &str) -> usize {
+    text.lines()
+        .filter(|line| is_wrapper_line(line.trim()))
+        .count()
+}
+
+fn is_wrapper_line(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("<pasted_content") else {
+        return false;
+    };
+    rest.contains('>')
 }
 
 /// Remove one outermost wrapper when the whole string is that wrapper.
@@ -148,6 +165,30 @@ mod tests {
         assert_ne!(
             fingerprint(DeliveryRuntime::Claude, sent),
             fingerprint(DeliveryRuntime::Claude, stored)
+        );
+    }
+
+    #[test]
+    fn literal_pasted_content_inside_one_wrapper_is_equal() {
+        let sent = "see <pasted_content in the docs";
+        let stored = "<pasted_content>\nsee <pasted_content in the docs\n</pasted_content>";
+        assert_eq!(super::pasted_openings(stored), 1);
+        assert_eq!(
+            match_for(DeliveryRuntime::Claude, sent, stored),
+            DeliveryMatch::Equal
+        );
+        let composite = "\
+<pasted_content>
+hello
+</pasted_content>
+<pasted_content>
+world
+</pasted_content>
+";
+        assert!(super::pasted_openings(composite) > 1);
+        assert_eq!(
+            match_for(DeliveryRuntime::Claude, "hello", composite),
+            DeliveryMatch::Composite
         );
     }
 

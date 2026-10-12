@@ -97,6 +97,7 @@ async fn resume_uses_stored_id_flag() {
             .any(|arg| arg == "11111111-1111-4111-8111-111111111111")
     );
     assert!(!flat.iter().any(|arg| arg == "--session-id"), "{flat:?}");
+    assert!(!flat.iter().any(|arg| arg == "--model"), "{flat:?}");
     drop(std::fs::remove_dir_all(&root));
 }
 

@@ -10,6 +10,9 @@ pub enum Error {
     /// The transcript file or its directory could not be read.
     #[error("transcript io: {0}")]
     Io(#[from] std::io::Error),
+    /// A resume token or session id is not a UUID.
+    #[error("session id is not a UUID")]
+    SessionId,
     /// A jsonl line is not a JSON value.
     #[error("transcript {} line {line}: {msg}", path.display())]
     Parse {

@@ -44,6 +44,26 @@ fn planted_quit_key_in_submit_fails() {
 }
 
 #[test]
+fn planted_carriage_return_literal_fails() {
+    let root = scratch("cr");
+    let path = root.join("crates/crewmux-adapters/src/claude/sneak.rs");
+    write(&path, "fn sneak() { send(Key::Literal(\"\\r\")); }\n").expect("write");
+    let err = lint_blind_enter(&root).expect_err("cr");
+    assert!(err.to_string().contains("Enter"), "{err}");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
+fn carriage_return_inside_submit_fails() {
+    let root = scratch("cr-submit");
+    let path = root.join("crates/crewmux-adapters/src/claude/submit.rs");
+    write(&path, "fn go() { send(Key::Literal(\"\\r\")); }\n").expect("write");
+    let err = lint_blind_enter(&root).expect_err("cr");
+    assert!(err.to_string().contains("Enter"), "{err}");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
 fn planted_digit_literal_fails() {
     let root = scratch("digit");
     let path = root.join("crates/crewmux-adapters/src/dialog/drive.rs");

@@ -2,6 +2,7 @@
 
 mod adapter;
 mod argv;
+mod composer;
 mod drive;
 mod launch;
 pub(crate) mod screen;

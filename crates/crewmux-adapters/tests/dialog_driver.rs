@@ -129,7 +129,9 @@ async fn unknown_menu_escalates() {
 
 #[tokio::test]
 async fn cursor_verification_failure_escalates() {
-    let trust = support::read(&support::fixtures().join("2.1.286/claude-006-trust.txt"));
+    let cwd = std::env::temp_dir();
+    let trust = support::read(&support::fixtures().join("2.1.286/claude-006-trust.txt"))
+        .replace("/tmp/fresh", &cwd.display().to_string());
     let mux = Arc::new(FakeMux::new());
     mux.replay_screens(vec![support::capture(&trust), support::capture(&trust)])
         .await;
@@ -143,6 +145,29 @@ async fn cursor_verification_failure_escalates() {
     let calls = mux.recorded().await;
     assert!(calls.iter().flatten().any(|arg| arg == "Down"), "{calls:?}");
     assert!(!support::sent_enter(&calls), "{calls:?}");
+}
+
+#[tokio::test]
+async fn trust_folder_must_match_the_seat_cwd() {
+    let trust = support::read(&support::fixtures().join("2.1.286/claude-006-trust.txt"));
+    let mux = replay(&trust).await;
+    let adapter = adapter_with(Arc::clone(&mux));
+    drop(
+        adapter
+            .launch(&binding(), opts(true))
+            .await
+            .expect("launch"),
+    );
+    let calls = mux.recorded().await;
+    assert!(
+        !calls.iter().flatten().any(|arg| arg == "Down"),
+        "{calls:?}"
+    );
+    assert!(!support::sent_enter(&calls), "{calls:?}");
+    assert_eq!(
+        adapter.check_ready(&binding()).await.expect("ready"),
+        Readiness::Gate(ReadinessCode::TrustGate)
+    );
 }
 
 #[tokio::test]

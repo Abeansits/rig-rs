@@ -72,7 +72,8 @@ pub(crate) fn shared(mux: &Arc<FakeMux>) -> Arc<dyn Multiplexer> {
 
 #[test]
 fn helpers_link() {
-    drop(fixtures());
+    let ready = fixtures().join("2.1.286/claude-020-ready.txt");
+    assert!(read(&ready).contains("shortcuts"));
     let _budget = fast_budget();
     assert!(!sent_enter(&[]));
     assert!(!sent_paste(&[]));

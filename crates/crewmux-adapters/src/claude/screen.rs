@@ -36,8 +36,10 @@ pub enum LoginKind {
 pub enum ClaudeScreen {
     /// Composer and shortcuts footer, and nothing that would eat a key.
     Ready(ComposerState),
-    /// `esc to interrupt` is on screen.
+    /// `esc to interrupt` is on screen, or a spinner with no interrupt hint.
     Busy,
+    /// The composer already holds text. Do not paste and do not send Enter.
+    Draft,
     /// Title and the full option list matched.
     Dialog(ClassifiedDialog),
     /// Theme picker, login method, or OAuth paste.
@@ -63,7 +65,7 @@ impl ClaudeScreen {
     pub const fn requires_attention(&self) -> bool {
         matches!(
             self,
-            Self::Dialog(_) | Self::Login(_) | Self::UnknownMenu { .. }
+            Self::Dialog(_) | Self::Login(_) | Self::UnknownMenu { .. } | Self::Draft
         )
     }
 
@@ -77,6 +79,7 @@ impl ClaudeScreen {
                 ReadinessCode::LoginRequired
             }
             Self::UnknownMenu { .. } => ReadinessCode::UnknownMenu,
+            Self::Draft => ReadinessCode::PromptDraft,
             Self::Ready(_) | Self::Busy | Self::Inconclusive => return None,
         })
     }
@@ -97,10 +100,15 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
     {
         return ClaudeScreen::Dialog(dialog);
     }
+    if no_conversation(text) {
+        return ClaudeScreen::UnknownMenu {
+            evidence: clip(text),
+        };
+    }
     if let Some(kind) = login_kind(text) {
         return ClaudeScreen::Login(kind);
     }
-    if has_interrupt(text) {
+    if has_interrupt(text) || spinning(text) {
         return ClaudeScreen::Busy;
     }
     if is_option_menu(&options) {
@@ -108,7 +116,10 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
             evidence: clip(text),
         };
     }
-    if is_composer(text) {
+    if crate::claude::composer::is_draft(text) {
+        return ClaudeScreen::Draft;
+    }
+    if crate::claude::composer::is_empty_composer(text) {
         return ClaudeScreen::Ready(ComposerState { bordered: true });
     }
     ClaudeScreen::Inconclusive
@@ -136,6 +147,7 @@ pub fn strict_mcp_drift(screen: &ClaudeScreen) -> Option<&'static str> {
         }
         ClaudeScreen::Ready(_)
         | ClaudeScreen::Busy
+        | ClaudeScreen::Draft
         | ClaudeScreen::Dialog(_)
         | ClaudeScreen::Login(_)
         | ClaudeScreen::UnknownMenu { .. }
@@ -155,18 +167,16 @@ pub fn identify_dialog(text: &str, options: &[MenuLine]) -> Option<ClassifiedDia
 }
 
 fn dialog_kind(text: &str, options: &[MenuLine]) -> Option<KnownDialog> {
-    if let Some(name) = mcp_name(text)
-        && has_option(options, "Continue without using this MCP server")
-    {
+    if let Some(name) = mcp_name(text, options) {
         return Some(KnownDialog::ClaudeNewMcpServer { name });
     }
-    if text.contains("Try the new fullscreen renderer?")
+    if line_has_title(text, "Try the new fullscreen renderer?")
         && has_option(options, "1. Yes, try it")
         && has_option(options, "2. Not now")
     {
         return Some(KnownDialog::ClaudeFullscreenRenderer);
     }
-    if text.contains("Bypass Permissions")
+    if line_has_title(text, "Bypass Permissions")
         && has_option(options, "No, exit")
         && has_option(options, "Yes, I accept")
     {
@@ -175,7 +185,7 @@ fn dialog_kind(text: &str, options: &[MenuLine]) -> Option<KnownDialog> {
     if trust_title(text) && has_option(options, "No, exit") && has_option(options, TRUST_YES) {
         return Some(KnownDialog::ClaudeTrust);
     }
-    if text.contains("Update available")
+    if line_has_title(text, "Update available")
         && options.iter().any(|line| line.text.contains("Update now"))
         && options.iter().any(|line| line.text.contains("Skip"))
     {
@@ -187,10 +197,52 @@ fn dialog_kind(text: &str, options: &[MenuLine]) -> Option<KnownDialog> {
 const TRUST_YES: &str = "Yes, I trust this folder";
 
 fn trust_title(text: &str) -> bool {
-    text.contains("Do you trust the files in this folder") || text.contains("Accessing workspace")
+    line_has_title(text, "Do you trust the files in this folder")
+        || line_has_title(text, "Quick safety check:")
+        || line_has_title(text, "Is this a project you created or one you trust?")
+        || line_has_title(text, "Accessing workspace")
 }
 
-fn mcp_name(text: &str) -> Option<String> {
+/// Folder path on a trust screen. `None` when the title has no path.
+#[must_use]
+pub(crate) fn trust_folder(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("Accessing workspace") else {
+            continue;
+        };
+        let rest = rest.trim().trim_start_matches(':').trim();
+        if rest.starts_with('/') {
+            return Some(rest.to_owned());
+        }
+        let later = lines.get(index.saturating_add(1)..).unwrap_or(&[]);
+        for next in later {
+            let next = next.trim();
+            if next.is_empty() {
+                continue;
+            }
+            if next.starts_with('/') {
+                return Some(next.to_owned());
+            }
+            break;
+        }
+    }
+    None
+}
+
+/// The screen path and the seat cwd name the same directory.
+#[must_use]
+pub(crate) fn same_dir(screen_path: &str, cwd: &std::path::Path) -> bool {
+    trim_dir(screen_path) == trim_dir(&cwd.display().to_string())
+}
+
+fn trim_dir(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches('/');
+    if trimmed.is_empty() { "/" } else { trimmed }.to_owned()
+}
+
+fn mcp_name(text: &str, options: &[MenuLine]) -> Option<String> {
     for line in text.lines() {
         let Some(rest) = line
             .trim()
@@ -199,15 +251,66 @@ fn mcp_name(text: &str) -> Option<String> {
             continue;
         };
         let name = rest.trim().trim_end_matches('.');
-        if !name.is_empty() {
+        if !name.is_empty() && has_option(options, "Continue without using this MCP server") {
             return Some(name.to_owned());
         }
     }
-    None
+    if !mcp_banner(text) || options.is_empty() {
+        return None;
+    }
+    let name = options
+        .first()
+        .map(|line| {
+            line.text
+                .trim()
+                .trim_start_matches("[✔]")
+                .trim()
+                .trim_start_matches("[ ]")
+                .trim()
+                .to_owned()
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "project".to_owned());
+    Some(name)
+}
+
+fn mcp_banner(text: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.starts_with("New MCP server found") {
+            return true;
+        }
+        let digit = trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit());
+        trimmed.contains("MCP servers found in .mcp.json") && (digit || trimmed.starts_with("MCP"))
+    })
 }
 
 fn has_option(options: &[MenuLine], text: &str) -> bool {
-    options.iter().any(|line| line.text == text)
+    options
+        .iter()
+        .any(|line| line.text == text || option_label(&line.text) == text)
+}
+
+fn option_label(text: &str) -> &str {
+    let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return text;
+    }
+    text.get(digits.len()..)
+        .and_then(|rest| rest.strip_prefix(". "))
+        .unwrap_or(text)
+}
+
+/// A title is the start of a line, after an optional `WARNING:` prefix.
+fn line_has_title(text: &str, title: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim();
+        let trimmed = trimmed.strip_prefix("WARNING:").map_or(trimmed, str::trim);
+        let Some(rest) = trimmed.strip_prefix(title) else {
+            return false;
+        };
+        rest.is_empty() || rest.starts_with([' ', '?', ':', '.'])
+    })
 }
 
 fn is_claude(kind: &KnownDialog) -> bool {
@@ -215,39 +318,50 @@ fn is_claude(kind: &KnownDialog) -> bool {
 }
 
 fn login_kind(text: &str) -> Option<LoginKind> {
-    if text.contains("Choose the text style that looks best") {
+    if line_has_title(text, "Choose the text style that looks best") {
         return Some(LoginKind::ThemePicker);
     }
-    if text.contains("Select login method:") {
+    if line_has_title(text, "Select login method:") {
         return Some(LoginKind::LoginMethod);
     }
-    if text.contains("Paste the authorization code") {
+    if line_has_title(text, "Paste the authorization code") {
         return Some(LoginKind::OAuthPaste);
     }
+    if text.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with("Not logged in") && trimmed.contains("/login")
+    }) {
+        return Some(LoginKind::LoginMethod);
+    }
     None
+}
+
+fn no_conversation(text: &str) -> bool {
+    line_has_title(text, "No conversation found with session ID")
 }
 
 fn has_interrupt(text: &str) -> bool {
     text.to_ascii_lowercase().contains("esc to interrupt")
 }
 
-fn is_composer(text: &str) -> bool {
-    text.contains("? for shortcuts") && has_border(text) && has_prompt(text)
-}
-
-fn has_border(text: &str) -> bool {
-    text.lines().any(|line| {
-        line.contains('╭')
-            || line.contains('╰')
-            || line.chars().filter(|ch| *ch == '─').take(4).count() >= 4
-    })
-}
-
-fn has_prompt(text: &str) -> bool {
+fn spinning(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim();
-        trimmed == ">" || trimmed == "❯" || (line.contains('│') && line.contains('>'))
+        if trimmed.contains("Crunched") {
+            return false;
+        }
+        trimmed.chars().any(is_spinner)
+            || (trimmed.contains('…')
+                && (trimmed.starts_with("Working")
+                    || trimmed.contains("Thinking")
+                    || trimmed.contains("Onioning")
+                    || trimmed.contains("Sketching")
+                    || trimmed.contains("Processing")))
     })
+}
+
+fn is_spinner(ch: char) -> bool {
+    ('\u{2800}'..='\u{28ff}').contains(&ch) || matches!(ch, '✶' | '✽')
 }
 
 fn dialog_code(kind: &KnownDialog) -> ReadinessCode {

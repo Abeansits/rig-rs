@@ -355,7 +355,16 @@ impl Multiplexer for FakeMux {
             inner: Arc::clone(&self.inner),
         };
         let receipt = perform_paste(&exec, &pane_target(pane), text, opts).await?;
-        self.inner.lock().await.fail_paste = false;
+        let mut guard = self.inner.lock().await;
+        guard.fail_paste = false;
+        if guard.replay.is_empty() {
+            guard.capture = land_paste(&guard.capture, text);
+            let session = canonical_session_name(&pane.session);
+            if let Some(screen) = guard.screens.get_mut(&session) {
+                *screen = land_paste(screen, text);
+            }
+        }
+        drop(guard);
         self.own_write.send_replace(Some(Instant::now()));
         Ok(receipt)
     }
@@ -438,6 +447,55 @@ fn scripted_plan(guard: &FakeInner, spec: &SessionSpec) -> Option<crate::fake_sc
     }
     let raw = spec.env.get("RIG_STUB_SCRIPT").map_or("", String::as_str);
     Some(crate::fake_script::parse_stub(raw))
+}
+
+/// Put `payload` into an empty `>` / `❯` prompt so a paste check can see it.
+///
+/// A replay queue is left alone: the test is showing a screen that did not change.
+fn land_paste(capture: &Capture, payload: &str) -> Capture {
+    let flat = payload.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut lines: Vec<String> = capture.text.lines().map(str::to_owned).collect();
+    if let Some(index) = lines.iter().rposition(|line| empty_prompt_line(line))
+        && let Some(line) = lines.get_mut(index)
+    {
+        *line = fill_prompt(line, &flat);
+    }
+    let mut text = lines.join("\n");
+    if capture.text.ends_with('\n') {
+        text.push('\n');
+    }
+    Capture::new(text, capture.cursor)
+}
+
+fn empty_prompt_line(line: &str) -> bool {
+    let inner = bar_inner(line).unwrap_or(line.trim());
+    matches!(inner, ">" | "❯" | "›" | "")
+        && (line.contains('>') || line.contains('❯') || line.contains('›'))
+}
+
+fn fill_prompt(line: &str, flat: &str) -> String {
+    let Some(start) = line.find('│') else {
+        return format!("> {flat}");
+    };
+    let Some(end) = line.rfind('│') else {
+        return format!("> {flat}");
+    };
+    if end <= start {
+        return format!("> {flat}");
+    }
+    let pre = line.get(..start).unwrap_or("");
+    let post = line.get(end..).unwrap_or("");
+    format!("{pre}│ > {flat} {post}")
+}
+
+fn bar_inner(line: &str) -> Option<&str> {
+    let start = line.find('│')?;
+    let end = line.rfind('│')?;
+    if end <= start {
+        return None;
+    }
+    line.get(start.saturating_add('│'.len_utf8())..end)
+        .map(str::trim)
 }
 
 fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {

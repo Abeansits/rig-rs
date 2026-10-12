@@ -70,6 +70,10 @@ impl SeatIo for ClaudeIo {
         self.mux
             .paste(&self.pane, text, PasteOpts::default())
             .await?;
+        let landed = self.snapshot().await?;
+        if !crate::claude::composer::composer_matches(&landed.text, text) {
+            return Err(Error::PasteMismatch);
+        }
         if mode == SubmitMode::Enter {
             self.mux.send_keys(&self.pane, &[Key::Enter]).await?;
         }

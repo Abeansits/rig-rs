@@ -37,6 +37,8 @@ pub enum ReadinessCode {
     UnrecognisedScreen,
     /// Claude's fullscreen-renderer popup.
     FullscreenRenderer,
+    /// The composer already holds text. Fail closed: do not paste or send Enter.
+    PromptDraft,
     /// A caller-supplied code, such as an invalid working directory.
     Other(String),
 }
@@ -60,6 +62,7 @@ impl ReadinessCode {
             Self::UnknownMenu => "unknown_menu",
             Self::UnrecognisedScreen => "unrecognised_screen",
             Self::FullscreenRenderer => "fullscreen_renderer",
+            Self::PromptDraft => "prompt_draft",
             Self::Other(text) => text.as_str(),
         }
     }
@@ -91,6 +94,7 @@ impl ReadinessCode {
             "unknown_menu" => Self::UnknownMenu,
             "unrecognised_screen" => Self::UnrecognisedScreen,
             "fullscreen_renderer" => Self::FullscreenRenderer,
+            "prompt_draft" => Self::PromptDraft,
             other => Self::Other(other.to_owned()),
         }
     }

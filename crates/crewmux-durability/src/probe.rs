@@ -14,12 +14,20 @@ pub struct UserTurn {
 }
 
 /// Locate the session file. The slug replaces every non-alphanumeric byte with `-`.
-#[must_use]
-pub fn transcript_path(home: &Path, cwd: &Path, session_id: &str) -> PathBuf {
-    home.join(".claude")
+///
+/// # Errors
+///
+/// Returns [`Error::SessionId`] when `session_id` is not a UUID. The id is a
+/// file name, so a non-UUID is refused before it is joined onto the path.
+pub fn transcript_path(home: &Path, cwd: &Path, session_id: &str) -> Result<PathBuf, Error> {
+    if uuid::Uuid::parse_str(session_id).is_err() {
+        return Err(Error::SessionId);
+    }
+    Ok(home
+        .join(".claude")
         .join("projects")
         .join(project_slug(cwd))
-        .join(format!("{session_id}.jsonl"))
+        .join(format!("{session_id}.jsonl")))
 }
 
 /// Claude's project directory slug.
@@ -49,6 +57,7 @@ pub fn user_turns_after(path: &Path, after_bytes: u64) -> Result<Vec<UserTurn>, 
     let start = usize::try_from(after_bytes).unwrap_or(bytes.len());
     let start = start.min(bytes.len());
     let tail = skip_partial_line(&bytes, start);
+    let tail = drop_incomplete_tail(tail);
     parse_turns(path, tail)
 }
 
@@ -62,6 +71,17 @@ pub fn transcript_len(path: &Path) -> Result<u64, Error> {
         Ok(meta) => Ok(meta.len()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(0),
         Err(err) => Err(err.into()),
+    }
+}
+
+/// A last line with no newline is still being written. Skip it and keep polling.
+fn drop_incomplete_tail(tail: &[u8]) -> &[u8] {
+    if tail.is_empty() || tail.last() == Some(&b'\n') {
+        return tail;
+    }
+    match tail.iter().rposition(|byte| *byte == b'\n') {
+        Some(index) => tail.get(..=index).unwrap_or(tail),
+        None => &[],
     }
 }
 

@@ -228,11 +228,33 @@ fn workspace_root_walks_up_from_the_process() {
 }
 
 #[test]
+fn slice2_titles_match_the_pin_when_openrig_dir_is_set() {
+    let Ok(dir) = std::env::var("OPENRIG_DIR") else {
+        return;
+    };
+    let root = workspace_root();
+    let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
+    let rows = parse_csv(&text).unwrap();
+    let errors = check_case_titles(&rows, std::path::Path::new(&dir));
+    let ours: Vec<_> = errors
+        .into_iter()
+        .filter(|err| {
+            err.contains("claude-runtime-adapter")
+                || err.contains("claude-warning-footer")
+                || err.contains("claude-interactive-launch")
+                || err.contains("native-resume-probe")
+                || err.contains("native-claude-delivery")
+        })
+        .collect();
+    assert_eq!(ours, Vec::<String>::new(), "{ours:?}");
+}
+
+#[test]
 fn seeded_ledger_is_check_green() {
     let root = workspace_root();
     let text = fs::read_to_string(root.join("parity/ledger.csv")).unwrap();
     let rows = parse_csv(&text).unwrap();
-    assert_eq!(rows.len(), 1394);
+    assert_eq!(rows.len(), 1536);
     for row in &rows {
         match row.status {
             LedgerStatus::Todo => {

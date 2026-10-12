@@ -1,5 +1,6 @@
 //! Poll a Claude pane until it is ready, blocked, or out of budget.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -7,7 +8,7 @@ use crewmux_mux::{Capture, CaptureRange, Multiplexer, PaneRef};
 use crewmux_types::{ReadinessCode, SeatId};
 
 use crate::budget::LaunchBudget;
-use crate::claude::screen::{ClaudeScreen, classify};
+use crate::claude::screen::{ClaudeScreen, classify, same_dir, trust_folder};
 use crate::dialog::{DialogDriver, DialogOption, MuxDialogDriver, auto_choice};
 
 pub(crate) struct DriveOutcome {
@@ -18,6 +19,7 @@ pub(crate) async fn drive(
     mux: Arc<dyn Multiplexer>,
     pane: &PaneRef,
     seat: &SeatId,
+    cwd: &Path,
     auto_trust: bool,
     budget: LaunchBudget,
 ) -> DriveOutcome {
@@ -29,7 +31,7 @@ pub(crate) async fn drive(
         let Ok(capture) = mux.capture(pane, CaptureRange::Visible).await else {
             return blocked();
         };
-        match act(&mux, pane, seat, auto_trust, &capture).await {
+        match act(&mux, pane, seat, cwd, auto_trust, &capture).await {
             Act::Ready | Act::Stop => return DriveOutcome { force: None },
             Act::Answered => watch.gate_at = Some(Instant::now()),
             Act::Poll { inconclusive } => {
@@ -56,6 +58,7 @@ async fn act(
     mux: &Arc<dyn Multiplexer>,
     pane: &PaneRef,
     seat: &SeatId,
+    cwd: &Path,
     auto_trust: bool,
     capture: &Capture,
 ) -> Act {
@@ -65,8 +68,15 @@ async fn act(
             inconclusive: false,
         },
         ClaudeScreen::Inconclusive => Act::Poll { inconclusive: true },
-        ClaudeScreen::Login(_) | ClaudeScreen::UnknownMenu { .. } => Act::Stop,
+        ClaudeScreen::Login(_) | ClaudeScreen::UnknownMenu { .. } | ClaudeScreen::Draft => {
+            Act::Stop
+        }
         ClaudeScreen::Dialog(dialog) => {
+            if matches!(dialog.known, crewmux_types::KnownDialog::ClaudeTrust)
+                && !trust_folder(&capture.text).is_some_and(|folder| same_dir(&folder, cwd))
+            {
+                return Act::Stop;
+            }
             let Some(choice) = auto_choice(&dialog.known, auto_trust) else {
                 return Act::Stop;
             };

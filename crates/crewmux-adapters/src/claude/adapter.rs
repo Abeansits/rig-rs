@@ -139,6 +139,13 @@ impl AgentAdapter for ClaudeAdapter {
         if let Some(failed) = missing_cwd(binding).await? {
             return Ok(failed);
         }
+        if crate::claude::screen::same_dir(&self.home.display().to_string(), &binding.cwd) {
+            return Ok(LaunchOutcome::Failed {
+                error: "refusing to launch Claude with cwd set to $HOME".to_owned(),
+                recovery: Some(crate::types::Recovery::AttentionRequired),
+                evidence: Some(binding.cwd.display().to_string()),
+            });
+        }
         let seat_dir = self.seat_dir(&binding.seat);
         let prepared = launch::prepare(binding, &opts, &seat_dir).await?;
         let session_id = prepared.session_id.clone();
@@ -148,6 +155,7 @@ impl AgentAdapter for ClaudeAdapter {
             Arc::clone(&self.mux),
             &pane,
             &binding.seat,
+            &binding.cwd,
             opts.auto_trust,
             budget,
         )

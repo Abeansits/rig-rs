@@ -60,6 +60,9 @@ fn scan(path: &Path, root: &Path, hits: &mut Vec<String>) -> Result<(), Error> {
         if !allow_enter && compact.contains("Key::Enter") {
             hits.push(format!("{}:{line_no}: Enter", path.display()));
         }
+        if carriage_return_literal(&compact) {
+            hits.push(format!("{}:{line_no}: Enter", path.display()));
+        }
         if compact.contains("Key::CtrlC") || compact.contains("Key::Escape") {
             hits.push(format!("{}:{line_no}: quit key", path.display()));
         }
@@ -68,6 +71,13 @@ fn scan(path: &Path, root: &Path, hits: &mut Vec<String>) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+fn carriage_return_literal(compact: &str) -> bool {
+    compact.contains("Key::Literal(\"\\r\")")
+        || compact.contains("Key::Literal('\\r')")
+        || compact.contains("Key::Literal(\"\r\")")
+        || compact.contains("Key::Literal('\r')")
 }
 
 fn forbidden_literal(compact: &str) -> bool {

@@ -12,12 +12,12 @@ pub struct ClaudeDelivery;
 
 impl DeliveryCheck for ClaudeDelivery {
     fn cursor(&self, query: &ProbeQuery) -> Result<u64, AdapterError> {
-        let path = transcript_path(&query.home, &query.cwd, &query.session_id);
+        let path = transcript_path(&query.home, &query.cwd, &query.session_id).map_err(map_err)?;
         transcript_len(&path).map_err(map_err)
     }
 
     fn turns(&self, query: &ProbeQuery) -> Result<Vec<String>, AdapterError> {
-        let path = transcript_path(&query.home, &query.cwd, &query.session_id);
+        let path = transcript_path(&query.home, &query.cwd, &query.session_id).map_err(map_err)?;
         let turns = user_turns_after(&path, query.after_bytes).map_err(map_err)?;
         Ok(turns.into_iter().map(|turn| turn.text).collect())
     }
@@ -34,6 +34,6 @@ impl DeliveryCheck for ClaudeDelivery {
 fn map_err(err: Error) -> AdapterError {
     match err {
         Error::Io(err) => AdapterError::Io(err),
-        Error::Parse { .. } => AdapterError::Message(err.to_string()),
+        Error::Parse { .. } | Error::SessionId => AdapterError::Message(err.to_string()),
     }
 }

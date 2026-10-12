@@ -24,10 +24,15 @@ pub(crate) async fn prepare(
     let (mcp, settings) = tokio::task::spawn_blocking(move || write_seat(&dir, mode))
         .await
         .map_err(|err| Error::Message(err.to_string()))??;
-    let session_id = opts
-        .resume
-        .as_ref()
-        .map_or_else(mint_session_id, |token| token.value.clone());
+    let session_id = match &opts.resume {
+        Some(token) => {
+            if uuid::Uuid::parse_str(&token.value).is_err() {
+                return Err(Error::Message("resume token is not a UUID".to_owned()));
+            }
+            token.value.clone()
+        }
+        None => mint_session_id(),
+    };
     write_id(&seat_dir.join("claude-session-id"), &session_id).await?;
     let binary = opts
         .claude_bin
