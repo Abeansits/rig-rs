@@ -55,6 +55,8 @@ mod lineage_it;
 #[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]
+mod send_tests;
+#[cfg(test)]
 mod slice4_tests;
 #[cfg(test)]
 mod slice8_delivery_tests;
