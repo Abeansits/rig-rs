@@ -98,7 +98,7 @@ fn ask_says_when_the_seat_has_no_transcript() {
 #[test]
 fn ask_does_not_mix_seat_and_session_files() {
     let env = Env::new();
-    let seat = env.rig_home.join("transcripts/one");
+    let seat = env.rig_home.join("transcripts/pair/one");
     std::fs::create_dir_all(&seat).expect("seat");
     std::fs::write(seat.join("1.txt"), "seat-only-token\n").expect("txt");
     let sessions = env.rig_home.join("sessions");

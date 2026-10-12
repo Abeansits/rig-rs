@@ -32,3 +32,19 @@ pub fn obligation_fingerprint(source: &str, destination: &str, body: &str) -> St
 pub fn leaks_body(text: &str, body: &str) -> bool {
     !body.is_empty() && text.contains(body)
 }
+
+/// Queue rows whose last nudge was delivered and not confirmed.
+///
+/// Restore re-nudges these with [`nudge_pointer`] and does not change the row.
+#[must_use]
+pub fn unconfirmed_ids(items: &[crate::model::QueueItem]) -> Vec<QItemId> {
+    items
+        .iter()
+        .filter(|item| {
+            item.last_nudge
+                .as_ref()
+                .is_some_and(|nudge| nudge.result == "delivered-ack-pending")
+        })
+        .map(|item| item.id.clone())
+        .collect()
+}

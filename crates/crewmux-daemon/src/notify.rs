@@ -71,6 +71,14 @@ fn project(event: &DomainEvent) -> (StreamKind, Option<StreamPayload>) {
                 ..StreamPayload::default()
             }),
         ),
+        DomainEvent::RestoreCompleted { outcome, .. } => (
+            StreamKind::Activity,
+            Some(StreamPayload {
+                outcome: Some(outcome.clone()),
+                summary: Some(event.kind().to_owned()),
+                ..StreamPayload::default()
+            }),
+        ),
         _ => (
             StreamKind::Activity,
             Some(StreamPayload {

@@ -1,0 +1,24 @@
+---
+source: crates/rig/tests/slice8_cli.rs
+expression: "serde_json::to_string_pretty(&ready).unwrap()"
+---
+{
+  "classes": {
+    "attention_required": 0,
+    "not_ready": 0,
+    "ready": 2,
+    "ready_with_caveats": 0,
+    "unknown": 0
+  },
+  "remediations": [],
+  "seats": [
+    {
+      "class": "ready",
+      "seat": "one"
+    },
+    {
+      "class": "ready",
+      "seat": "two"
+    }
+  ]
+}

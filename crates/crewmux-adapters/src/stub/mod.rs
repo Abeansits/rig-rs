@@ -97,7 +97,7 @@ impl AgentAdapter for StubAdapter {
         spec.remain_on_exit = false;
         let pane = self.mux.create_session(&spec).await?;
         Ok(LaunchOutcome::Ok {
-            resume: None,
+            resume: opts.resume.clone(),
             applied: AppliedLaunch {
                 tmux_session: pane.session.clone(),
                 pane,
@@ -115,9 +115,34 @@ impl AgentAdapter for StubAdapter {
 
     async fn discover_resume_token(
         &self,
-        _binding: &NodeBinding,
+        binding: &NodeBinding,
     ) -> Result<Option<ResumeToken>, Error> {
-        Ok(None)
+        let Some(path) = binding
+            .runtime_opts
+            .get("resume_file")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Ok(None);
+        };
+        let path = std::path::PathBuf::from(path);
+        let read = tokio::task::spawn_blocking(move || std::fs::read_to_string(path))
+            .await
+            .map_err(|err| Error::Message(err.to_string()))?;
+        match read {
+            Ok(text) => {
+                let text = text.trim();
+                if text.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(ResumeToken {
+                        kind: "stub".to_owned(),
+                        value: text.to_owned(),
+                    }))
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(Error::Message(err.to_string())),
+        }
     }
 }
 

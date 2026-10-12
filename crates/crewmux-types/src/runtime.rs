@@ -42,7 +42,9 @@ impl RuntimeKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchPosture {
-    /// The floor posture.
+    /// Explicit lock. Restore must not widen this.
+    Locked,
+    /// The floor posture. Also the locked minimum when nothing is attached.
     Floor,
     /// Full bypass of first-launch warnings.
     FullBypass,

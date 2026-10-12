@@ -29,6 +29,7 @@ fn outbound() -> Outbound {
         interact: false,
         reason: None,
         verify: false,
+        track_direct: true,
     }
 }
 

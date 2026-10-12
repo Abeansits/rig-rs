@@ -1,0 +1,39 @@
+---
+source: crates/rig/tests/slice8_cli.rs
+expression: "serde_json::to_string_pretty(&shown).unwrap()"
+---
+{
+  "created_at": 0,
+  "id": "<ulid>",
+  "in_flight": [],
+  "rig": "<ulid>",
+  "rig_name": "pair",
+  "schema_version": 4,
+  "seats": [
+    {
+      "name": "one",
+      "posture": "auto",
+      "resume": {
+        "kind": "stub",
+        "value": "<resume>"
+      },
+      "runtime": "stub",
+      "seat": "<ulid>",
+      "startup_status": null,
+      "transcript_cursor": null
+    },
+    {
+      "name": "two",
+      "posture": "auto",
+      "resume": {
+        "kind": "stub",
+        "value": "<resume>"
+      },
+      "runtime": "stub",
+      "seat": "<ulid>",
+      "startup_status": null,
+      "transcript_cursor": null
+    }
+  ],
+  "sha256": "<sha256>"
+}

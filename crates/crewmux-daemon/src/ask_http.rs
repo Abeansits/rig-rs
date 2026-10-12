@@ -21,10 +21,17 @@ pub(crate) async fn ask(State(app): State<App>, body: Bytes) -> Response {
     let home = app.home.clone();
     let enabled = app.transcripts;
     let seat_name = parsed.seat.clone();
+    let rig_name = parsed.rig.clone();
     let token = parsed.session.clone();
-    let loaded =
-        tokio::task::spawn_blocking(move || load(&home, seat_name.as_deref(), token.as_deref()))
-            .await;
+    let loaded = tokio::task::spawn_blocking(move || {
+        load(
+            &home,
+            rig_name.as_deref(),
+            seat_name.as_deref(),
+            token.as_deref(),
+        )
+    })
+    .await;
     let corpus = match loaded {
         Ok(corpus) => corpus,
         Err(err) => return fail(Error::Message(err.to_string())),
@@ -55,7 +62,12 @@ pub(crate) async fn ask(State(app): State<App>, body: Bytes) -> Response {
     }
 }
 
-fn load(home: &std::path::Path, seat: Option<&str>, token: Option<&str>) -> AskCorpus {
+fn load(
+    home: &std::path::Path,
+    rig: Option<&str>,
+    seat: Option<&str>,
+    token: Option<&str>,
+) -> AskCorpus {
     if token.is_some() {
         return AskCorpus {
             session_jsonl: token.and_then(|token| read_session(home, token)),
@@ -63,14 +75,43 @@ fn load(home: &std::path::Path, seat: Option<&str>, token: Option<&str>) -> AskC
         };
     }
     AskCorpus {
-        seat_generations: seat.map(|seat| read_seat(home, seat)).unwrap_or_default(),
+        seat_generations: seat
+            .map(|seat| read_seat(home, rig, seat))
+            .unwrap_or_default(),
         ..AskCorpus::default()
     }
 }
 
-fn read_seat(home: &std::path::Path, seat: &str) -> Vec<(u64, String)> {
-    let dir = home.join("transcripts").join(seat);
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+fn read_seat(home: &std::path::Path, rig: Option<&str>, seat: &str) -> Vec<(u64, String)> {
+    let mut rows = Vec::new();
+    for dir in seat_dirs(home, rig, seat) {
+        rows.extend(read_generations(&dir));
+    }
+    rows.sort_by_key(|(generation, _)| *generation);
+    rows
+}
+
+fn seat_dirs(home: &std::path::Path, rig: Option<&str>, seat: &str) -> Vec<std::path::PathBuf> {
+    let root = home.join("transcripts");
+    if let Some(rig) = rig.filter(|rig| !rig.is_empty()) {
+        return vec![root.join(rig).join(seat)];
+    }
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut dirs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path().join(seat);
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
+    dirs.sort();
+    dirs
+}
+
+fn read_generations(dir: &std::path::Path) -> Vec<(u64, String)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut rows = Vec::new();
@@ -89,7 +130,6 @@ fn read_seat(home: &std::path::Path, seat: &str) -> Vec<(u64, String)> {
             rows.push((generation, body));
         }
     }
-    rows.sort_by_key(|(generation, _)| *generation);
     rows
 }
 
