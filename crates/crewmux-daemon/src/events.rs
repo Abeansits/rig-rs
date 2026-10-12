@@ -104,9 +104,13 @@ fn resume_cursor(headers: &HeaderMap, resume: &Resume) -> Option<u64> {
     let header = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok());
-    header
-        .or(resume.last_event_id.as_deref())
-        .and_then(|text| text.parse().ok())
+    header.or(resume.last_event_id.as_deref()).and_then(|text| {
+        if text.len() > 20 {
+            None
+        } else {
+            text.parse().ok()
+        }
+    })
 }
 
 fn project(event: &DomainEvent, seat: Option<&SeatKey>) -> Option<Projected> {

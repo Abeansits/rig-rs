@@ -2,7 +2,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, StubAdapter};
@@ -28,15 +27,13 @@ async fn harness(script: Option<&str>) -> (App, Arc<FakeMux>) {
         Arc::clone(&shared),
         "rig-stub-agent",
     )));
-    let app = App {
+    let app = App::new(
         store,
-        mux: shared,
-        up_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        stub_script: script.map(str::to_owned),
-        cancel: CancellationToken::new(),
-        activity: Arc::new(AtomicU64::new(0)),
-        registry: Arc::new(registry),
-    };
+        shared,
+        script.map(str::to_owned),
+        CancellationToken::new(),
+        Arc::new(registry),
+    );
     tokio::spawn(supervise(app.clone()));
     (app, mux)
 }

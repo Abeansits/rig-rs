@@ -4,6 +4,7 @@
 //! The binary dispatches `tui` before clap so `rig --help` stays the setup/doctor list.
 
 mod autostart;
+mod chatroom;
 mod command;
 mod doctor_cmd;
 mod doctor_eval;
@@ -120,6 +121,8 @@ enum Commands {
     Setup(command::SetupArgs),
     /// Read-only version and environment checks.
     Doctor(command::DoctorArgs),
+    /// Per-rig chatroom: send, history, watch, topic, and clear.
+    Chatroom(chatroom::ChatroomArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -155,6 +158,7 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Down { rig, json } => down(rig.as_deref(), json),
         Commands::Setup(args) => setup_cmd::run(&Paths::capture()?, &args),
         Commands::Doctor(args) => doctor_cmd::run(&Paths::capture()?, &args),
+        Commands::Chatroom(args) => chatroom::run(&args),
     }
 }
 

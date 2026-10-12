@@ -2,23 +2,19 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, StubAdapter};
 use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
 use crewmux_store::Store;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
 
 use crate::death::supervise;
 use crate::error::Error;
 use crate::http::router;
 use crate::reconcile::reconcile;
 use crate::runtime::{self, DaemonLock};
-use crate::state::{
-    App, idle_exceeded, now_ms, socket_name_from_env, stub_binary, stub_script_from_env,
-};
+use crate::state::{App, idle_exceeded, socket_name_from_env, stub_binary, stub_script_from_env};
 
 /// Bind the daemon and serve until shutdown or idle.
 ///
@@ -48,15 +44,13 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
         stub_bin.clone(),
     )));
     let cancel = CancellationToken::new();
-    let app = App {
+    let app = App::new(
         store,
         mux,
-        up_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        stub_script: stub_script_from_env(),
-        cancel: cancel.clone(),
-        activity: Arc::new(AtomicU64::new(now_ms())),
-        registry: Arc::new(registry),
-    };
+        stub_script_from_env(),
+        cancel.clone(),
+        Arc::new(registry),
+    );
     reconcile(&app).await?;
     let sock = crewmux_api::daemon_socket(&home);
     let pid = home.join("run/daemon.pid");
@@ -77,7 +71,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
             .await
             .map_err(crate::state::join_err)??;
     }
-    let tracker = TaskTracker::new();
+    let tracker = app.tasks.clone();
     tracker.spawn(supervise(app.clone()));
     tracker.spawn(reap(app.clone()));
     tracker.spawn(on_terminate(cancel.clone()));

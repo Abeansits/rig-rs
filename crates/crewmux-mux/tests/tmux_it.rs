@@ -281,6 +281,11 @@ mod suite {
                 .create_session(&sleep_spec("before"))
                 .await
                 .expect("before");
+            assert!(
+                crewmux_mux::socket_owned_by(&server.socket, std::process::id()),
+                "refusing to kill-server {}",
+                server.socket
+            );
             let status = std::process::Command::new("tmux")
                 .args(["-L", &server.socket, "-f", "/dev/null", "kill-server"])
                 .status()

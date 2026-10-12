@@ -1,0 +1,5 @@
+---
+source: crates/rig/tests/chatroom.rs
+expression: redact(&json)
+---
+{"id":"<id>","rigId":"<id>","sender":"operator","kind":"topic","body":"daily","topic":"standup","createdAt":"<time>"}

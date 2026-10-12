@@ -71,6 +71,11 @@ insta = "1.49.0"
 # Slice 7. Versions come from `cargo add` (crates.io, 2026-10-11), then hoisted.
 toml_edit = "0.25.17"
 predicates = "3.1.4"
+# Slice 5. Versions come from `cargo add` (crates.io, 2026-10-11), then hoisted.
+# tokio-stream turns the watch task's mpsc into the SSE `Stream`.
+# signal-hook lets `rig chatroom watch` exit 0 on SIGINT without an unsafe handler.
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+signal-hook = "0.4.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

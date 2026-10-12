@@ -37,7 +37,9 @@ impl Env {
             .env("RIG_HOME", &self.rig_home)
             .env("RIG_FAKE_MUX", "1")
             .env_remove("RIG_STUB_SCRIPT")
+            .env_remove("RIG_TMUX_SOCKET")
             .env_remove("TMUX")
+            .env_remove("TMUX_TMPDIR")
             .current_dir(&self.home);
         command
     }

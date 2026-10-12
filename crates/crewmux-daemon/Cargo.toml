@@ -30,6 +30,10 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
+tokio-stream.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
 
 [features]
 # In-memory multiplexer for debug test builds. Release binaries leave this off

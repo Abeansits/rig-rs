@@ -71,6 +71,9 @@ mod live {
     }
 
     fn kill_server(socket: &str) {
+        if !owned_socket(socket) {
+            return;
+        }
         let mut kill = Command::new("tmux");
         kill.args(["-L", socket, "-f", "/dev/null", "kill-server"])
             .env_remove("TMUX")
@@ -79,6 +82,17 @@ mod live {
             .stderr(Stdio::null());
         if let Ok(mut child) = kill.spawn() {
             drop(child.wait());
+        }
+    }
+
+    fn owned_socket(socket: &str) -> bool {
+        let pid = std::process::id().to_string();
+        let Some(rest) = socket.strip_prefix("rig-rs-") else {
+            return false;
+        };
+        match rest.split_once('-') {
+            Some((head, tail)) => head == pid && !tail.is_empty(),
+            None => rest == pid,
         }
     }
 

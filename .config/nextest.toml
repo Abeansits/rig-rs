@@ -51,6 +51,12 @@ filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
 threads-required = "num-test-threads"
 
+# Chatroom CLI tests dial a private daemon. A reset under a busy machine
+# would apply a POST twice if the client retried, so these run alone instead.
+[[profile.default.overrides]]
+filter = "test(/^chatroom_/)"
+threads-required = "num-test-threads"
+
 [[profile.ci.overrides]]
 filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
 test-group = "tmux-heavy"
@@ -61,6 +67,10 @@ filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
 threads-required = "num-test-threads"
 
+[[profile.ci.overrides]]
+filter = "test(/^chatroom_/)"
+threads-required = "num-test-threads"
+
 [[profile.slow.overrides]]
 filter = "test(/::tmux_it::paste_/) | test(/::tmux_it::control_fidelity_/)"
 test-group = "tmux-heavy"
@@ -69,4 +79,8 @@ threads-required = "num-test-threads"
 [[profile.slow.overrides]]
 filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
+threads-required = "num-test-threads"
+
+[[profile.coverage.overrides]]
+filter = "test(/^chatroom_/)"
 threads-required = "num-test-threads"

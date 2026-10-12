@@ -10,6 +10,12 @@ pub use error::SpecError;
 pub use model::{RigSpec, SeatSpec};
 
 use std::collections::BTreeSet;
+use std::path::Path;
+
+use crewmux_types::MAX_NAME_LEN;
+
+/// Longest seat `cwd`, in bytes.
+const MAX_CWD_LEN: usize = 4096;
 
 /// Parse and validate a slice 1 rig spec.
 ///
@@ -46,6 +52,12 @@ fn validate(spec: &RigSpec, text: &str) -> Result<(), SpecError> {
                 "seat name must match [A-Za-z0-9_-]",
             ));
         }
+        if let Some(model) = &seat.model {
+            check_model(model, index, text)?;
+        }
+        if let Some(cwd) = &seat.cwd {
+            check_cwd(cwd, index, text)?;
+        }
         if !seen.insert(seat.name.as_str()) {
             let (line, col) = second_token(text, seat.name.as_str()).unwrap_or((1, 1));
             return Err(SpecError::at(
@@ -76,7 +88,42 @@ fn check_name(name: &str, path: &str, text: &str) -> Result<(), SpecError> {
             "name: required non-empty string",
         ));
     }
+    if name.len() > MAX_NAME_LEN {
+        let (line, col) = locate_token(text, path).unwrap_or((1, 1));
+        return Err(SpecError::at(
+            line,
+            col,
+            path,
+            "name must be at most 256 bytes",
+        ));
+    }
     Ok(())
+}
+
+fn check_model(model: &str, index: usize, text: &str) -> Result<(), SpecError> {
+    if model.len() <= MAX_NAME_LEN && !model.chars().any(char::is_control) {
+        return Ok(());
+    }
+    let (line, col) = locate_token(text, "model").unwrap_or((1, 1));
+    Err(SpecError::at(
+        line,
+        col,
+        format!("seats[{index}].model"),
+        "invalid model",
+    ))
+}
+
+fn check_cwd(cwd: &Path, index: usize, text: &str) -> Result<(), SpecError> {
+    if cwd.as_os_str().len() <= MAX_CWD_LEN {
+        return Ok(());
+    }
+    let (line, col) = locate_token(text, "cwd").unwrap_or((1, 1));
+    Err(SpecError::at(
+        line,
+        col,
+        format!("seats[{index}].cwd"),
+        "cwd must be at most 4096 bytes",
+    ))
 }
 
 fn second_token(text: &str, token: &str) -> Option<(u32, u32)> {

@@ -1,0 +1,5 @@
+---
+source: crates/rig/tests/chatroom.rs
+expression: out.trim()
+---
+--- topic: deploy ---

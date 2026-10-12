@@ -25,7 +25,7 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 
 - **Covers:** stdout
 - **TS behaviour:** `rig --help` lists the v0.6.9 command names (`add`, `adopt`, `agent`, … `workspace`). `rig --version` prints `0.6.9` and exits 0.
-- **Rust behaviour today:** the merged CLI prints clap help for `attach`, `capture`, `doctor`, `down`, `help`, `ps`, `setup`, and `up`, and `rig --version` prints `rig 0.0.0`. The help-name projection is those names sorted. The exit status still matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
+- **Rust behaviour today:** the merged CLI prints clap help for `attach`, `capture`, `chatroom`, `doctor`, `down`, `help`, `ps`, `setup`, and `up`, and `rig --version` prints `rig 0.0.0`. The help-name projection is those names sorted. The exit status still matches, which is why the `version` case (exit code only) is Equal. The tmux shim records the same `tmux -V` argv on both sides.
 - **Snapshot:** `tests/diff/snapshots/help-top.rs.snap` and `tests/diff/snapshots/scenario-runner-probe.rs.snap` record that Rust side. `ExpectedDiff(PE-003)` applies only while the live Rust observation still matches that snapshot. Exit status, stderr, JSON, files, and tmux argv are compared as ordinary fields. A different exit code, a stderr panic, or an extra or missing tmux call is `Unexpected`.
 - **Why this is recorded:** these are real diffs from a local `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`). They are not a behaviour we intend to keep, and they are not hidden. Delete this heading, and the two `.rs.snap` files, when the CLI prints the same command names and `0.6.9` version text. The harness then reports `stale exception` because the Rust output no longer matches the snapshot (or the two sides are equal).
 - **Required test:** `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-003)` for `help-top` and `scenario-runner-probe`, and `Equal` for `version`. `excepted_exit_code_is_unexpected`, `excepted_stderr_panic_is_unexpected`, and `excepted_extra_tmux_call_is_unexpected` each return `Unexpected`. `changed_rust_snapshot_is_stale` reports `stale exception`.
@@ -75,6 +75,18 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Snapshot:** `tests/diff/snapshots/daemon-health.rs.snap` records that Rust side. `ExpectedDiff(PE-009)` applies only while the live Rust observation still matches it. stderr, exit, json, files, and tmux argv stay compared as ordinary fields.
 - **Why this is recorded:** a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`) shows the same `status=ok` and a longer key list on the TypeScript side. Delete this heading and the `.rs.snap` when `/healthz` carries the same top-level keys.
 - **Required test:** `daemon_health_against_product_daemon`. `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-009)` for `daemon-health`.
+
+## PE-011: chat sender is a seat token, not `X-OpenRig-Session`
+
+- **TS behaviour:** `requireSenderIdentity` deliver-and-label. No header and no body sender is `400 actor_required`. No header plus `body.sender` stores that claim. A header supersedes a different body sender and still returns 201. The CLI echoes `OPENRIG_SESSION_NAME` or `[you]`.
+- **Rust behaviour:** `RIG_SEAT_ID` and `RIG_SEAT_TOKEN` are stamped into the seat process at launch and checked against `seat_tokens`. A matching pair attributes the row to that seat's name, and only when the seat belongs to the rig in the path. No seat headers, and no claim or a claim of `operator`, attributes the row to `operator`. A claim of anyone else, a wrong token, a partial header pair, or a seat from another rig is rejected. There is no spoofable `--sender` on `rig chatroom send`. The human send line is `[operator]` outside a seat and `[name]` for a seat.
+- **Required test:** `send_outside_seat_is_operator`, `send_spoofed_sender_is_rejected`, `send_wrong_token_is_rejected`, `send_matching_token_is_the_seat`, and `send_token_mismatch_claim_is_rejected`.
+
+## PE-012: history page and unknown topic
+
+- **TS behaviour:** `history` without a cursor returns the oldest rows. An unknown `--topic` returns an empty list.
+- **Rust behaviour:** without a cursor the page is the newest `limit` rows, oldest first. A cursor pages forward (`id` greater than the cursor, ascending). An unknown topic is `UnknownTopic` after `has_topic` returns false, including when `limit` is 0.
+- **Required test:** `history_without_cursor_returns_the_newest_limit` and `unknown_topic_is_an_error`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

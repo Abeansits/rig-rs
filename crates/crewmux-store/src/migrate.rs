@@ -1,4 +1,4 @@
-//! Schema v1. `user_version` equals [`MIGRATIONS`]`.len()` after a successful open.
+//! Schema. `user_version` equals [`MIGRATIONS`]`.len()` after a successful open.
 
 use std::sync::LazyLock;
 
@@ -55,17 +55,33 @@ impl MigrationSet {
         self.len
     }
 
-    /// True when no migrations are embedded. This build always has one.
+    /// True when no migrations are embedded.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 }
 
-/// Schema v1.
+const CHAT: &str = "
+CREATE TABLE chat_messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    rig_id TEXT NOT NULL REFERENCES rigs(id) ON DELETE CASCADE,
+    sender TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    topic TEXT
+);
+CREATE INDEX idx_chat_messages_rig_id ON chat_messages (rig_id, id);
+CREATE TABLE seat_tokens (
+    seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    token TEXT NOT NULL
+);
+";
+
+/// Rig tables, then chat messages and seat tokens.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
-    inner: Migrations::new(vec![M::up(SCHEMA)]),
-    len: 1,
+    inner: Migrations::new(vec![M::up(SCHEMA), M::up(CHAT)]),
+    len: 2,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {
