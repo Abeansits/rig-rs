@@ -5,8 +5,8 @@
 
 ## Stopping the daemon
 
-A graceful stop shuts down the tmux server that this daemon started. That includes the process exiting on its own and `POST /shutdown`.
+A graceful stop shuts down the tmux server that this daemon started. That includes the process exiting on its own and `POST /shutdown`. The whole server stops, including sessions a person added after the daemon started.
 
-`kill -9` skips that cleanup. The tmux server keeps running, reparented away from the daemon. The next daemon attaches to that same server (`new-session -A`) instead of starting a second one. A later graceful stop is what shuts it down.
+The daemon treats that server as its own only when the server is not older than the daemon's tmux client. `new-session -A` attaches when a server is already listening. An older server, including one already on the shared `rig-rs` socket, stays up on the way out.
 
-If a tmux server was already running on the daemon's socket when it started, the daemon attaches and does not kill that server on the way out.
+`kill -9` skips that cleanup. The tmux server keeps running, reparented away from the daemon. The next daemon attaches to that same server and leaves it up, because the server is older than the new client.

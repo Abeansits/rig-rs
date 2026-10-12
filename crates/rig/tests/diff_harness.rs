@@ -110,7 +110,11 @@ mod tmux_it {
     fn preexisting_rig_rs_server_survives_the_harness() {
         let bin = std::path::PathBuf::from(env!("CARGO_BIN_EXE_rig"));
         let already = rig_rs_reachable();
-        let _decoy = (!already).then(Decoy::start);
+        let _decoy = if already {
+            None
+        } else {
+            Some(Decoy::start().unwrap())
+        };
         let cases = load_suite(&exceptions()).unwrap();
         let case = cases
             .into_iter()
@@ -126,7 +130,7 @@ mod tmux_it {
     struct Decoy;
 
     impl Decoy {
-        fn start() -> Self {
+        fn start() -> std::io::Result<Self> {
             let mut command = Command::new("tmux");
             command
                 .args([
@@ -146,14 +150,16 @@ mod tmux_it {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped());
-            let child = command.spawn().unwrap();
-            let output = child.wait_with_output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            Self
+            let child = command.spawn()?;
+            let output = child.wait_with_output()?;
+            if output.status.success() {
+                Ok(Self)
+            } else {
+                Err(std::io::Error::other(format!(
+                    "decoy tmux: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )))
+            }
         }
     }
 

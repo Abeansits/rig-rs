@@ -67,10 +67,10 @@ pub struct TmuxMux {
     child: Arc<ControlSlot>,
     tracker: TaskTracker,
     control: JoinHandle<()>,
-    /// True when no server was listening before `new-session -A`.
+    /// True when this client's `new-session -A` forked the server.
     ///
-    /// Drop reaps only that case. A server that was already up was attached
-    /// to, and killing it would take the caller's sessions with it.
+    /// Drop reaps that server, including sessions added to it later. A server
+    /// that is older than the client was attached to and is left alone.
     created_server: bool,
 }
 
@@ -86,18 +86,22 @@ impl Drop for TmuxMux {
             // The server is forked from the control client and reparented to
             // init, so killing the client leaves it running.
             //
-            // Reap only a server this mux created. `new-session -A` attaches
-            // when one is already listening; that server stays up, including
-            // the shared `rig-rs` a developer already had open. A server this
-            // mux created is still reaped when a parent chose the name
-            // (`rig-rs-<their pid>-…`). [`socket_owned_by`] is the sweep rule
-            // and is not a license to kill a server we only attached to. The
-            // bare name `rig-rs` is never owned, so a sweep will not kill it.
+            // Reap only a server this mux created. The check is the server's
+            // start time against this control client, taken after
+            // `new-session -A`, so a server that appeared between the probe
+            // and `-A` is not killed. An attached server stays up, including
+            // the shared `rig-rs` a developer already had open.
             //
-            // `kill -9` of the daemon skips this Drop. That server stays up
-            // until the next daemon starts: `new-session -A` attaches to it
-            // instead of leaving a second server, and the next graceful
-            // shutdown is what finally kills it.
+            // A server this mux created is still reaped when a parent chose
+            // the name (`rig-rs-<their pid>-…`). That is the whole server:
+            // sessions someone added later go down with it.
+            // [`socket_owned_by`] is the sweep rule and is not a license to
+            // kill a server we only attached to. The bare name `rig-rs` is
+            // never owned, so a sweep will not kill it.
+            //
+            // `kill -9` of the daemon skips this Drop. That server stays up.
+            // The next daemon attaches with `new-session -A` and leaves it,
+            // because the server is older than the new client.
             if created {
                 kill_server(&binary, &socket);
             }
@@ -182,9 +186,9 @@ impl TmuxMux {
         cancel: CancellationToken,
     ) -> Result<Self, MuxError> {
         ensure_version(exec.as_ref()).await?;
-        // Probe before the control client. `new-session -A` creates the server
-        // when this fails, and attaches when a server is already up.
-        let created_server = !server_already_running(exec.as_ref()).await?;
+        // A server that answers here is older than the client we are about
+        // to start. `new-session -A` attaches, and Drop must not kill it.
+        let probed_absent = !server_already_running(exec.as_ref()).await?;
         let binary = config
             .binary
             .to_str()
@@ -201,6 +205,13 @@ impl TmuxMux {
             control,
             nudge_rx,
         } = start_control(&config, &exec, &cancel);
+        let ready = wait_ready(boot_rx).await;
+        let proved = if probed_absent {
+            client_started_server(exec.as_ref(), &child).await
+        } else {
+            Some(false)
+        };
+        let created_server = created_after_probe(probed_absent, proved, ready.is_err());
         let live = LiveConnect {
             cancel: &cancel,
             child: &child,
@@ -209,7 +220,7 @@ impl TmuxMux {
             socket: &config.socket,
             created_server,
         };
-        if let Err(err) = wait_ready(boot_rx).await {
+        if let Err(err) = ready {
             stop(&live).await;
             return Err(err);
         }
@@ -371,6 +382,38 @@ async fn server_already_running(exec: &dyn TmuxExec) -> Result<bool, MuxError> {
 
 fn server_missing(stderr: &str) -> bool {
     stderr.contains("no server running") || stderr.contains("error connecting to")
+}
+
+/// Kill only when the probe saw no server and this client forked the one that
+/// answered. A failed boot whose client pid is already gone still reaps.
+/// A live session whose start time could not be read is left alone.
+fn created_after_probe(probed_absent: bool, proved: Option<bool>, ready_failed: bool) -> bool {
+    if !probed_absent {
+        return false;
+    }
+    proved.unwrap_or(ready_failed)
+}
+
+async fn client_started_server(exec: &dyn TmuxExec, child: &ControlSlot) -> Option<bool> {
+    let client = child.id().await?;
+    let server = server_pid(exec).await?;
+    tokio::task::spawn_blocking(move || crate::born::server_not_older(server, client))
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn server_pid(exec: &dyn TmuxExec) -> Option<u32> {
+    let out = exec
+        .run(&[
+            "display-message".to_owned(),
+            "-p".to_owned(),
+            "#{pid}".to_owned(),
+        ])
+        .await
+        .ok()?;
+    let pid = out.stdout.trim().parse::<u32>().ok()?;
+    if pid == 0 { None } else { Some(pid) }
 }
 
 async fn fail_connect(
@@ -642,5 +685,16 @@ mod tests {
         ));
         assert!(!super::server_missing("no sessions"));
         assert!(!super::server_missing("can't find session: decoy"));
+    }
+
+    #[test]
+    fn drop_kills_only_a_server_this_client_started() {
+        assert!(!super::created_after_probe(false, Some(true), true));
+        assert!(!super::created_after_probe(false, None, true));
+        assert!(!super::created_after_probe(true, Some(false), false));
+        assert!(!super::created_after_probe(true, Some(false), true));
+        assert!(super::created_after_probe(true, Some(true), false));
+        assert!(super::created_after_probe(true, None, true));
+        assert!(!super::created_after_probe(true, None, false));
     }
 }

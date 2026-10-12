@@ -58,6 +58,11 @@ impl ControlSlot {
         Ok(child)
     }
 
+    /// Pid of the client spawned by [`spawn`](Self::spawn), if it is still recorded.
+    pub(crate) async fn id(&self) -> Option<u32> {
+        *self.pid.lock().await
+    }
+
     /// Forget `pid` after this task has reaped it.
     pub(crate) async fn clear(&self, pid: u32) {
         let mut guard = self.pid.lock().await;

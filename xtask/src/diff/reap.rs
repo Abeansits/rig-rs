@@ -55,12 +55,12 @@ impl<'a> DaemonGuard<'a> {
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline && !daemon_run_pids(&rig_home).is_empty() {
             for pid in daemon_run_pids(&rig_home) {
-                signal(pid, "-TERM");
+                signal_if_owned(&rig_home, pid, "-TERM");
             }
             thread::park_timeout(Duration::from_millis(50));
         }
         for pid in daemon_run_pids(&rig_home) {
-            signal(pid, "-KILL");
+            signal_if_owned(&rig_home, pid, "-KILL");
         }
         thread::park_timeout(Duration::from_millis(50));
         let left = daemon_run_pids(&rig_home);
@@ -101,19 +101,33 @@ fn ensure_rs(bin: &Path, home: &HermeticHome) -> Result<(), Error> {
         .map_err(|source| io_err("spawn rig daemon run", source))?;
     // macOS has no `/proc`, and SIP hides another process's environment, so
     // the pid scan below cannot see this child. The file is what `finish`
-    // kills. The command line is checked again so a recycled pid is left alone.
+    // kills, and only after the start time still matches.
     remember_pid(&rig_home, child.id())?;
     wait_health(&socket, &mut child, &err_path)
 }
 
 fn remember_pid(rig_home: &Path, pid: u32) -> Result<(), Error> {
+    let stamp = process_stamp(pid).unwrap_or_else(|| "-".to_owned());
     let path = rig_home.join("run/harness.pid");
-    std::fs::write(path, pid.to_string()).map_err(|source| io_err("record daemon pid", source))
+    std::fs::write(path, format!("{pid} {stamp}"))
+        .map_err(|source| io_err("record daemon pid", source))
 }
 
-fn spawned_pid(rig_home: &Path) -> Option<u32> {
+/// `{pid} {stamp}` from `run/harness.pid`. The stamp may contain spaces.
+fn harness_record(rig_home: &Path) -> Option<(u32, String)> {
     let text = std::fs::read_to_string(rig_home.join("run/harness.pid")).ok()?;
-    text.trim().parse().ok()
+    split_record(text.trim())
+}
+
+fn split_record(text: &str) -> Option<(u32, String)> {
+    let (pid, stamp) = text.split_once(char::is_whitespace)?;
+    let pid = pid.parse().ok()?;
+    let stamp = stamp.trim();
+    if stamp.is_empty() {
+        None
+    } else {
+        Some((pid, stamp.to_owned()))
+    }
 }
 
 fn ensure_ts(node: &Path, pkg: &Path, port: u16, home: &HermeticHome) -> Result<(), Error> {
@@ -224,17 +238,89 @@ fn signal(pid: u32, name: &str) {
     );
 }
 
+/// Signal only while this pid is still the daemon recorded for `rig_home`.
+fn signal_if_owned(rig_home: &Path, pid: u32, name: &str) {
+    if still_owned(rig_home, pid) {
+        signal(pid, name);
+    }
+}
+
+/// `daemon run` plus this home. Environ is exact `RIG_HOME` when readable.
+/// Otherwise the start stamp in `run/harness.pid` must still match, so a
+/// recycled pid is never killed. `-` is not a stamp.
+fn still_owned(rig_home: &Path, pid: u32) -> bool {
+    if !command_line(pid).is_some_and(|cmd| is_daemon_run(&cmd)) {
+        return false;
+    }
+    let home = rig_home.display().to_string();
+    match read_environ(pid) {
+        Some(env) => env_eq(&env, "RIG_HOME", &home),
+        None => harness_record(rig_home).is_some_and(|(recorded, stamp)| {
+            recorded == pid && process_stamp(pid).is_some_and(|now| stamps_agree(&stamp, &now))
+        }),
+    }
+}
+
+fn stamps_agree(stored: &str, current: &str) -> bool {
+    !stored.is_empty() && stored != "-" && stored == current
+}
+
+fn read_environ(pid: u32) -> Option<Vec<u8>> {
+    let path = PathBuf::from(format!("/proc/{pid}/environ"));
+    if !path.is_file() {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
+/// Absolute start identity. Linux uses `/proc` start ticks. Other platforms
+/// use `ps -o lstart=`, which stays equal for the life of the process.
+fn process_stamp(pid: u32) -> Option<String> {
+    if let Some(ticks) = proc_start_ticks(pid) {
+        return Some(ticks.to_string());
+    }
+    ps_column(pid, "lstart=")
+}
+
+fn proc_start_ticks(pid: u32) -> Option<u64> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = text.rsplit_once(')')?.1;
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn ps_column(pid: u32, column: &str) -> Option<String> {
+    let pid_text = pid.to_string();
+    let mut command = Command::new("ps");
+    command
+        .args(["-ww", "-p", &pid_text, "-o", column])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let child = command.spawn().ok()?;
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let text = text.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_owned())
+    }
+}
+
 /// Process ids of `rig daemon run` for this `RIG_HOME`.
 ///
 /// Linux matches `/proc/<pid>/environ`. That directory is absent on macOS, so
-/// a daemon this harness spawned is also taken from `run/harness.pid` while
-/// `ps` still shows `daemon run`.
+/// a daemon this harness spawned is also taken from `run/harness.pid` when
+/// the command is still `daemon run` and the start stamp still matches.
 #[must_use]
 pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
     let mut pids = pids_from_proc(rig_home);
-    if let Some(pid) = spawned_pid(rig_home)
+    if let Some((pid, _)) = harness_record(rig_home)
         && !pids.contains(&pid)
-        && command_line(pid).is_some_and(|cmd| is_daemon_run(&cmd))
+        && still_owned(rig_home, pid)
     {
         pids.push(pid);
     }
@@ -356,7 +442,9 @@ pub(crate) fn free_port() -> Result<u16, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cmdline_from_ps_text, env_eq, is_daemon_run};
+    use super::{
+        cmdline_from_ps_text, env_eq, is_daemon_run, process_stamp, split_record, stamps_agree,
+    };
 
     #[test]
     fn daemon_match_is_the_exact_home_and_argv() {
@@ -387,5 +475,37 @@ mod tests {
         assert!(cmdline_from_ps_text("").is_none());
         let status = cmdline_from_ps_text("python3 /tmp/rig daemon status");
         assert!(status.is_some_and(|cmd| !is_daemon_run(&cmd)));
+    }
+
+    #[test]
+    fn a_stamp_must_match_and_a_dash_never_authorizes_a_kill() {
+        assert_eq!(
+            split_record("4242 Mon Oct 12 06:27:32 2026"),
+            Some((4242, "Mon Oct 12 06:27:32 2026".to_owned()))
+        );
+        assert_eq!(split_record("7 99"), Some((7, "99".to_owned())));
+        assert!(split_record("4242").is_none());
+        assert!(split_record("nope stamp").is_none());
+        assert!(split_record("1 ").is_none());
+        assert!(stamps_agree("99", "99"));
+        assert!(stamps_agree(
+            "Mon Oct 12 06:27:32 2026",
+            "Mon Oct 12 06:27:32 2026"
+        ));
+        assert!(!stamps_agree("-", "-"));
+        assert!(!stamps_agree("", "99"));
+        assert!(!stamps_agree("99", "100"));
+    }
+
+    #[test]
+    fn this_process_stamp_is_stable_when_readable() {
+        let Some(stamp) = process_stamp(std::process::id()) else {
+            return;
+        };
+        assert_ne!(stamp, "-");
+        assert_eq!(
+            process_stamp(std::process::id()).as_deref(),
+            Some(stamp.as_str())
+        );
     }
 }
