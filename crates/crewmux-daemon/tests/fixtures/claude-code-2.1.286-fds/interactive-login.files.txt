@@ -1,0 +1,5 @@
+.claude.json 464
+.claude/settings.json 22
+.claude/cache/changelog.md 987162
+.claude/sessions/249150.968b76862dff065ce2166bfe9768cd0425c2df8de423ea2c084b6b906934d360.key 140
+.claude/backups/.claude.json.backup.1791831623057 84

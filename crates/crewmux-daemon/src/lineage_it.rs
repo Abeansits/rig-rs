@@ -63,8 +63,11 @@ function flag(name) {
 const when = flag('--title');
 const ready = flag('--ready');
 const go = flag('--go');
-const hold = flag('--hold');
-if (hold) fs.openSync(hold, 'a');
+const transcript = flag('--transcript');
+if (transcript) {
+  fs.mkdirSync(require('path').dirname(transcript), { recursive: true });
+  fs.writeFileSync(transcript, '{}\n');
+}
 if (when === 'before') process.title = '2.1.289';
 fs.writeFileSync(ready, '1');
 if (when === 'after') {
@@ -79,6 +82,9 @@ setInterval(() => {}, 1000);
 ";
 
     /// Title hides argv, then `exec` into another session keeps pid and start time.
+    ///
+    /// The transcript is written and closed, matching Claude Code 2.1.286. The
+    /// second session file is newer, so the open-fd check is not what refuses.
     #[cfg(target_os = "linux")]
     const HIDDEN: &str = r#"
 import ctypes, os, sys, time
@@ -91,9 +97,13 @@ libc = ctypes.CDLL("libc.so.6")
 libc.prctl.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
 libc.prctl.restype = ctypes.c_int
 libc.prctl(15, b"2.1.289", 0, 0, 0)
-hold = os.environ["RIG_HOLD"]
+def emit(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("{}\n")
 ready = os.environ["RIG_READY"]
-fd = os.open(hold, os.O_RDWR | os.O_CREAT, 0o644)
+if os.environ.get("RIG_LINEAGE_MODE") != "stay":
+    emit(os.environ["RIG_TRANSCRIPT"])
 rule = "─" * 40
 sys.stdout.write(rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n")
 sys.stdout.flush()
@@ -108,9 +118,11 @@ while not os.path.exists(trigger):
     if time.time() > deadline:
         raise SystemExit("trigger")
     time.sleep(0.05)
-os.close(fd)
+other = os.environ["RIG_OTHER"]
+emit(other)
+stamp = time.time() + 5
+os.utime(other, (stamp, stamp))
 os.environ["RIG_LINEAGE_MODE"] = "stay"
-os.environ["RIG_HOLD"] = os.environ["RIG_OTHER_HOLD"]
 os.environ["RIG_READY"] = ready + ".next"
 os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
 "#;
@@ -416,17 +428,18 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
         tokio::fs::write(&script, HIDDEN).await.expect("script");
         let ready = live.root.join("ready-hide");
         let trigger = live.root.join("go-hide");
-        let hold = live.root.join(format!("{ORIG}.jsonl"));
-        let other = live.root.join(format!("{OTHER}.jsonl"));
-        tokio::fs::create_dir_all(live.root.join("work"))
-            .await
-            .expect("work");
+        let home = live.root.join("claude-home");
+        let cwd = live.root.join("work");
+        let transcript = transcript_path(&home, &cwd, ORIG);
+        let other = transcript_path(&home, &cwd, OTHER);
+        tokio::fs::create_dir_all(&cwd).await.expect("work");
         let name = format!("hide{}", unique());
-        let mut spec = SessionSpec::new(&name, live.root.join("work"));
+        let mut spec = SessionSpec::new(&name, cwd);
+        spec.env.insert("HOME".into(), home.display().to_string());
         spec.env
-            .insert("RIG_HOLD".into(), hold.display().to_string());
+            .insert("RIG_TRANSCRIPT".into(), transcript.display().to_string());
         spec.env
-            .insert("RIG_OTHER_HOLD".into(), other.display().to_string());
+            .insert("RIG_OTHER".into(), other.display().to_string());
         spec.env
             .insert("RIG_READY".into(), ready.display().to_string());
         spec.env
@@ -466,7 +479,58 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
             }
         })
         .await;
+        let orig_mtime = std::fs::metadata(&transcript)
+            .expect("orig transcript")
+            .modified()
+            .expect("orig mtime");
+        let other_mtime = std::fs::metadata(&other)
+            .expect("other transcript")
+            .modified()
+            .expect("other mtime");
+        assert!(
+            other_mtime > orig_mtime,
+            "the swapped session must be the newest transcript"
+        );
         refuse(&live.app, &pane, &live.mux, "lineage:session_id_mismatch").await;
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn closed_transcript(live: &Live, pane: &PaneRef) {
+        let home = live.root.join("claude-home");
+        let transcript = transcript_path(&home, &live.root.join("work"), ORIG);
+        assert!(
+            tokio::fs::try_exists(&transcript).await.unwrap_or(false),
+            "closed transcript"
+        );
+        let pid = pane_info(&live.mux, &pane.session).await.pid.expect("pid");
+        assert!(
+            !fd_names(pid, ORIG).await,
+            "the launcher must not hold the transcript open"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn transcript_path(home: &std::path::Path, cwd: &std::path::Path, session: &str) -> PathBuf {
+        home.join(".claude")
+            .join("projects")
+            .join(crate::lineage_held::encode_project(cwd))
+            .join(format!("{session}.jsonl"))
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn fd_names(pid: u32, needle: &str) -> bool {
+        let Ok(mut entries) = tokio::fs::read_dir(format!("/proc/{pid}/fd")).await else {
+            return false;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let Ok(target) = tokio::fs::read_link(entry.path()).await else {
+                continue;
+            };
+            if target.to_string_lossy().contains(needle) {
+                return true;
+            }
+        }
+        false
     }
 
     #[cfg(target_os = "linux")]
@@ -493,9 +557,12 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
         tokio::fs::write(&script, NODE).await.expect("script");
         let ready = live.root.join(format!("ready-{when}"));
         let go = live.root.join(format!("title-{when}"));
-        let hold = live.root.join(format!("{ORIG}.jsonl"));
+        let home = live.root.join("claude-home");
+        let cwd = live.root.join("work");
+        let transcript = transcript_path(&home, &cwd, ORIG);
         let name = format!("node{}", unique());
-        let mut spec = SessionSpec::new(&name, live.root.join("work"));
+        let mut spec = SessionSpec::new(&name, cwd);
+        spec.env.insert("HOME".into(), home.display().to_string());
         spec.argv = vec![
             bin,
             script.display().to_string(),
@@ -505,8 +572,8 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
             ready.display().to_string(),
             "--go".into(),
             go.display().to_string(),
-            "--hold".into(),
-            hold.display().to_string(),
+            "--transcript".into(),
+            transcript.display().to_string(),
             "--session-id".into(),
             ORIG.into(),
         ];
@@ -566,6 +633,7 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
             })
             .await;
         }
+        closed_transcript(&live, &pane).await;
         crate::lineage::ensure(&live.app, &seat, &pane)
             .await
             .expect("version title");

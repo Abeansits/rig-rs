@@ -885,7 +885,7 @@
 "packages/daemon/test/native-claude-delivery.test.ts","2","todo","","","pre-send refusal is narrower than the selector and ordinary transport; those stay open"
 "packages/daemon/test/native-claude-delivery.test.ts > selector and ordinary transport: %s","12","diverged","lineage::tests::session_id_mismatch_refuses_before_paste","PE-019","pre-send refusal only; the selector and ordinary transport matrix are not ported"
 "packages/daemon/test/native-process-executable.test.ts","","todo","","",""
-"packages/daemon/test/native-process-lineage.test.ts","12","diverged","lineage::tests::pid_mismatch_refuses_before_paste","PE-019","the ps-tree selector (nix wrappers, executable path, launcher shims) is not ported; the pre-send check is pid, foreground, and a session token or an open session file. Start time does not prove the session"
+"packages/daemon/test/native-process-lineage.test.ts","12","diverged","lineage::tests::pid_mismatch_refuses_before_paste","PE-019","the ps-tree selector (nix wrappers, executable path, launcher shims) is not ported; the pre-send check is pid, foreground, and a session token, an open fd, or the newest Claude project transcript. Claude Code 2.1.286 closes <sid>.jsonl after writing it. Start time does not prove the session. A same-image exec that writes no newer transcript is not distinguished"
 "packages/daemon/test/native-process-path-sampling.test.ts","","todo","","",""
 "packages/daemon/test/native-ps-locale.test.ts","","todo","","",""
 "packages/daemon/test/native-resume-probe.test.ts","2","todo","","","slice 2 ports the Claude screen decisions. Codex probe cases and the shell resume builder are waived per case"
