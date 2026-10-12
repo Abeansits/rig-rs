@@ -43,6 +43,8 @@ async fn serve(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use crewmux_api::Client;
 
     use super::{CancellationToken, Fixture, UnixListener, serve};
@@ -68,24 +70,38 @@ mod tests {
         let listener = UnixListener::bind(&path).expect("bind");
         let cancel = CancellationToken::new();
         let task = tokio::spawn(serve(listener, fixture, cancel.clone()));
+        // The accept task may not have been polled yet. A first connect can
+        // see a broken pipe; retry off the worker until the listener is up.
+        tokio::task::yield_now().await;
 
         let socket = path.clone();
-        let got = tokio::task::spawn_blocking(move || Client::over_uds(&socket).hydrate())
-            .await
-            .expect("join")
-            .expect("hydrate");
+        let got = retry(move || Client::over_uds(&socket).hydrate()).await;
         assert_eq!(got.seats.len(), 1);
         assert_eq!(got.seats[0].name.as_str(), "alpha");
         assert_eq!(got.seats[0].state, crewmux_api::SeatState::Ready);
 
-        let info =
-            tokio::task::spawn_blocking(move || Client::over_uds(&path).attach_argv("alpha"))
-                .await
-                .expect("join")
-                .expect("attach");
+        let info = retry(move || Client::over_uds(&path).attach_argv("alpha")).await;
         assert_eq!(info, vec!["tmux".to_owned(), "attach".to_owned()]);
 
         cancel.cancel();
         task.await.expect("server task").expect("serve");
+    }
+
+    async fn retry<T>(op: impl Fn() -> Result<T, crewmux_api::Error> + Send + Sync + 'static) -> T
+    where
+        T: Send + 'static,
+    {
+        let op = std::sync::Arc::new(op);
+        let mut last = String::new();
+        for _ in 0..8 {
+            let op = std::sync::Arc::clone(&op);
+            match tokio::task::spawn_blocking(move || op()).await {
+                Ok(Ok(value)) => return value,
+                Ok(Err(err)) => last = err.to_string(),
+                Err(err) => last = err.to_string(),
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("exchange: {last}");
     }
 }
