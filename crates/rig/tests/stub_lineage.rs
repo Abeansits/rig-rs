@@ -1,4 +1,12 @@
 //! Stub seats refuse a respawned or exec'd pane. Real tmux, private socket.
+#![cfg_attr(
+    feature = "tmux-it",
+    expect(
+        clippy::expect_used,
+        clippy::panic,
+        reason = "setup failures should abort the integration test"
+    )
+)]
 #![cfg(feature = "tmux-it")]
 
 mod live {
@@ -226,8 +234,8 @@ mod live {
             ],
         );
         assert_eq!(shot.0, 0, "{}", shot.2);
-        let line = shot.1.lines().next().unwrap_or_default();
-        let (id, pid) = line.split_once('\t').unwrap_or((line, ""));
+        let row = shot.1.lines().next().unwrap_or_default();
+        let (id, pid) = row.split_once('\t').unwrap_or((row, ""));
         let pid = pid.trim().parse().unwrap_or(0);
         assert_ne!(pid, 0, "{}", shot.1);
         (id.to_owned(), pid)
