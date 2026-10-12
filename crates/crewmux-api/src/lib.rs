@@ -28,9 +28,10 @@ pub use crewmux_types::{
 };
 pub use dirs::{create_private, open_private};
 pub use endpoint::{
-    AskSeat, AttachInfo, AttachRequest, BroadcastSend, CaptureRequest, CaptureSeat, CreateRigUp,
-    DownRequest, Endpoint, Healthz, ListSeats, QueueClaim, QueueCollection, QueueFallback,
-    QueueHandoff, QueueShow, RigDown, SendMessage, SubmitRequest, SubmitSeat, UnclaimItem, Whoami,
+    AskSeat, AttachInfo, AttachRequest, BroadcastSend, CaptureRequest, CaptureSeat, CompactCancel,
+    CompactStatus, CompactTrigger, CreateRigUp, DownRequest, Endpoint, Healthz, ListSeats,
+    QueueClaim, QueueCollection, QueueFallback, QueueHandoff, QueueShow, RigDown, SendMessage,
+    SubmitRequest, SubmitSeat, UnclaimItem, Whoami, seat_hook_path,
 };
 pub use error::Error;
 pub use model::{ActivityItem, HealthItem, HealthSummary, LauncherConfig, SeatView, Snapshot};

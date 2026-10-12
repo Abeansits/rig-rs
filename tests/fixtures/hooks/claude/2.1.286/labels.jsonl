@@ -1,0 +1,10 @@
+{"line":1,"event":"PreCompact","detail":"manual","sha256":"e48b3dbeb81a36f22f53e7a39162e4d5506da7ea88c6c89a77693df00f1cff88"}
+{"line":2,"event":"PreCompact","detail":"auto","sha256":"bb17348a3efb9ecbb35851655354b01b0815312cf9b7f83c030c2ef954a0b0c4"}
+{"line":3,"event":"SessionStart","detail":"compact","sha256":"5139736a3ccaa18da713d6630a6d8f8bac412d7c37c8d747e2a02468cd7407f3"}
+{"line":4,"event":"SessionStart","detail":"resume","sha256":"887377a8118ed5be4f8a1581850ec7eadb8d55fe9e5a7bd818b14d3a7b928ba4"}
+{"line":5,"event":"PostCompact","detail":"manual","sha256":"652149c4bd41463af7177ca1758d107ddb45aa7590a76d4829fa8dc88ad01c0e"}
+{"line":6,"event":"UserPromptSubmit","detail":null,"sha256":"880cc14b95a28fda4eeee3922b7fd8942bc91ecadb9b40f38a3c45fb0a7b5752"}
+{"line":7,"event":"Stop","detail":null,"sha256":"a8c6292e532d66fab80056d44e4e3adcbe5c136b18b81a99fd4355e37be9e80b"}
+{"line":8,"event":"SessionEnd","detail":null,"sha256":"d434246f90566733d67092bab8eea351807562acc415a025852cd3aef1673f31"}
+{"line":9,"event":"Elicitation","detail":null,"sha256":"3eb56efc0008cd32a639e80ffa3d01c38fbb76fcaf58afd7fe364e79542f65b4"}
+{"line":10,"event":"PreCompact","detail":"manual-extra","sha256":"2cdbc7c6d2337a8a0d7356dbaf4ff8119b2edd2a259dba979bedd0eedaed7ad2"}

@@ -54,6 +54,7 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/inbox/deny", post(crate::inbox_http::deny))
         .route("/api/outbox", post(crate::inbox_http::outbox))
         .merge(crate::chat::routes())
+        .merge(crate::compaction::routes())
         .layer(map_response(connection_close))
         .with_state(app)
 }

@@ -113,10 +113,25 @@ CREATE TABLE seat_tokens (
 );
 ";
 
-/// Rig tables, then the queue, inbox, and receipt tables, then chat.
+const COMPACTION: &str = "
+CREATE TABLE compaction_attempts (
+    id TEXT PRIMARY KEY NOT NULL,
+    seat_key TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE INDEX idx_compaction_attempts_seat ON compaction_attempts (seat_key);
+";
+
+/// Rig tables, then the queue, inbox, and receipt tables, then chat, then attempts.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
-    inner: Migrations::new(vec![M::up(SCHEMA), M::up(QUEUE_SCHEMA), M::up(CHAT)]),
-    len: 3,
+    inner: Migrations::new(vec![
+        M::up(SCHEMA),
+        M::up(QUEUE_SCHEMA),
+        M::up(CHAT),
+        M::up(COMPACTION),
+    ]),
+    len: 4,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

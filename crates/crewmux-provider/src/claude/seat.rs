@@ -20,6 +20,17 @@ pub struct McpServerEntry {
     pub args: Vec<String>,
 }
 
+/// Identity stamped into one Claude process's hook commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunHooks {
+    /// `RIG_SEAT_KEY`.
+    pub seat_key: String,
+    /// `RIG_HOME`.
+    pub rig_home: PathBuf,
+    /// `RIG_RUN_ID`. One directory under `run/`.
+    pub run_id: String,
+}
+
 /// Settings passed with `--settings`. Hooks are an arbitrary JSON object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClaudeSeatSettings {
@@ -88,6 +99,27 @@ impl ClaudeSeatFiles {
         settings_document(settings)
     }
 
+    /// Write `<seat>/run/<run-id>/settings.json` for one Claude process.
+    ///
+    /// The file registers `rig hook <event>` for the six compaction events and
+    /// is not rewritten while that process runs. Callers pass it as `--settings`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProviderError::Io`] when the directory or file cannot be written.
+    pub fn write_run_settings(
+        &self,
+        run: &RunHooks,
+        permission_mode: Option<&str>,
+    ) -> Result<PathBuf, ProviderError> {
+        let dir = self.seat_dir.join("run").join(&run.run_id);
+        let path = dir.join("settings.json");
+        let body = render_run(run, permission_mode)?;
+        fs::create_dir_all(&dir)?;
+        AtomicWrite::write(&path, body.as_bytes(), Some(0o600))?;
+        Ok(path)
+    }
+
     /// `--mcp-config <p> --strict-mcp-config --settings <p>`.
     #[must_use]
     pub fn launch_flags(&self) -> Vec<OsString> {
@@ -123,6 +155,46 @@ fn mcp_document(servers: &[McpServerEntry]) -> Result<String, ProviderError> {
         file: PathBuf::from("mcp.json"),
         msg: err.to_string(),
     })
+}
+
+const HOOK_EVENTS: [&str; 6] = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreCompact",
+    "PostCompact",
+    "Stop",
+    "SessionEnd",
+];
+
+fn render_run(run: &RunHooks, permission_mode: Option<&str>) -> Result<String, ProviderError> {
+    let mut hooks = Map::new();
+    for event in HOOK_EVENTS {
+        let command = hook_command(run, event);
+        let handler = serde_json::json!({
+            "type": "command",
+            "command": command,
+        });
+        let group = serde_json::json!({ "hooks": [handler] });
+        hooks.insert(event.to_owned(), Value::Array(vec![group]));
+    }
+    let settings = ClaudeSeatSettings {
+        permission_mode: permission_mode.map(str::to_owned),
+        hooks: Value::Object(hooks),
+    };
+    settings_document(&settings)
+}
+
+fn hook_command(run: &RunHooks, event: &str) -> String {
+    format!(
+        "env RIG_SEAT_KEY={} RIG_HOME={} RIG_RUN_ID={} rig hook {event}",
+        shell_quote(&run.seat_key),
+        shell_quote(&run.rig_home.display().to_string()),
+        shell_quote(&run.run_id)
+    )
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn settings_document(settings: &ClaudeSeatSettings) -> Result<String, ProviderError> {

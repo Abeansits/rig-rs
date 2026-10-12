@@ -23,7 +23,7 @@ pub use auth::{CodexProviderAuth, select_codex_provider_auth};
 pub use backup::Backups;
 pub use claude::{
     ClaudeSeatFiles, ClaudeSeatSettings, ClaudeTrust, FileStamp, McpServerEntry, ProcessProbe,
-    TrustOutcome, user_config_basename,
+    RunHooks, TrustOutcome, user_config_basename,
 };
 pub use codex::{
     Change, CodexConfig, CodexHealth, RIG_MCP_NAME, TrustLevel, classify_config, rig_mcp_command,

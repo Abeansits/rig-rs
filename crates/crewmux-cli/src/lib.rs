@@ -6,6 +6,7 @@
 mod autostart;
 mod chatroom;
 mod command;
+mod compact;
 mod doctor_cmd;
 mod doctor_eval;
 mod doctor_facts;
@@ -13,6 +14,7 @@ mod doctor_fixture;
 mod doctor_live;
 mod error;
 mod herdr_probe;
+mod hook;
 pub mod output;
 mod paths;
 mod setup_apply;
@@ -136,6 +138,13 @@ enum Commands {
     Whoami,
     /// Per-rig chatroom: send, history, watch, topic, and clear.
     Chatroom(chatroom::ChatroomArgs),
+    /// Compact a Claude seat, cancel it, or print its status.
+    Compact(compact::CompactArgs),
+    /// Claude hook entry. Reads JSON on stdin and exits 0.
+    Hook {
+        /// Hook event name, such as `PreCompact`.
+        event: String,
+    },
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -178,6 +187,8 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Unclaim(args) => slice4::unclaim(&args),
         Commands::Whoami => slice4::whoami(),
         Commands::Chatroom(args) => chatroom::run(&args),
+        Commands::Compact(args) => compact::run(&args),
+        Commands::Hook { event } => Ok(hook::run(&event)),
     }
 }
 

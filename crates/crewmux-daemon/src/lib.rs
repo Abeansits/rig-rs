@@ -2,6 +2,7 @@
 
 mod ask_http;
 mod chat;
+mod compaction;
 mod composer;
 mod db;
 mod death;

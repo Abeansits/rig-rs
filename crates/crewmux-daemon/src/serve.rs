@@ -72,6 +72,8 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     };
     app.seed_cursor(max_cursor);
     app.launch_workers().await;
+    crate::compaction::load(&app).await?;
+    crate::compaction::drain_spools(&app).await?;
     reconcile(&app).await?;
     let sock = crewmux_api::daemon_socket(&home);
     let pid = home.join("run/daemon.pid");
@@ -94,6 +96,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     }
     let tracker = app.tasks.clone();
     tracker.spawn(supervise(app.clone()));
+    tracker.spawn(crate::compaction::supervise(app.clone()));
     tracker.spawn(reap(app.clone()));
     tracker.spawn(on_terminate(cancel.clone()));
     let tasks = app.tasks.clone();

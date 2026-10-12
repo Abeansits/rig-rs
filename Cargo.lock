@@ -501,6 +501,7 @@ dependencies = [
  "proptest",
  "rustix",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
  "tokio",
  "uuid",
@@ -563,6 +564,7 @@ dependencies = [
  "crewmux-messaging",
  "crewmux-mux",
  "crewmux-orchestration",
+ "crewmux-provider",
  "crewmux-spec",
  "crewmux-store",
  "crewmux-transcript",
@@ -591,6 +593,11 @@ name = "crewmux-health"
 version = "0.0.0"
 dependencies = [
  "crewmux-core",
+ "crewmux-types",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

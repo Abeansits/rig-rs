@@ -11,7 +11,7 @@ ADR-0010 makes this file the single PE register. Design-workspace ids that colli
 | PE-004 | no writes to the Claude user config | PE-004 |
 | PE-005 | exactly-once direct/startup re-delivery | PE-017 (reserved; no heading yet) |
 | PE-006 | blind Enter | PE-013 |
-| PE-007 | compaction completion via hooks | PE-018 (reserved; no heading yet) |
+| PE-007 | compaction completion via hooks | PE-018 |
 
 Repo PE-006 stays the setup/doctor exception below. It is not the blind-Enter rule.
 
@@ -118,3 +118,12 @@ The design index calls this PE-006. That id is already the setup/doctor exceptio
 ## Status of real-login testing
 
 A Mac rerun on 2026-10-11 with Claude Code 2.1.286 observed multi-line pastes wrapped in a pasted-content tag and tabs expanded to four spaces (ADR-0009 Amendment 2). Live Claude runs are gated on `RIG_LIVE_CLAUDE=1` inside the `tmux-it` feature and are not part of CI. This change did not execute that live suite. Codex real-login coverage is still pending.
+
+## PE-018: Claude compaction completes on both hooks, not on a timer
+
+The design index calls this PE-007. That id is already the slice 1 stub JSON exception in this file, so compaction completion is PE-018.
+
+- **TS behaviour:** `ClaudeCompactionEnforcer` detects completion by waiting, then sends a turn-boundary handshake, a restore prompt, and a compliance audit. `precompact-hook.mjs` writes one marker per session plus an `.expected.json` sentinel. `compaction-restore-bridge.cjs` tells the seat that compaction finished. A stray `PreCompact` overwrites that marker. Elapsed post-compact time can advance the restore stages.
+- **Rust behaviour:** an attempt becomes `Completed` only when `SessionStart` with `source=compact` and `PostCompact` both arrive for the same `session_id`, in either order, within 120s. The marker is per `(seat_key, attempt_id)` and is acted on only when `confirmed` is true. An unsolicited `PreCompact` opens a separate attempt and does not rewrite a managed marker. The 10s post-compact wait is only a lower bound before the `Ready` check. Time alone never submits a restore. Exactly one restore prompt is submitted, through `SeatIo::submit`, after both signals and `Ready`. The sentinel file and the bridge script are not ported. Prompt text, thresholds, the 60s dedup, re-arm, the 120s manual and 25-minute automatic prep budgets, and the 10-minute cooldown match v0.6.9. Enforcer sample state is still in-memory. Attempt rows are persisted.
+- **Open gated test:** L3, genuine threshold-driven auto-compaction, is not done. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` did not produce `PostCompact` in spike S2. L1 and L2 have S2 evidence and were not re-run in this checkout.
+- **Required test:** `enforcer_table`, `hook_parse_golden`, `spool_drain`, `per_run_settings`, `completion_requires_both_signals`, `stray_auto_precompact_does_not_touch_managed_marker`, `unconfirmed_marker_ignored`, `no_timing_triggered_restore`, `compaction_never_submits_when_not_ready`, `no_claude_files_written`, and `fire_compaction_recorded_payload`.

@@ -1,5 +1,6 @@
 //! SQLite persistence: schema, a single writer, and the core repository ports.
 
+mod attempt;
 mod chat;
 mod error;
 mod migrate;
@@ -8,6 +9,7 @@ mod repo;
 mod store;
 mod token;
 
+pub use attempt::{AttemptRow, delete_attempt, get_attempt, list_attempts, upsert_attempt};
 pub use error::Error;
 pub use migrate::MIGRATIONS;
 pub use queue::{archive_terminal, insert_receipt, load_book, max_receipt_cursor, replace_book};

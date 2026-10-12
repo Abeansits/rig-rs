@@ -61,6 +61,8 @@ pub(crate) struct App {
     queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueWrite>>>>,
     /// Next snapshot write fails at this `replace_book` hook, then the hook clears.
     persist_crash: Arc<tokio::sync::Mutex<Option<&'static str>>>,
+    /// Compaction attempts and the in-memory enforcer.
+    pub compaction: Arc<tokio::sync::Mutex<crate::compaction::Runtime>>,
 }
 
 /// One queue snapshot for the writer, plus the callers waiting on that commit.
@@ -107,6 +109,7 @@ impl App {
             persist_tx,
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
             persist_crash: Arc::new(tokio::sync::Mutex::new(None)),
+            compaction: Arc::new(tokio::sync::Mutex::new(crate::compaction::Runtime::new())),
         }
     }
 

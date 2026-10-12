@@ -1,8 +1,10 @@
 //! `rig ps`, `rig capture`, `rig attach`, and `rig down`.
 
+use std::str::FromStr;
+
 use crewmux_core::{LifecycleService, RigRepo, Seat, SeatRepo, SeatState};
 use crewmux_mux::{CaptureRange, MuxError, PaneRef};
-use crewmux_types::{MAX_NAME_LEN, RigName, SeatName};
+use crewmux_types::{MAX_NAME_LEN, RigName, SeatId, SeatName};
 use serde_json::{Value, json};
 
 use crate::db::{read, write};
@@ -150,6 +152,14 @@ async fn attached(app: &App, seat: &Seat) -> Result<bool, Error> {
     };
     let clients = app.mux.human_clients(session).await?;
     Ok(!clients.is_empty())
+}
+
+pub(crate) async fn find_seat_id(app: &App, key: &str) -> Result<Seat, Error> {
+    let id = SeatId::from_str(key).map_err(|err| Error::Message(err.to_string()))?;
+    read(&app.store, move |conn| {
+        crewmux_core::SeatRepo::get(conn, &id)
+    })
+    .await
 }
 
 pub(crate) async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {

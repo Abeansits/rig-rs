@@ -27,6 +27,7 @@ tmux-it = []
 [dev-dependencies]
 proptest.workspace = true
 tokio.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true
