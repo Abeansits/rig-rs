@@ -1,0 +1,15 @@
+[
+  {"id": "single-hello", "multiline": false, "sent": "hello", "stored": "hello"},
+  {"id": "single-code", "multiline": false, "sent": "fn main() {}", "stored": "fn main() {}"},
+  {"id": "single-punct", "multiline": false, "sent": "a, b; c.", "stored": "a, b; c."},
+  {"id": "single-unicode", "multiline": false, "sent": "café", "stored": "café"},
+  {"id": "single-digits", "multiline": false, "sent": "12345", "stored": "12345"},
+  {"id": "single-quote", "multiline": false, "sent": "say \"hi\"", "stored": "say \"hi\""},
+  {"id": "single-path", "multiline": false, "sent": "src/main.rs", "stored": "src/main.rs"},
+  {"id": "single-space", "multiline": false, "sent": "two words", "stored": "two words"},
+  {"id": "single-dash", "multiline": false, "sent": "a-b_c", "stored": "a-b_c"},
+  {"id": "single-empty-word", "multiline": false, "sent": "ok", "stored": "ok"},
+  {"id": "multi-tab", "multiline": true, "sent": "line\n\ttab", "stored": "\n<pasted_content id=\"p\">\nline\n    tab\n</pasted_content>\n"},
+  {"id": "multi-plain", "multiline": true, "sent": "a\nb", "stored": "\n<pasted_content id=\"q\">\na\nb\n</pasted_content>\n"},
+  {"id": "multi-three", "multiline": true, "sent": "one\ntwo\nthree", "stored": "\n<pasted_content id=\"r\">\none\ntwo\nthree\n</pasted_content>\n"}
+]

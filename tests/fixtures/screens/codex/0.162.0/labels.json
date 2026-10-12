@@ -1,0 +1,8 @@
+[
+  {"file": "codex-005-update.txt", "screen": "update", "from": "0.162.0", "to": "0.162.1"},
+  {"file": "codex-000-firstrun.txt", "screen": "background"},
+  {"file": "codex-106-s6-approval.txt", "screen": "mcp", "server": "rig", "tool": "seat_send"},
+  {"file": "codex-020-ready.txt", "screen": "ready"},
+  {"file": "codex-040-midturn.txt", "screen": "busy"},
+  {"file": "codex-stale.txt", "screen": "stale"}
+]

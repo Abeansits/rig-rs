@@ -93,6 +93,13 @@ pub trait AgentAdapter: Send + Sync + 'static {
     /// Returns [`Error`] when capture fails.
     async fn check_ready(&self, binding: &NodeBinding) -> Result<Readiness, Error>;
 
+    /// How long a launch may stay open before the daemon marks it timed out.
+    ///
+    /// The stub keeps the shared default. Codex uses its shorter overall budget.
+    fn launch_timeout(&self) -> std::time::Duration {
+        crate::readiness::default_launch_timeout()
+    }
+
     /// Provider resume token, when one is on disk.
     ///
     /// # Errors

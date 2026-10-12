@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crewmux_types::{ReadinessCode, RigId, RigName, RuntimeKind, SeatId, SeatName};
+use crewmux_types::{LoginKind, ReadinessCode, RigId, RigName, RuntimeKind, SeatId, SeatName};
 use serde::{Deserialize, Serialize};
 
 /// A rig row.
@@ -32,6 +32,13 @@ pub enum SeatState {
     Stopped,
     /// The pane process exited.
     Dead,
+    /// Codex needs a human to log in. Distinct from [`Attention`](Self::Attention).
+    LoginRequired {
+        /// Which login screen, or the pre-flight result.
+        kind: LoginKind,
+        /// Captured evidence. Includes the remedy to run `codex login`.
+        evidence: String,
+    },
 }
 
 impl SeatState {
@@ -45,18 +52,54 @@ impl SeatState {
             Self::Attention(_) => "attention",
             Self::Stopped => "stopped",
             Self::Dead => "dead",
+            Self::LoginRequired { .. } => "login_required",
         }
     }
 
     /// Attention code, when the state carries one.
+    ///
+    /// [`LoginRequired`](Self::LoginRequired) reports [`ReadinessCode::LoginRequired`].
+    /// The login kind is [`login_kind`](Self::login_kind).
     #[must_use]
     pub const fn code(&self) -> Option<&ReadinessCode> {
         match self {
             Self::Attention(code) => Some(code),
+            Self::LoginRequired { .. } => Some(&LOGIN_CODE),
             Self::Planned | Self::Launching | Self::Ready | Self::Stopped | Self::Dead => None,
         }
     }
+
+    /// Login kind, when this seat is waiting for `codex login`.
+    #[must_use]
+    pub const fn login_kind(&self) -> Option<LoginKind> {
+        match self {
+            Self::LoginRequired { kind, .. } => Some(*kind),
+            Self::Planned
+            | Self::Launching
+            | Self::Ready
+            | Self::Attention(_)
+            | Self::Stopped
+            | Self::Dead => None,
+        }
+    }
+
+    /// Evidence stored on a login-required seat.
+    #[must_use]
+    pub fn login_evidence(&self) -> Option<&str> {
+        match self {
+            Self::LoginRequired { evidence, .. } => Some(evidence.as_str()),
+            Self::Planned
+            | Self::Launching
+            | Self::Ready
+            | Self::Attention(_)
+            | Self::Stopped
+            | Self::Dead => None,
+        }
+    }
 }
+
+/// Stable code so [`SeatState::code`] can return a reference.
+static LOGIN_CODE: ReadinessCode = ReadinessCode::LoginRequired;
 
 /// A seat row.
 #[derive(Clone, Debug, PartialEq, Eq)]

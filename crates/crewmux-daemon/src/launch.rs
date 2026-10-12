@@ -212,7 +212,23 @@ async fn launch_one(
         LaunchOutcome::Failed { error, .. } => {
             fail_seat(app, seat, &error, attention_code(&error)).await
         }
+        LaunchOutcome::LoginRequired { kind, evidence } => {
+            login_required_seat(app, seat, kind, evidence).await
+        }
     }
+}
+
+async fn login_required_seat(
+    app: &App,
+    seat: &crewmux_core::Seat,
+    kind: crewmux_types::LoginKind,
+    evidence: String,
+) -> Result<crewmux_core::Seat, Error> {
+    let mut updated = seat.clone();
+    LifecycleService::mark_login_required(&mut updated, kind, evidence);
+    let saved = updated.clone();
+    write(&app.store, move |conn| SeatRepo::upsert(conn, &saved)).await?;
+    Ok(updated)
 }
 
 async fn seat_cwd(seat: &crewmux_core::Seat) -> Result<std::path::PathBuf, Error> {
@@ -283,7 +299,7 @@ async fn fail_seat(
     drop(LifecycleService::apply_launch_result(
         &mut updated,
         LaunchApply::Failed {
-            code: ReadinessCode::Other(code.to_owned()),
+            code: ReadinessCode::parse(code),
             reason: reason.to_owned(),
         },
         now_ts(),
@@ -306,6 +322,8 @@ pub(crate) fn attention_code(error: &str) -> &'static str {
         "permission_denied"
     } else if lower.contains("no such file") || lower.contains("not found") {
         "not_found"
+    } else if lower.contains("codex_home_missing") || lower.contains("codex home") {
+        "codex_home_missing"
     } else if lower.contains("cwd") || lower.contains("directory") {
         "invalid_cwd"
     } else {

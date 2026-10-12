@@ -1,0 +1,6 @@
+Allow the rig MCP server to run tool seat_send?
+
+› 1. Allow
+  2. Allow for this session
+  3. Always allow
+  4. Cancel

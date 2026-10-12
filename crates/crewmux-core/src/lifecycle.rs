@@ -2,7 +2,7 @@
 
 //! Pure up/down planning. I/O stays in the daemon.
 
-use crewmux_types::{ReadinessCode, RigId, SeatId, SessionId};
+use crewmux_types::{LoginKind, ReadinessCode, RigId, SeatId, SessionId};
 
 use crate::clock::Timestamp;
 use crate::error::Error;
@@ -140,6 +140,12 @@ impl LifecycleService {
     pub fn mark_attention(seat: &mut Seat, code: ReadinessCode, reason: Option<String>) {
         seat.state = SeatState::Attention(code);
         seat.reason = reason;
+    }
+
+    /// Codex pre-flight or a login screen. The session, when one exists, is left in place.
+    pub fn mark_login_required(seat: &mut Seat, kind: LoginKind, evidence: String) {
+        seat.reason = Some(evidence.clone());
+        seat.state = SeatState::LoginRequired { kind, evidence };
     }
 
     /// The pane process exited.

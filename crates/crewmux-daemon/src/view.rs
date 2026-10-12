@@ -12,6 +12,9 @@ pub(crate) fn seat_value(seat: &Seat, attached: Option<bool>) -> Value {
     if let Some(code) = seat.state.code() {
         insert(&mut value, "code", json!(code.as_str()));
     }
+    if let Some(kind) = seat.state.login_kind() {
+        insert(&mut value, "login_kind", json!(kind.as_str()));
+    }
     if let Some(reason) = &seat.reason {
         insert(&mut value, "reason", json!(reason));
     }
@@ -38,10 +41,12 @@ pub(crate) fn status_of(seats: &[Seat]) -> &'static str {
     if launch_failed {
         return "partial";
     }
-    if seats
-        .iter()
-        .any(|seat| matches!(seat.state, crewmux_core::SeatState::Attention(_)))
-    {
+    if seats.iter().any(|seat| {
+        matches!(
+            seat.state,
+            crewmux_core::SeatState::Attention(_) | crewmux_core::SeatState::LoginRequired { .. }
+        )
+    }) {
         return "attention";
     }
     if seats

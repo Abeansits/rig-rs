@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crewmux_adapters::{AdapterRegistry, StubAdapter};
+use crewmux_adapters::{AdapterRegistry, CodexAdapter, StubAdapter};
 use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
 use crewmux_store::Store;
 use tokio_util::sync::CancellationToken;
@@ -43,6 +43,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
         Arc::clone(&mux),
         stub_bin.clone(),
     )));
+    registry.register(Arc::new(CodexAdapter::new(Arc::clone(&mux))));
     let cancel = CancellationToken::new();
     let app = App::new(
         store,

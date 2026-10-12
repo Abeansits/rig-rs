@@ -7,6 +7,7 @@
 
 mod error;
 mod lint;
+mod lint_blind;
 mod lint_mux;
 mod output;
 
@@ -16,5 +17,6 @@ pub mod record_tui;
 
 pub use error::{Error, io_err};
 pub use lint::{lint_claude_json, lint_window_size};
+pub use lint_blind::lint_blind_enter;
 pub use lint_mux::{lint_mux_at, workspace_root as lint_workspace_root};
 pub use output::{err, out};

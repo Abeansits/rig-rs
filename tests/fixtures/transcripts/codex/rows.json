@@ -1,0 +1,12 @@
+[
+  {"id": "plain", "sent": "hello", "stored": "hello"},
+  {"id": "code", "sent": "fn main() {}", "stored": "fn main() {}"},
+  {"id": "multi", "sent": "a\nb", "stored": "a\nb"},
+  {"id": "unicode", "sent": "café", "stored": "café"},
+  {"id": "punct", "sent": "a, b; c.", "stored": "a, b; c."},
+  {"id": "quote", "sent": "say \"hi\"", "stored": "say \"hi\""},
+  {"id": "path", "sent": "src/main.rs", "stored": "src/main.rs"},
+  {"id": "space", "sent": "two words", "stored": "two words"},
+  {"id": "dash", "sent": "a-b_c", "stored": "a-b_c"},
+  {"id": "digits", "sent": "12345", "stored": "12345"}
+]

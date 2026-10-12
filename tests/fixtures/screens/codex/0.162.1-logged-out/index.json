@@ -1,0 +1,272 @@
+[
+  {
+    "file": "cx-lo-00-menu-0.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-01-menu-1.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-02-menu-2.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-03-menu-3.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-04-menu-4.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-05-menu-5.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-06-menu-6.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-07-menu-7.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-08-menu-8.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-09-menu-9.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-10-menu-10.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-11-menu-11.txt",
+    "live": true,
+    "expect": "menu"
+  },
+  {
+    "file": "cx-lo-12-browser-0.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-13-browser-1.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-14-browser-2.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-15-browser-3.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-16-browser-4.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-17-browser-5.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-18-browser-6.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-19-browser-7.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-20-browser-8.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-21-browser-9.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-22-browser-10.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-23-browser-11.txt",
+    "live": true,
+    "expect": "chatgpt_browser"
+  },
+  {
+    "file": "cx-lo-24-device-0.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-25-device-1.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-26-device-2.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-27-device-3.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-28-device-4.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-29-device-5.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-30-device-6.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-31-device-7.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-32-device-8.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-33-device-9.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-34-device-10.txt",
+    "live": true,
+    "expect": "device_code"
+  },
+  {
+    "file": "cx-lo-35-apikey-0.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-36-apikey-1.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-37-apikey-2.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-38-apikey-3.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-39-apikey-4.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-40-apikey-5.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-41-apikey-6.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-42-apikey-7.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-43-apikey-8.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-44-apikey-9.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-45-apikey-10.txt",
+    "live": true,
+    "expect": "api_key_entry"
+  },
+  {
+    "file": "cx-lo-46-ctrl-c-a.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-47-ctrl-c-b.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-48-quit-a.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-49-quit-b.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-50-login-status.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-51-login-status-2.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-52-exec.txt",
+    "live": false,
+    "expect": "returned_to_shell"
+  },
+  {
+    "file": "cx-lo-53-missing-home.txt",
+    "live": false,
+    "expect": "hard_failure"
+  }
+]

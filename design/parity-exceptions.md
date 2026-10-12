@@ -18,8 +18,8 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
   - `HardFailure(CodexHomeMissing)` for the CODEX_HOME error, which is not retried.
   - **Pre-flight before launch:** `codex login status` (exit code / output) runs under the seat's CODEX_HOME. If it reports not logged in, the launch is short-circuited to `LoginRequired` without starting the TUI. The screen matcher is the second line of defence.
   - **Inconclusive budget:** an `Inconclusive` verdict that persists for `inconclusive_budget` (default 15 s, configurable) while the screen is *stable* (same hash across 3 captures) escalates to `AttentionRequired(UnrecognisedScreen)` and attaches the capture as evidence. It does not wait for the full launch timeout. This applies to all runtimes.
-- **Required tests:** `codex_gates.rs::login_screens_are_login_required` (cx-1, cx-2, cx-3 give `LoginRequired`; cx-0 gives `HardFailure`); `codex_launch.rs::not_logged_in_preflight_short_circuits` (stub `codex` binary on PATH printing not-logged-in; asserts no tmux session is created and the seat state is `attention_required/login_required`); `readiness.rs::stable_inconclusive_escalates_before_timeout` (FakeMux plus a fake Clock).
-- **Pending:** confirm the current `codex login status` output and exit codes against a real logged-in and logged-out codex. The fixtures come from codex-cli 0.162.1.
+- **Required tests:** `codex_login.rs::all_live_logged_out_screens_are_login_required` (live captures are `LoginRequired(kind)`; dead panes are `ReturnedToShell` or `HardFailure`); `codex_login.rs::preflight_exit1_short_circuits` (stub `codex` printing "Not logged in" on exit 1 creates no tmux session); `codex_login.rs::codex_home_missing_is_hard_failure`; `readiness.rs::stable_inconclusive_escalates_before_timeout` (FakeMux plus a fake Clock).
+- **Logged-out corpus:** exit 1 with "Not logged in" is `SeatState::LoginRequired { kind: PreflightNotLoggedIn }`. A missing Codex home is `HardFailure(CodexHomeMissing)`. A not-logged-in pre-flight is never `Ready`, even when a composer is on screen. "control socket is already in use" is `AttentionRequired(StaleCodexServer)`. The seat is not driven: no Enter, `q`, Ctrl-C, or digits.
 
 ## PE-003: slice 1 `rig` help and version are a subset of v0.6.9
 
@@ -87,6 +87,12 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **TS behaviour:** `history` without a cursor returns the oldest rows. An unknown `--topic` returns an empty list.
 - **Rust behaviour:** without a cursor the page is the newest `limit` rows, oldest first. A cursor pages forward (`id` greater than the cursor, ascending). An unknown topic is `UnknownTopic` after `has_topic` returns false, including when `limit` is 0.
 - **Required test:** `history_without_cursor_returns_the_newest_limit` and `unknown_topic_is_an_error`.
+
+## PE-013: Never send a blind Enter to a provider dialog
+
+- **TS behaviour:** `claude-code-adapter.ts` sends `Enter` on a trust gate without moving the cursor or checking which option is selected. A blind Enter on the current Codex update gate runs the update. On the Codex sign-in menu, `q` and Ctrl-C quit and digits pick a login method.
+- **Rust behaviour:** Enter is sent only from `DialogDriver::answer` after a re-capture shows `›` or `❯` on the chosen label, or from Codex `submit` after the classifier returns `Ready`. The driver sends Up and Down, then Enter. It does not send `q`, Ctrl-C, Escape, or digits. Codex update is answered "Skip", never "Update now". Login screens and the background-server menu are not answered. Stop uses the tmux kill path.
+- **Required tests:** `dialog_driver.rs::never_enter_on_default_no_exit`, `trust_not_answered_without_opt_in`, `codex_update_answers_skip_never_update`, `bypass_always_escalates`, `unknown_menu_escalates`, `cursor_verification_failure_escalates`, `no_quit_keys_on_login_menu`, and `xtask` `lint blind-enter`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

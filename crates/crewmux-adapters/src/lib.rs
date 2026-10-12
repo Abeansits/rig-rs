@@ -1,6 +1,8 @@
 //! Agent runtime adapters. Slice 1 ships the trait and the stub runtime.
 
 mod adapter;
+pub mod codex;
+pub mod dialog;
 mod error;
 mod readiness;
 mod registry;
@@ -8,6 +10,7 @@ mod stub;
 mod types;
 
 pub use adapter::{AgentAdapter, SeatIo};
+pub use codex::CodexAdapter;
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};
 pub use registry::AdapterRegistry;

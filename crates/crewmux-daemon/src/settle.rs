@@ -41,10 +41,14 @@ pub(crate) async fn settle(
             pane: Some(0),
             pane_id: seat.pane_id.clone(),
         };
+        let timeout = app
+            .registry
+            .get(seat.runtime)
+            .map_or_else(default_launch_timeout, |adapter| adapter.launch_timeout());
         pending.push(Pending {
             id: seat.id,
             binding,
-            watch: ReadinessWatch::new(now_ts(), default_budget(), default_launch_timeout()),
+            watch: ReadinessWatch::new(now_ts(), default_budget(), timeout),
         });
     }
     let started = tokio::time::Instant::now();
@@ -111,7 +115,24 @@ async fn step(app: &App, item: &mut Pending, events: &mut Vec<Value>) -> Result<
             .await?;
             Ok(true)
         }
+        WatchDecision::LoginRequired { kind, evidence } => {
+            mark_login(app, &seat, kind, &evidence).await?;
+            Ok(true)
+        }
     }
+}
+
+async fn mark_login(
+    app: &App,
+    seat: &Seat,
+    kind: crewmux_types::LoginKind,
+    evidence: &str,
+) -> Result<(), Error> {
+    let mut updated = seat.clone();
+    LifecycleService::mark_login_required(&mut updated, kind, evidence.to_owned());
+    let saved = updated;
+    write(&app.store, move |conn| SeatRepo::upsert(conn, &saved)).await?;
+    Ok(())
 }
 
 async fn mark_ready(app: &App, seat: &Seat, events: &mut Vec<Value>) -> Result<(), Error> {
