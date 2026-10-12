@@ -63,11 +63,11 @@ function flag(name) {
 const when = flag('--title');
 const ready = flag('--ready');
 const go = flag('--go');
-const transcript = flag('--transcript');
-if (transcript) {
-  fs.mkdirSync(require('path').dirname(transcript), { recursive: true });
-  fs.writeFileSync(transcript, '{}\n');
+function show(body) {
+  const rule = '─'.repeat(40);
+  process.stdout.write('\u001b[2J\u001b[H' + rule + '\n❯ ' + body + '\n' + rule + '\n  ? for shortcuts\n');
 }
+show('');
 if (when === 'before') process.title = '2.1.289';
 fs.writeFileSync(ready, '1');
 if (when === 'after') {
@@ -78,13 +78,17 @@ if (when === 'after') {
   process.title = '2.1.289';
   fs.writeFileSync(ready + '.titled', '1');
 }
-setInterval(() => {}, 1000);
+if (process.stdin.isTTY) process.stdin.setRawMode(true);
+process.stdin.on('data', (buf) => {
+  const text = buf.toString('utf8').replace(/\u001b\[200~/g, '').replace(/\u001b\[201~/g, '').replace(/[\r\n]/g, '');
+  if (text) show(text);
+});
 ";
 
     /// Title hides argv, then `exec` into another session keeps pid and start time.
     ///
-    /// The transcript is written and closed, matching Claude Code 2.1.286. The
-    /// second session file is newer, so the open-fd check is not what refuses.
+    /// No transcript is written. A missing argv token with no open session file
+    /// is a refusal, including when the new session has not created a file yet.
     #[cfg(target_os = "linux")]
     const HIDDEN: &str = r#"
 import ctypes, os, sys, time
@@ -97,13 +101,7 @@ libc = ctypes.CDLL("libc.so.6")
 libc.prctl.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
 libc.prctl.restype = ctypes.c_int
 libc.prctl(15, b"2.1.289", 0, 0, 0)
-def emit(path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write("{}\n")
 ready = os.environ["RIG_READY"]
-if os.environ.get("RIG_LINEAGE_MODE") != "stay":
-    emit(os.environ["RIG_TRANSCRIPT"])
 rule = "─" * 40
 sys.stdout.write(rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n")
 sys.stdout.flush()
@@ -118,10 +116,6 @@ while not os.path.exists(trigger):
     if time.time() > deadline:
         raise SystemExit("trigger")
     time.sleep(0.05)
-other = os.environ["RIG_OTHER"]
-emit(other)
-stamp = time.time() + 5
-os.utime(other, (stamp, stamp))
 os.environ["RIG_LINEAGE_MODE"] = "stay"
 os.environ["RIG_READY"] = ready + ".next"
 os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
@@ -428,18 +422,10 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
         tokio::fs::write(&script, HIDDEN).await.expect("script");
         let ready = live.root.join("ready-hide");
         let trigger = live.root.join("go-hide");
-        let home = live.root.join("claude-home");
         let cwd = live.root.join("work");
-        let transcript = transcript_path(&home, &cwd, ORIG);
-        let other = transcript_path(&home, &cwd, OTHER);
         tokio::fs::create_dir_all(&cwd).await.expect("work");
         let name = format!("hide{}", unique());
         let mut spec = SessionSpec::new(&name, cwd);
-        spec.env.insert("HOME".into(), home.display().to_string());
-        spec.env
-            .insert("RIG_TRANSCRIPT".into(), transcript.display().to_string());
-        spec.env
-            .insert("RIG_OTHER".into(), other.display().to_string());
         spec.env
             .insert("RIG_READY".into(), ready.display().to_string());
         spec.env
@@ -479,42 +465,12 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
             }
         })
         .await;
-        let orig_mtime = std::fs::metadata(&transcript)
-            .expect("orig transcript")
-            .modified()
-            .expect("orig mtime");
-        let other_mtime = std::fs::metadata(&other)
-            .expect("other transcript")
-            .modified()
-            .expect("other mtime");
-        assert!(
-            other_mtime > orig_mtime,
-            "the swapped session must be the newest transcript"
-        );
-        refuse(&live.app, &pane, &live.mux, "lineage:session_id_mismatch").await;
-    }
-
-    #[cfg(target_os = "linux")]
-    async fn closed_transcript(live: &Live, pane: &PaneRef) {
-        let home = live.root.join("claude-home");
-        let transcript = transcript_path(&home, &live.root.join("work"), ORIG);
-        assert!(
-            tokio::fs::try_exists(&transcript).await.unwrap_or(false),
-            "closed transcript"
-        );
         let pid = pane_info(&live.mux, &pane.session).await.pid.expect("pid");
         assert!(
             !fd_names(pid, ORIG).await,
-            "the launcher must not hold the transcript open"
+            "the swap must not be saved by an open session file"
         );
-    }
-
-    #[cfg(target_os = "linux")]
-    fn transcript_path(home: &std::path::Path, cwd: &std::path::Path, session: &str) -> PathBuf {
-        home.join(".claude")
-            .join("projects")
-            .join(crate::lineage_held::encode_project(cwd))
-            .join(format!("{session}.jsonl"))
+        refuse(&live.app, &pane, &live.mux, "lineage:session_id_mismatch").await;
     }
 
     #[cfg(target_os = "linux")]
@@ -557,12 +513,8 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
         tokio::fs::write(&script, NODE).await.expect("script");
         let ready = live.root.join(format!("ready-{when}"));
         let go = live.root.join(format!("title-{when}"));
-        let home = live.root.join("claude-home");
-        let cwd = live.root.join("work");
-        let transcript = transcript_path(&home, &cwd, ORIG);
         let name = format!("node{}", unique());
-        let mut spec = SessionSpec::new(&name, cwd);
-        spec.env.insert("HOME".into(), home.display().to_string());
+        let mut spec = SessionSpec::new(&name, live.root.join("work"));
         spec.argv = vec![
             bin,
             script.display().to_string(),
@@ -572,8 +524,6 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
             ready.display().to_string(),
             "--go".into(),
             go.display().to_string(),
-            "--transcript".into(),
-            transcript.display().to_string(),
             "--session-id".into(),
             ORIG.into(),
         ];
@@ -582,7 +532,7 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
     }
 
     #[cfg(target_os = "linux")]
-    async fn title_still_submits(when: &str) {
+    async fn prepared_node(when: &str) -> (Live, PaneRef) {
         let live = boot().await;
         let (pane, ready, go) = node_pane(&live, when).await;
         until(|| {
@@ -633,25 +583,40 @@ os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
             })
             .await;
         }
-        closed_transcript(&live, &pane).await;
-        crate::lineage::ensure(&live.app, &seat, &pane)
-            .await
-            .expect("version title");
-        match submit_text(&live.app, "claude", MARKER).await {
-            Ok(_) => {}
-            Err(err) => assert!(!err.to_string().contains("lineage:"), "{err}"),
-        }
+        (live, pane)
     }
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn node_title_before_launch_still_submits() {
-        title_still_submits("before").await;
+    async fn node_title_before_launch_pastes_nothing() {
+        let (live, pane) = prepared_node("before").await;
+        let pid = pane_info(&live.mux, &pane.session).await.pid.expect("pid");
+        assert!(!fd_names(pid, ORIG).await, "no session fd");
+        refuse(&live.app, &pane, &live.mux, "lineage:session_id_mismatch").await;
     }
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn node_title_after_launch_still_submits() {
-        title_still_submits("after").await;
+    async fn node_title_after_launch_pastes_nothing() {
+        let (live, pane) = prepared_node("after").await;
+        let pid = pane_info(&live.mux, &pane.session).await.pid.expect("pid");
+        assert!(!fd_names(pid, ORIG).await, "no session fd");
+        refuse(&live.app, &pane, &live.mux, "lineage:session_id_mismatch").await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn node_argv_session_delivers() {
+        let (live, pane) = prepared_node("keep").await;
+        let pid = pane_info(&live.mux, &pane.session).await.pid.expect("pid");
+        let argv = argv_of(pid).await;
+        assert!(argv.contains("--session-id"), "{argv}");
+        assert!(argv.contains(ORIG), "{argv}");
+        let sent = submit_text(&live.app, "claude", MARKER).await;
+        let text = capture(&live.mux, &pane).await;
+        assert!(
+            text.contains(MARKER),
+            "argv session was not delivered: {sent:?}\n{text}"
+        );
     }
 }
