@@ -138,9 +138,29 @@ if sys.argv[1:3] == ["daemon", "run"]:
         + str(len(body)).encode()
         + b"\r\nConnection: close\r\n\r\n"
     )
+    def read_request(conn):
+        # One recv can return after the headers and before the body. Closing
+        # then makes the client's second write fail with EPIPE.
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(65536)
+            if not chunk:
+                return data
+            data += chunk
+        head_bytes, rest = data.split(b"\r\n\r\n", 1)
+        need = 0
+        for line in head_bytes.split(b"\r\n"):
+            if line.lower().startswith(b"content-length:"):
+                need = int(line.split(b":", 1)[1].strip() or b"0")
+        while len(rest) < need:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            rest += chunk
+        return data
     while True:
         conn, _addr = server.accept()
-        conn.recv(65536)
+        read_request(conn)
         conn.sendall(head + body)
         conn.close()
 raise SystemExit(0)

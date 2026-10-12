@@ -4,6 +4,7 @@
 //! The binary dispatches `tui` before clap so `rig --help` stays the setup/doctor list.
 
 mod autostart;
+mod chatroom;
 mod command;
 mod doctor_cmd;
 mod doctor_eval;
@@ -133,6 +134,8 @@ enum Commands {
     Unclaim(slice4::UnclaimArgs),
     /// Print the operator session.
     Whoami,
+    /// Per-rig chatroom: send, history, watch, topic, and clear.
+    Chatroom(chatroom::ChatroomArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -174,6 +177,7 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Ask(args) => slice4::ask(&args),
         Commands::Unclaim(args) => slice4::unclaim(&args),
         Commands::Whoami => slice4::whoami(),
+        Commands::Chatroom(args) => chatroom::run(&args),
     }
 }
 

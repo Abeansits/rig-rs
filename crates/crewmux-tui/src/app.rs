@@ -524,6 +524,7 @@ async fn fetch(path: &std::path::Path) -> Result<Snapshot, HydrateFail> {
         Ok(Err(
             crewmux_api::Error::BadPath
             | crewmux_api::Error::BadMethod
+            | crewmux_api::Error::BadHeader
             | crewmux_api::Error::Protocol(_)
             | crewmux_api::Error::BodyEncoding
             | crewmux_api::Error::Status { .. }

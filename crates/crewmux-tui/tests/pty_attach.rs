@@ -336,6 +336,10 @@ mod tmux_it {
 
     impl Drop for Server {
         fn drop(&mut self) {
+            let pid = std::process::id().to_string();
+            if self.sock != format!("r{pid}") && self.sock != format!("q{pid}") {
+                return;
+            }
             drop(tmux(&self.sock, &["kill-server"]));
         }
     }

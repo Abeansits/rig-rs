@@ -1,0 +1,14 @@
+---
+source: tests/diff/cases/chatroom-send-history.json
+expression: "ts:chatroom-send-history"
+---
+{
+  "exit": 400,
+  "files": [],
+  "json": {
+    "error": "since must be a datetime SQLite can parse, such as 'YYYY-MM-DD HH:MM:SS'; got 'garbage'"
+  },
+  "stderr": "",
+  "stdout": "[]\n{\"error\":\"Missing body\"}\n{\"error\":\"since must be a datetime SQLite can parse, such as 'YYYY-MM-DD HH:MM:SS'; got 'garbage'\"}",
+  "tmux_argv": []
+}

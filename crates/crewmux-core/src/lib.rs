@@ -3,6 +3,8 @@
 //! No tokio, no rusqlite, and no process spawning. The daemon applies these
 //! plans inside a store transaction.
 
+pub mod chat;
+
 mod clock;
 mod error;
 mod event;

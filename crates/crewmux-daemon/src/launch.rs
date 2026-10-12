@@ -7,8 +7,8 @@ use crewmux_core::{
     LaunchApply, LifecycleService, PlanIds, RigRepo, SeatRepo, SeatState, Timestamp,
 };
 use crewmux_spec::RigSpec;
-use crewmux_store::clear_rig;
-use crewmux_types::{ReadinessCode, RigId, SeatId, SessionId};
+use crewmux_store::{clear_rig, put_seat_token};
+use crewmux_types::{ReadinessCode, RigId, SEAT_ID_ENV, SEAT_TOKEN_ENV, SeatId, SessionId};
 use serde_json::{Value, json};
 
 use crate::db::{read, write};
@@ -191,6 +191,9 @@ async fn launch_one(
     if let Some(script) = stub_script(app) {
         env.insert("RIG_STUB_SCRIPT".to_owned(), script);
     }
+    let seat_token = SeatId::new().to_string();
+    env.insert(SEAT_ID_ENV.to_owned(), seat.id.to_string());
+    env.insert(SEAT_TOKEN_ENV.to_owned(), seat_token.clone());
     let outcome = adapter
         .launch(
             &binding,
@@ -204,7 +207,7 @@ async fn launch_one(
         .await?;
     match outcome {
         LaunchOutcome::Ok { applied, .. } => {
-            store_started(app, seat, session, applied, events).await
+            store_started(app, seat, session, applied, events, &seat_token).await
         }
         LaunchOutcome::Failed { error, .. } => {
             fail_seat(app, seat, &error, attention_code(&error)).await
@@ -228,6 +231,7 @@ async fn store_started(
     session: SessionId,
     applied: crewmux_adapters::AppliedLaunch,
     events: &mut Vec<Value>,
+    token: &str,
 ) -> Result<crewmux_core::Seat, Error> {
     let mut updated = seat.clone();
     let now = now_ts();
@@ -245,8 +249,10 @@ async fn store_started(
     let saved = updated.clone();
     let name = saved.name.as_str().to_owned();
     let stored = event.clone();
+    let token = token.to_owned();
     write(&app.store, move |conn| {
         SeatRepo::upsert(conn, &saved)?;
+        put_seat_token(conn, &saved.id, &token)?;
         crewmux_core::SessionRepo::insert(
             conn,
             &session,

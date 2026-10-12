@@ -8,7 +8,6 @@ use crewmux_adapters::{AdapterRegistry, StubAdapter};
 use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
 use crewmux_store::Store;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::TaskTracker;
 
 use crate::death::supervise;
 use crate::error::Error;
@@ -88,7 +87,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
             .await
             .map_err(crate::state::join_err)??;
     }
-    let tracker = TaskTracker::new();
+    let tracker = app.tasks.clone();
     tracker.spawn(supervise(app.clone()));
     tracker.spawn(reap(app.clone()));
     tracker.spawn(on_terminate(cancel.clone()));

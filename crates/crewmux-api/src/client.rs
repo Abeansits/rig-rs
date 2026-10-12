@@ -3,6 +3,7 @@
 //! rig-rs uses `$RIG_HOME/run/daemon.sock`. The TypeScript daemon uses TCP.
 //! This client implements both transports and adds no new routes.
 
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::net::UnixStream;
@@ -91,32 +92,100 @@ impl Client {
         path: &str,
         body: Option<&[u8]>,
     ) -> Result<Response, Error> {
+        self.round_trip(method, path, body, &[])
+    }
+
+    /// Send one request with extra headers and read until the peer closes.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`request`](Self::request), plus [`Error::BadHeader`] when a header contains a line break.
+    pub fn request_with_headers(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        headers: &[(&str, &str)],
+    ) -> Result<Response, Error> {
+        self.round_trip(method, path, body, headers)
+    }
+
+    fn round_trip(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        headers: &[(&str, &str)],
+    ) -> Result<Response, Error> {
         validate_method(method)?;
         validate_path(path)?;
-        let head = build_head(method, path, body.unwrap_or(b""));
         let payload = body.unwrap_or(b"");
+        let head = build_head(method, path, payload, headers)?;
+        let (mut stream, target) = self.dial()?;
+        exchange(&mut stream, &target, &head, payload)
+    }
+
+    fn dial(&self) -> Result<(IoStream, String), Error> {
         match &self.target {
             Target::Uds(path) => {
                 let target = path.display().to_string();
-                let mut stream = UnixStream::connect(path).map_err(|source| Error::Connect {
+                let stream = UnixStream::connect(path).map_err(|source| Error::Connect {
                     target: target.clone(),
                     source,
                 })?;
-                prepare_stream(&mut stream, &target, self.timeout)?;
-                exchange(&mut stream, &target, &head, payload)
+                prepare_stream(&stream, &target, self.timeout)?;
+                Ok((IoStream::Uds(stream), target))
             }
             Target::Tcp(addr) => {
                 let target = addr.to_string();
-                let mut stream =
-                    TcpStream::connect_timeout(addr, self.timeout).map_err(|source| {
-                        Error::Connect {
-                            target: target.clone(),
-                            source,
-                        }
-                    })?;
-                prepare_stream(&mut stream, &target, self.timeout)?;
-                exchange(&mut stream, &target, &head, payload)
+                let stream = TcpStream::connect_timeout(addr, self.timeout).map_err(|source| {
+                    Error::Connect {
+                        target: target.clone(),
+                        source,
+                    }
+                })?;
+                prepare_stream(&stream, &target, self.timeout)?;
+                Ok((IoStream::Tcp(stream), target))
             }
+        }
+    }
+}
+
+enum IoStream {
+    Uds(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Read for IoStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Uds(stream) => stream.read(buf),
+            Self::Tcp(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for IoStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Uds(stream) => stream.write(buf),
+            Self::Tcp(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Uds(stream) => stream.flush(),
+            Self::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+impl IoStream {
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        match self {
+            Self::Uds(stream) => stream.set_read_timeout(timeout),
+            Self::Tcp(stream) => stream.set_read_timeout(timeout),
         }
     }
 }
@@ -238,15 +307,51 @@ fn validate_path(path: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn build_head(method: &str, path: &str, payload: &[u8]) -> String {
-    format!(
-        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nAccept: application/json\r\nContent-Length: {}\r\n\r\n",
-        payload.len()
-    )
+fn build_head(
+    method: &str,
+    path: &str,
+    payload: &[u8],
+    headers: &[(&str, &str)],
+) -> Result<String, Error> {
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+    let mut accept = false;
+    for (name, value) in headers {
+        if !header_token(name) || value_has_break(value) {
+            return Err(Error::BadHeader);
+        }
+        if name.eq_ignore_ascii_case("accept") {
+            accept = true;
+        }
+        head.push_str(name);
+        head.push_str(": ");
+        head.push_str(value);
+        head.push_str("\r\n");
+    }
+    if !accept {
+        head.push_str("Accept: application/json\r\n");
+    }
+    let _ = write!(head, "Content-Length: {}\r\n\r\n", payload.len());
+    Ok(head)
 }
 
+fn header_token(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn value_has_break(value: &str) -> bool {
+    value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
+}
+
+#[path = "http_stream.rs"]
+mod http_stream;
+
+pub use http_stream::HttpStream;
+
 fn prepare_stream(
-    stream: &mut impl TimeoutStream,
+    stream: &impl TimeoutStream,
     target: &str,
     timeout: Duration,
 ) -> Result<(), Error> {
@@ -283,14 +388,74 @@ fn exchange(
             target: target.to_owned(),
             source,
         })?;
+    parse_response(&read_message(stream, target)?)
+}
+
+/// Read one response. A reset after a complete `Content-Length` body is the
+/// peer closing; the bytes already read are the response.
+fn read_message(stream: &mut impl Read, target: &str) -> Result<Vec<u8>, Error> {
     let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .map_err(|source| Error::Exchange {
-            target: target.to_owned(),
-            source,
-        })?;
-    parse_response(&buf)
+    let mut chunk = [0_u8; 1024];
+    loop {
+        if message_complete(&buf) {
+            return Ok(buf);
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                if header_end(&buf).is_some() {
+                    return Ok(buf);
+                }
+                return Err(Error::Exchange {
+                    target: target.to_owned(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "closed before an HTTP response",
+                    ),
+                });
+            }
+            Ok(n) => {
+                if let Some(bytes) = chunk.get(..n) {
+                    buf.extend_from_slice(bytes);
+                }
+            }
+            Err(_) if message_complete(&buf) => return Ok(buf),
+            Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(source) => {
+                return Err(Error::Exchange {
+                    target: target.to_owned(),
+                    source,
+                });
+            }
+        }
+    }
+}
+
+fn message_complete(buf: &[u8]) -> bool {
+    let Some(split) = header_end(buf) else {
+        return false;
+    };
+    let Some(head) = buf.get(..split) else {
+        return false;
+    };
+    let Some(len) = content_length(head) else {
+        return false;
+    };
+    buf.len().saturating_sub(split.saturating_add(4)) >= len
+}
+
+fn header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn content_length(head: &[u8]) -> Option<usize> {
+    let text = std::str::from_utf8(head).ok()?;
+    for line in text.split("\r\n").skip(1) {
+        let (name, value) = line.split_once(':')?;
+        if name.eq_ignore_ascii_case("content-length") {
+            return value.trim().parse().ok();
+        }
+    }
+    None
 }
 
 fn parse_response(buf: &[u8]) -> Result<Response, Error> {

@@ -8,6 +8,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::error::TypeError;
+use crate::id::MAX_NAME_LEN;
+
+/// Longest tmux session name: `{seat}__{rig}` with both names at [`MAX_NAME_LEN`].
+const MAX_SESSION_LEN: usize = MAX_NAME_LEN * 2 + 2;
 
 /// A seat row key. Not a [`crate::SeatId`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -19,9 +23,10 @@ impl SeatKey {
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains whitespace or a slash.
+    /// Returns [`TypeError::Name`] when `text` is empty, longer than 256 bytes,
+    /// or contains whitespace or a slash.
     pub fn parse(text: impl Into<String>) -> Result<Self, TypeError> {
-        validate_token(text.into()).map(Self)
+        validate_token(text.into(), MAX_NAME_LEN).map(Self)
     }
 
     /// Borrow the token.
@@ -47,9 +52,10 @@ impl PodName {
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains whitespace or a slash.
+    /// Returns [`TypeError::Name`] when `text` is empty, longer than 256 bytes,
+    /// or contains whitespace or a slash.
     pub fn parse(text: impl Into<String>) -> Result<Self, TypeError> {
-        validate_token(text.into()).map(Self)
+        validate_token(text.into(), MAX_NAME_LEN).map(Self)
     }
 
     /// Borrow the name.
@@ -75,9 +81,10 @@ impl TmuxSession {
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Name`] when `text` is empty or contains whitespace or a slash.
+    /// Returns [`TypeError::Name`] when `text` is empty, longer than a
+    /// `{seat}__{rig}` pair, or contains whitespace or a slash.
     pub fn parse(text: impl Into<String>) -> Result<Self, TypeError> {
-        validate_token(text.into()).map(Self)
+        validate_token(text.into(), MAX_SESSION_LEN).map(Self)
     }
 
     /// Borrow the session name.
@@ -115,8 +122,9 @@ impl LauncherKind {
     }
 }
 
-fn validate_token(text: String) -> Result<String, TypeError> {
+fn validate_token(text: String, max: usize) -> Result<String, TypeError> {
     let bad = text.is_empty()
+        || text.len() > max
         || text
             .chars()
             .any(|ch| ch.is_whitespace() || matches!(ch, '/' | '\\' | '\0'));

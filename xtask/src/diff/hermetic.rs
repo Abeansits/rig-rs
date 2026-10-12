@@ -317,17 +317,17 @@ fn python3_on_path() -> bool {
 
 fn fresh_socket_name() -> String {
     // Short on purpose: macOS `sockaddr_un` is 104 bytes, and tmux puts this
-    // name under a long temp directory. The pid prefix is what Drop checks
-    // before `kill-server`, so a socket this process did not create stays up.
+    // name under a long temp directory. The pid prefix keeps Drop from killing a
+    // socket this process did not create.
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.subsec_nanos());
     let seq = SOCKET_SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("r{:x}{seq:x}{nanos:08x}", std::process::id())
+    format!("p{:x}{seq:x}{nanos:08x}", std::process::id())
 }
 
 fn harness_socket_owned(name: &str) -> bool {
-    let prefix = format!("r{:x}", std::process::id());
+    let prefix = format!("p{:x}", std::process::id());
     name.starts_with(&prefix) && name.len() > prefix.len()
 }
 

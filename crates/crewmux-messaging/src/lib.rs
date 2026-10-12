@@ -1,7 +1,7 @@
-//! Message queue, send/ask, wake ladder, claims and chatroom.
+//! Message queue, send/ask, wake ladder, claims, and chatroom.
 //!
 //! The queue book and the wake ladder are pure. SQLite lives in `crewmux-store`.
-//! Chat history is empty until slice 5 provides a repository.
+//! Chat history is the `chat` module; the store implements the repository.
 
 mod ask;
 mod book;
@@ -19,8 +19,11 @@ mod repo;
 mod session;
 mod state;
 
+pub mod chat;
+
 pub use ask::{AskCorpus, AskQuery, AskResult, ChatHit, Evidence, search};
 pub use book::QueueBook;
+pub use chat::resolve_sender;
 pub use closure::{CLOSURE_REASONS, Closure, closure_required_at, validate_closure};
 pub use envelope::wrap_pane;
 pub use error::Error;

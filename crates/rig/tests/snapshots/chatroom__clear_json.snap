@@ -1,0 +1,5 @@
+---
+source: crates/rig/tests/chatroom.rs
+expression: json.trim()
+---
+{"ok":true,"deleted":1}

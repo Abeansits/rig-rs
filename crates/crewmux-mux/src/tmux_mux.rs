@@ -78,16 +78,18 @@ impl Drop for TmuxMux {
         let reaper = std::thread::spawn(move || {
             child.kill_and_wait();
             // The server is forked from the control client and reparented to
-            // init, so killing the client leaves it running. This mux started
-            // that client, including when a parent process chose the socket
-            // name (`rig-rs-<their pid>-…`). Tests still refuse to kill a
-            // socket they do not own; see [`socket_owned_by`].
+            // init, so killing the client leaves it running.
+            //
+            // Only a socket this process named may be torn down. The shared
+            // `rig-rs` server, and any server a parent process created, stay up.
             //
             // `kill -9` of the daemon skips this Drop. That server stays up
             // until the next daemon starts: `new-session -A` attaches to it
             // instead of leaving a second server, and the next graceful
             // shutdown is what finally kills it.
-            kill_server(&binary, &socket);
+            if socket_owned_by(&socket, std::process::id()) {
+                kill_server(&binary, &socket);
+            }
         });
         drop(reaper.join());
         self.control.abort();

@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use crate::chat::ChatHub;
 use crate::error::Error;
 use crate::hub::EventHub;
 use crate::taps::{DraftAges, KeyTaps};
@@ -52,8 +53,10 @@ pub(crate) struct App {
     pub transcript_cap: u64,
     /// `RIG_TRANSCRIPTS=0` turns the writer off.
     pub transcripts: bool,
-    /// Background work owned by this process.
+    /// Background work owned by this process, including chat watch tasks.
     pub tasks: TaskTracker,
+    /// Wakes chat watchers after a committed message. Not the slice 4 event bus.
+    pub chat: ChatHub,
     persist_tx: mpsc::UnboundedSender<QueueWrite>,
     queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueWrite>>>>,
     /// Next snapshot write fails at this `replace_book` hook, then the hook clears.
@@ -100,6 +103,7 @@ impl App {
             transcript_cap: transcript_cap_from_env(),
             transcripts: transcripts_from_env(),
             tasks: TaskTracker::new(),
+            chat: ChatHub::new(),
             persist_tx,
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
             persist_crash: Arc::new(tokio::sync::Mutex::new(None)),

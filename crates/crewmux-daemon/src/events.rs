@@ -151,8 +151,17 @@ fn resume_id(headers: &axum::http::HeaderMap, query: Option<&str>) -> Option<u64
     let header = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok());
+        .and_then(bounded_id);
     header.or_else(|| query_id(query))
+}
+
+/// Numeric event ids are short. A longer header or query is ignored rather than parsed.
+fn bounded_id(text: &str) -> Option<u64> {
+    if text.len() > 20 {
+        None
+    } else {
+        text.parse().ok()
+    }
 }
 
 fn query_id(query: Option<&str>) -> Option<u64> {
@@ -160,7 +169,7 @@ fn query_id(query: Option<&str>) -> Option<u64> {
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=')?;
         if key == "last_event_id" {
-            return value.parse().ok();
+            return bounded_id(value);
         }
     }
     None

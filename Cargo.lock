@@ -516,6 +516,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "signal-hook 0.4.5",
  "tempfile",
  "thiserror 2.0.21",
 ]
@@ -549,11 +550,13 @@ dependencies = [
  "crewmux-store",
  "crewmux-types",
  "futures-core",
+ "rusqlite",
  "rustix",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]
@@ -659,6 +662,7 @@ dependencies = [
  "crewmux-core",
  "crewmux-messaging",
  "crewmux-types",
+ "proptest",
  "rusqlite",
  "rusqlite_migration",
  "serde",
@@ -721,7 +725,7 @@ dependencies = [
  "mio",
  "parking_lot",
  "rustix",
- "signal-hook",
+ "signal-hook 0.3.18",
  "signal-hook-mio",
  "winapi",
 ]
@@ -2074,6 +2078,8 @@ dependencies = [
  "crewmux-tui",
  "insta",
  "predicates",
+ "rusqlite",
+ "rustix",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2295,6 +2301,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-hook"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b29ffa27d3d59a049bb328258de100f8012848d1b08d444e08bbc02ac468435e"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
+
+[[package]]
 name = "signal-hook-mio"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2302,7 +2318,7 @@ checksum = "b75a19a7a740b25bc7944bdee6172368f988763b744e3d4dfe753f6b4ece40cc"
 dependencies = [
  "libc",
  "mio",
- "signal-hook",
+ "signal-hook 0.3.18",
 ]
 
 [[package]]
@@ -2474,7 +2490,7 @@ dependencies = [
  "bitflags 2.13.2",
  "parking_lot",
  "rustix",
- "signal-hook",
+ "signal-hook 0.3.18",
  "windows-sys",
 ]
 
@@ -2531,7 +2547,7 @@ dependencies = [
  "pest_derive",
  "phf",
  "sha2",
- "signal-hook",
+ "signal-hook 0.3.18",
  "siphasher",
  "terminfo",
  "termios",
@@ -2633,6 +2649,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

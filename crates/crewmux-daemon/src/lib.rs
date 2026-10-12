@@ -1,6 +1,7 @@
 //! The daemon: HTTP on a Unix socket, stub-seat launch, and pane death.
 
 mod ask_http;
+mod chat;
 mod composer;
 mod db;
 mod death;

@@ -99,6 +99,19 @@ seats:
 }
 
 #[test]
+fn names_longer_than_256_bytes_are_rejected() {
+    let name = "n".repeat(257);
+    let text = format!("name: {name}\nseats:\n  - name: one\n    runtime: stub\n");
+    let err = parse(&text).expect_err("long rig");
+    assert!(err.message.contains("256"), "{err}");
+    assert!(!err.message.contains(&name));
+    let seat = format!("name: pair\nseats:\n  - name: {name}\n    runtime: stub\n");
+    let err = parse(&seat).expect_err("long seat");
+    assert!(err.message.contains("256"), "{err}");
+    assert!(!err.message.contains(&name));
+}
+
+#[test]
 fn seat_names_reject_tmux_format_characters() {
     let err = parse("name: pair\nseats:\n  - name: \"#{pane_id}\"\n    runtime: stub\n")
         .expect_err("format");
