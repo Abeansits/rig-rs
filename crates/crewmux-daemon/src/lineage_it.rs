@@ -55,10 +55,16 @@ os.execv(sys.executable, [
     const NODE: &str = r"
 const fs = require('fs');
 const args = process.argv.slice(2);
-function flag(name) { return args[args.indexOf(name) + 1]; }
+function flag(name) {
+  const index = args.indexOf(name);
+  if (index < 0 || index + 1 >= args.length) return '';
+  return args[index + 1];
+}
 const when = flag('--title');
 const ready = flag('--ready');
 const go = flag('--go');
+const hold = flag('--hold');
+if (hold) fs.openSync(hold, 'a');
 if (when === 'before') process.title = '2.1.289';
 fs.writeFileSync(ready, '1');
 if (when === 'after') {
@@ -71,6 +77,43 @@ if (when === 'after') {
 }
 setInterval(() => {}, 1000);
 ";
+
+    /// Title hides argv, then `exec` into another session keeps pid and start time.
+    #[cfg(target_os = "linux")]
+    const HIDDEN: &str = r#"
+import ctypes, os, sys, time
+if os.environ.get("RIG_TITLED") != "1":
+    os.environ["RIG_TITLED"] = "1"
+    os.environ["RIG_PYTHON"] = sys.executable
+    os.execv(sys.executable, ["2.1.289", os.environ["RIG_SCRIPT"]])
+python = os.environ["RIG_PYTHON"]
+libc = ctypes.CDLL("libc.so.6")
+libc.prctl.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+libc.prctl.restype = ctypes.c_int
+libc.prctl(15, b"2.1.289", 0, 0, 0)
+hold = os.environ["RIG_HOLD"]
+ready = os.environ["RIG_READY"]
+fd = os.open(hold, os.O_RDWR | os.O_CREAT, 0o644)
+rule = "─" * 40
+sys.stdout.write(rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n")
+sys.stdout.flush()
+with open(ready, "w") as handle:
+    handle.write("1")
+if os.environ.get("RIG_LINEAGE_MODE") == "stay":
+    while True:
+        time.sleep(1)
+trigger = os.environ["RIG_TRIGGER"]
+deadline = time.time() + 20
+while not os.path.exists(trigger):
+    if time.time() > deadline:
+        raise SystemExit("trigger")
+    time.sleep(0.05)
+os.close(fd)
+os.environ["RIG_LINEAGE_MODE"] = "stay"
+os.environ["RIG_HOLD"] = os.environ["RIG_OTHER_HOLD"]
+os.environ["RIG_READY"] = ready + ".next"
+os.execv(python, ["2.1.289", os.environ["RIG_SCRIPT"]])
+"#;
 
     struct Live {
         app: App,
@@ -366,6 +409,67 @@ setInterval(() => {}, 1000);
     }
 
     #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn hidden_title_exec_into_another_session_pastes_nothing() {
+        let live = boot().await;
+        let script = live.root.join("title.py");
+        tokio::fs::write(&script, HIDDEN).await.expect("script");
+        let ready = live.root.join("ready-hide");
+        let trigger = live.root.join("go-hide");
+        let hold = live.root.join(format!("{ORIG}.jsonl"));
+        let other = live.root.join(format!("{OTHER}.jsonl"));
+        tokio::fs::create_dir_all(live.root.join("work"))
+            .await
+            .expect("work");
+        let name = format!("hide{}", unique());
+        let mut spec = SessionSpec::new(&name, live.root.join("work"));
+        spec.env
+            .insert("RIG_HOLD".into(), hold.display().to_string());
+        spec.env
+            .insert("RIG_OTHER_HOLD".into(), other.display().to_string());
+        spec.env
+            .insert("RIG_READY".into(), ready.display().to_string());
+        spec.env
+            .insert("RIG_TRIGGER".into(), trigger.display().to_string());
+        spec.env
+            .insert("RIG_SCRIPT".into(), script.display().to_string());
+        spec.argv = vec!["python3".into(), script.display().to_string()];
+        let pane = live.mux.create_session(&spec).await.expect("session");
+        until(|| {
+            let ready = ready.clone();
+            let mux = Arc::clone(&live.mux);
+            let session = pane.session.clone();
+            async move {
+                tokio::fs::try_exists(&ready).await.unwrap_or(false)
+                    && pane_info(&mux, &session).await.current_cmd == "2.1.289"
+            }
+        })
+        .await;
+        let info = pane_info(&live.mux, &pane.session).await;
+        let seat = seed(&live.app, &pane.session, &info.pane_id).await;
+        crate::lineage::record(&live.app, &seat, &pane)
+            .await
+            .expect("record");
+        tokio::fs::write(&trigger, "1").await.expect("trigger");
+        let next = format!("{}.next", ready.display());
+        until(|| {
+            let next = next.clone();
+            let mux = Arc::clone(&live.mux);
+            let session = pane.session.clone();
+            async move {
+                if !tokio::fs::try_exists(&next).await.unwrap_or(false) {
+                    return false;
+                }
+                let info = pane_info(&mux, &session).await;
+                let Some(pid) = info.pid else { return false };
+                info.current_cmd == "2.1.289" && argv_of(pid).await.contains("2.1.289")
+            }
+        })
+        .await;
+        refuse(&live.app, &pane, &live.mux, "lineage:session_id_mismatch").await;
+    }
+
+    #[cfg(target_os = "linux")]
     #[expect(clippy::panic, reason = "the process.title test needs a node binary")]
     async fn node_bin() -> String {
         for name in ["node", "nodejs"] {
@@ -389,6 +493,7 @@ setInterval(() => {}, 1000);
         tokio::fs::write(&script, NODE).await.expect("script");
         let ready = live.root.join(format!("ready-{when}"));
         let go = live.root.join(format!("title-{when}"));
+        let hold = live.root.join(format!("{ORIG}.jsonl"));
         let name = format!("node{}", unique());
         let mut spec = SessionSpec::new(&name, live.root.join("work"));
         spec.argv = vec![
@@ -400,6 +505,8 @@ setInterval(() => {}, 1000);
             ready.display().to_string(),
             "--go".into(),
             go.display().to_string(),
+            "--hold".into(),
+            hold.display().to_string(),
             "--session-id".into(),
             ORIG.into(),
         ];

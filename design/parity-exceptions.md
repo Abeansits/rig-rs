@@ -126,8 +126,8 @@ The design index calls this PE-006. That id is already the setup/doctor exceptio
 ## PE-019: the process-lineage selector is not the pre-send check
 
 - **TS behaviour:** `native-process-lineage.test.ts` selects the agent through a process tree (nix wrappers, the executable path, launcher shims). `native-claude-delivery.test.ts` pairs that selector with the ordinary transport.
-- **Rust behaviour:** before a paste or `POST /api/seats/submit`, the daemon checks the recorded pid, the process start time, that the foreground is not a shell, and that a session id still present in argv matches the id stored at launch. A version-number process title (`2.1.289`) counts as Claude, because Node's `process.title` overwrites the command line. The process-tree selector is not ported.
-- **Required test:** `pid_mismatch_refuses_before_paste`, `session_id_mismatch_refuses_before_paste`, `exec_into_another_session_pastes_nothing`, `respawn_under_another_session_pastes_nothing`, and `exec_into_bash_pastes_nothing`.
+- **Rust behaviour:** before a paste (direct send, launch startup, restore re-send, and `POST /api/seats/submit`), the daemon checks the recorded pid, that the foreground is not a shell, and the session. A version-number process title (`2.1.289`) counts as Claude, because Node's `process.title` overwrites the command line. The start time distinguishes a reused pid; it does not prove the session, because `exec` keeps both. A session or resume token in argv must be the id stored at launch, including when the launch record has none (`codex resume <other>`). With no token, an open transcript or session file has to name that id, or the send is refused. The process-tree selector is not ported.
+- **Required test:** `pid_mismatch_refuses_before_paste`, `session_id_mismatch_refuses_before_paste`, `same_start_time_without_a_session_file_is_not_proof`, `codex_resume_token_the_record_lacks_refuses`, `exec_into_another_session_pastes_nothing`, `respawn_under_another_session_pastes_nothing`, `exec_into_bash_pastes_nothing`, and `hidden_title_exec_into_another_session_pastes_nothing`.
 
 ## Status of real-login testing
 

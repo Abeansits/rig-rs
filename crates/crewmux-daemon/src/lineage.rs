@@ -94,10 +94,11 @@ pub(crate) async fn record(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
 /// Refuse before paste when the pane is no longer the launched process.
 ///
 /// Claude accepts a version-number process title (`2.1.289`) as well as
-/// `claude` and `node`. Node's `process.title` overwrites `/proc` cmdline, so
-/// a matching pid and start time plus the session id stored at launch prove
-/// the process when argv no longer contains `--session-id`. An argv session
-/// that disagrees with the launch record is still a refusal.
+/// `claude` and `node`. Node's `process.title` overwrites the command line, and
+/// `exec` keeps the pid and the start time, so those two do not prove which
+/// session is running. A session or resume token in argv must be the one stored
+/// at launch (a token the record lacks is a refusal). With no token, an open
+/// transcript or session file has to name that id, or the send is refused.
 ///
 /// # Errors
 ///
@@ -134,10 +135,34 @@ pub(crate) async fn ensure(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
         }
         None => (None, None),
     };
-    if let Some(fault) = judge(recorded.as_ref(), live, argv.as_deref(), live_started) {
+    let holds_session = held_session(recorded.as_ref(), argv.as_deref(), live).await;
+    if let Some(fault) = judge(
+        recorded.as_ref(),
+        live,
+        argv.as_deref(),
+        live_started,
+        holds_session,
+    ) {
         return Err(Error::Message(fault.message()));
     }
     Ok(())
+}
+
+async fn held_session(
+    recorded: Option<&PaneLineage>,
+    argv: Option<&str>,
+    live: Option<&PaneInfo>,
+) -> bool {
+    let Some(expected) = recorded.and_then(|row| row.session_id.as_deref()) else {
+        return false;
+    };
+    if token_in_argv(argv.unwrap_or("")).is_some() {
+        return false;
+    }
+    let Some(pid) = live.and_then(|info| info.pid) else {
+        return false;
+    };
+    crate::lineage_held::process_holds_session(pid, expected).await
 }
 
 fn judge(
@@ -145,6 +170,7 @@ fn judge(
     live: Option<&PaneInfo>,
     argv: Option<&str>,
     live_started: Option<u64>,
+    holds_session: bool,
 ) -> Option<Fault> {
     let Some(recorded) = recorded else {
         return Some(Fault::ResumeUnproven);
@@ -169,31 +195,21 @@ fn judge(
     if !same_foreground(&recorded.runtime, &recorded.command, &live.current_cmd) {
         return Some(Fault::Backgrounded);
     }
-    session_fault(recorded, argv, live_started)
+    session_fault(recorded, argv, holds_session)
 }
 
-fn session_fault(
-    recorded: &PaneLineage,
-    argv: Option<&str>,
-    live_started: Option<u64>,
-) -> Option<Fault> {
+fn session_fault(recorded: &PaneLineage, argv: Option<&str>, holds_session: bool) -> Option<Fault> {
     if recorded.runtime == "claude-code" && recorded.session_id.is_none() {
         return Some(Fault::ResumeUnproven);
     }
-    let expected = recorded.session_id.as_deref()?;
-    if let Some(argv) = argv.filter(|text| !text.is_empty())
-        && token_in_argv(argv).is_some()
-    {
-        if session_in_argv(argv, expected) {
-            return None;
-        }
-        return Some(Fault::SessionMismatch);
+    if let Some(token) = argv.and_then(token_in_argv) {
+        return match recorded.session_id.as_deref() {
+            Some(expected) if expected == token => None,
+            _ => Some(Fault::SessionMismatch),
+        };
     }
-    let same_process = matches!(
-        (recorded.started_ticks, live_started),
-        (Some(saved), Some(live)) if saved == live
-    );
-    if same_process {
+    recorded.session_id.as_ref()?;
+    if holds_session {
         None
     } else {
         Some(Fault::SessionMismatch)
@@ -253,52 +269,47 @@ fn is_shell(command: &str) -> bool {
     SHELLS.contains(&command_base(command))
 }
 
+#[cfg(test)]
 fn session_in_argv(argv: &str, expected: &str) -> bool {
-    let tokens: Vec<&str> = argv.split_whitespace().collect();
-    for (index, token) in tokens.iter().enumerate() {
-        if let Some(value) = token
-            .strip_prefix("--session-id=")
-            .or_else(|| token.strip_prefix("--resume="))
-            && value == expected
-        {
-            return true;
-        }
-        if (*token == "--session-id" || *token == "--resume")
-            && tokens.get(index.saturating_add(1)).copied() == Some(expected)
-        {
-            return true;
-        }
-    }
-    if let Some(index) = tokens.iter().position(|token| *token == "resume") {
-        let mut cursor = index.saturating_add(1);
-        while let Some(token) = tokens.get(cursor) {
-            if token.starts_with('-') {
-                cursor = cursor.saturating_add(1);
-                continue;
-            }
-            return *token == expected;
-        }
-    }
-    false
+    token_in_argv(argv).as_deref() == Some(expected)
 }
 
 fn token_in_argv(argv: &str) -> Option<String> {
     let tokens: Vec<&str> = argv.split_whitespace().collect();
+    flag_value(&tokens, "--session-id")
+        .or_else(|| flag_value(&tokens, "--resume"))
+        .or_else(|| resume_word(&tokens))
+        .map(str::to_owned)
+}
+
+fn flag_value<'a>(tokens: &[&'a str], flag: &str) -> Option<&'a str> {
+    let equals = format!("{flag}=");
     for (index, token) in tokens.iter().enumerate() {
-        if let Some(value) = token
-            .strip_prefix("--session-id=")
-            .or_else(|| token.strip_prefix("--resume="))
+        if let Some(value) = token.strip_prefix(equals.as_str())
             && !value.is_empty()
             && !value.starts_with('-')
         {
-            return Some(value.to_owned());
+            return Some(value);
         }
-        if *token == "--session-id" || *token == "--resume" {
+        if *token == flag {
             let next = tokens.get(index.saturating_add(1)).copied()?;
             if !next.starts_with('-') {
-                return Some(next.to_owned());
+                return Some(next);
             }
         }
+    }
+    None
+}
+
+fn resume_word<'a>(tokens: &[&'a str]) -> Option<&'a str> {
+    let index = tokens.iter().position(|token| *token == "resume")?;
+    let mut cursor = index.saturating_add(1);
+    while let Some(token) = tokens.get(cursor) {
+        if token.starts_with('-') {
+            cursor = cursor.saturating_add(1);
+            continue;
+        }
+        return Some(*token);
     }
     None
 }
@@ -478,7 +489,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn same_process_without_a_session_token_keeps_the_launch_record() {
+    async fn same_process_without_a_session_token_or_open_file_refuses() {
         let (app, mux) = launched().await;
         let pane = one_pane(&mux).await;
         plant_session(&app, "expected-session").await;
@@ -498,28 +509,37 @@ mod tests {
             pane: Some(0),
             pane_id: Some(pane.pane_id),
         };
-        super::ensure(&app, &seat, &pref)
+        let err = super::ensure(&app, &seat, &pref)
             .await
-            .expect("pid and start time prove the launch");
+            .expect_err("no session file");
+        assert!(
+            err.to_string().contains("lineage:session_id_mismatch"),
+            "{err}"
+        );
     }
 
     #[test]
-    fn version_title_after_launch_is_the_same_agent() {
-        let row = sample_row("node", Some("sess"), 9);
+    fn version_title_holding_the_recorded_session_is_the_same_agent() {
+        let after = sample_row("node", Some("sess"), 9);
+        let before = sample_row("2.1.289", Some("sess"), 9);
         let live = sample_pane("2.1.289", 9);
         assert_eq!(
-            judge(Some(&row), Some(&live), Some("2.1.289"), Some(9)),
+            judge(Some(&after), Some(&live), Some("2.1.289"), Some(9), true),
+            None
+        );
+        assert_eq!(
+            judge(Some(&before), Some(&live), Some("2.1.289"), Some(9), true),
             None
         );
     }
 
     #[test]
-    fn version_title_before_launch_uses_the_launch_record() {
+    fn same_start_time_without_a_session_file_is_not_proof() {
         let row = sample_row("2.1.289", Some("sess"), 9);
         let live = sample_pane("2.1.289", 9);
         assert_eq!(
-            judge(Some(&row), Some(&live), Some("2.1.289"), Some(9)),
-            None
+            judge(Some(&row), Some(&live), Some("2.1.289"), Some(9), false),
+            Some(Fault::SessionMismatch)
         );
     }
 
@@ -532,7 +552,8 @@ mod tests {
                 Some(&row),
                 Some(&live),
                 Some("node --session-id other"),
-                Some(9)
+                Some(9),
+                true
             ),
             Some(Fault::SessionMismatch)
         );
@@ -547,7 +568,8 @@ mod tests {
                 Some(&row),
                 Some(&live),
                 Some("node --session-id sess"),
-                Some(10)
+                Some(10),
+                true
             ),
             Some(Fault::PidMismatch)
         );
@@ -597,6 +619,69 @@ mod tests {
         .expect("join")
         .expect("runtime");
         refuse(&mux, &app, "lineage:resume_unproven").await;
+    }
+
+    #[tokio::test]
+    async fn codex_resume_token_the_record_lacks_refuses() {
+        let (app, mux) = launched().await;
+        let pane = one_pane(&mux).await;
+        let store = std::sync::Arc::clone(&app.store);
+        tokio::task::spawn_blocking(move || {
+            store.write(|conn| {
+                conn.execute(
+                    "UPDATE pane_lineage SET runtime = 'codex', session_id = NULL",
+                    [],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .expect("join")
+        .expect("runtime");
+        mux.set_pane_process(
+            &pane.session,
+            pane.pid,
+            &pane.current_cmd,
+            Some("codex resume 22222222-2222-4222-8222-222222222222"),
+        )
+        .await;
+        refuse(&mux, &app, "lineage:session_id_mismatch").await;
+    }
+
+    #[tokio::test]
+    async fn startup_paste_refuses_when_the_pane_is_a_shell() {
+        let (app, mux) = launched().await;
+        let pane = one_pane(&mux).await;
+        mux.set_pane_process(&pane.session, pane.pid, "bash", None)
+            .await;
+        let seat = crate::query::find_address(&app, "one@pair")
+            .await
+            .expect("seat");
+        let dir = app.home.join("startup");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("one.txt"), "boot-line\n").expect("startup");
+        let before = pastes(&mux.recorded().await);
+        let err = crate::direct::record_startup(&app, std::slice::from_ref(&seat))
+            .await
+            .expect_err("refused");
+        assert!(err.to_string().contains("lineage:bare_shell"), "{err}");
+        assert_eq!(pastes(&mux.recorded().await), before);
+    }
+
+    #[tokio::test]
+    async fn restore_resend_refuses_when_the_pane_is_a_shell() {
+        let (app, mux) = launched().await;
+        app.set_direct_phase(Some("before")).await;
+        deliver(&app, outbound()).await.expect("recorded");
+        app.set_direct_phase(None).await;
+        let pane = one_pane(&mux).await;
+        mux.set_pane_process(&pane.session, pane.pid, "bash", None)
+            .await;
+        let before = pastes(&mux.recorded().await);
+        crate::restore::restore_rig(&app, "pair", None, crewmux_types::LaunchPosture::Auto)
+            .await
+            .expect("restore");
+        assert_eq!(pastes(&mux.recorded().await), before);
     }
 
     async fn plant_session(app: &App, session: &str) {

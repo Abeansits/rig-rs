@@ -21,6 +21,7 @@ mod hub;
 mod inbox_http;
 mod launch;
 mod lineage;
+mod lineage_held;
 mod notify;
 mod paste_check;
 mod persist;
