@@ -136,6 +136,14 @@ impl FakeMux {
         self.inner.lock().await.script_stubs = true;
     }
 
+    /// Put a ready `stub>` prompt back. Repeated pastes otherwise see the last payload.
+    pub async fn show_stub_prompt(&self, session: &str) {
+        let session = canonical_session_name(session);
+        let screen = Capture::new("stub-agent\nstub> \n".to_owned(), (0, 0));
+        let mut guard = self.inner.lock().await;
+        guard.screens.insert(session, screen);
+    }
+
     fn arm_stub(&self, session: &str, pane_id: &str, plan: &crate::fake_script::StubPlan) {
         if plan.ready_after_ms > 0 {
             let inner = Arc::clone(&self.inner);
@@ -400,8 +408,8 @@ impl Multiplexer for FakeMux {
         if keys.iter().any(|key| matches!(key, Key::CtrlU)) && guard.replay.is_empty() {
             clear_composer(&mut guard, pane);
         }
-        if keys.iter().any(|key| matches!(key, Key::Enter)) && guard.replay.is_empty() {
-            clear_chevron_composer(&mut guard, pane);
+        if keys.iter().any(|key| matches!(key, Key::Enter)) {
+            on_enter(&mut guard, pane);
         }
         if guard.replay.len() > 1 {
             guard.replay.pop_front();
@@ -440,6 +448,15 @@ impl Multiplexer for FakeMux {
             }
         }
         self.own_write.send_replace(Some(Instant::now()));
+        if let Some(id) = pane.pane_id.as_deref() {
+            if text.ends_with('\n') {
+                self.inject_output(id, text).await;
+            } else {
+                let mut owned = text.to_owned();
+                owned.push('\n');
+                self.inject_output(id, &owned).await;
+            }
+        }
         Ok(receipt)
     }
 
@@ -452,7 +469,7 @@ impl Multiplexer for FakeMux {
             .cloned()
             .or_else(|| guard.screens.get(&session).cloned())
             .unwrap_or_else(|| guard.capture.clone());
-        Ok(slice_capture(capture, range))
+        Ok(crate::fake_script::slice_capture(capture, range))
     }
 
     async fn subscribe_output(&self, pane: &PaneRef) -> Result<OutputStream, MuxError> {
@@ -530,6 +547,26 @@ impl Multiplexer for FakeMux {
     }
 }
 
+/// Enter clears a `❯` composer when nothing is replaying, and puts a stub prompt back.
+fn on_enter(guard: &mut FakeInner, pane: &PaneRef) {
+    if guard.replay.is_empty() {
+        clear_chevron_composer(guard, pane);
+    }
+    if !guard.script_stubs {
+        return;
+    }
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get(&session) else {
+        return;
+    };
+    let Some(text) = crate::fake_script::restore_stub_prompt(&screen.text) else {
+        return;
+    };
+    let next = Capture::new(text, (0, 0));
+    guard.capture = next.clone();
+    guard.screens.insert(session, next);
+}
+
 /// Enter clears a `❯` composer so the next paste is not a draft. A `stub>` screen stays.
 fn clear_chevron_composer(guard: &mut FakeInner, pane: &PaneRef) {
     if guard.capture.text.contains('❯') {
@@ -583,7 +620,7 @@ fn place_pasted_text(guard: &mut FakeInner, pane: &PaneRef, text: &str) {
 
 fn land_or_append(screen: Capture, text: &str) -> Capture {
     if screen.text.contains('›') {
-        let spliced = spliced_composer(&screen.text, text);
+        let spliced = crate::fake_script::spliced_composer(&screen.text, text);
         if spliced != screen.text {
             return Capture::new(spliced, screen.cursor);
         }
@@ -710,40 +747,6 @@ fn fill_prompt(line: &str, flat: &str) -> String {
     }
 }
 
-/// Insert `pasted` after the last `›`, keeping a closing box bar on the last line.
-fn spliced_composer(capture: &str, pasted: &str) -> String {
-    let Some(cursor) = capture.rfind('›') else {
-        return capture.to_owned();
-    };
-    let Some(mark) = capture.get(cursor..).and_then(|rest| rest.chars().next()) else {
-        return capture.to_owned();
-    };
-    let prefix_end = cursor.saturating_add(mark.len_utf8());
-    let line_start = capture
-        .get(..cursor)
-        .and_then(|head| head.rfind('\n'))
-        .map_or(0, |index| index.saturating_add(1));
-    let line_end = capture
-        .get(cursor..)
-        .and_then(|rest| rest.find('\n'))
-        .map_or(capture.len(), |index| cursor.saturating_add(index));
-    let Some(prefix) = capture.get(line_start..prefix_end) else {
-        return capture.to_owned();
-    };
-    let trailing = capture
-        .get(prefix_end..line_end)
-        .is_some_and(|tail| tail.trim_end().ends_with(['│', '┃']));
-    let suffix = if trailing { " │" } else { "" };
-    let mut rebuilt = String::new();
-    rebuilt.push_str(capture.get(..line_start).unwrap_or(""));
-    rebuilt.push_str(prefix);
-    rebuilt.push(' ');
-    rebuilt.push_str(pasted);
-    rebuilt.push_str(suffix);
-    rebuilt.push_str(capture.get(line_end..).unwrap_or(""));
-    rebuilt
-}
-
 fn rewrite_marker(line: &str, flat: &str) -> String {
     let trimmed = line.trim_start();
     let indent_len = line.len().saturating_sub(trimmed.len());
@@ -770,25 +773,4 @@ fn bar_inner(line: &str) -> Option<&str> {
     }
     line.get(start.saturating_add('│'.len_utf8())..end)
         .map(str::trim)
-}
-
-fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
-    let lines = match range {
-        CaptureRange::Visible | CaptureRange::Joined => return capture,
-        CaptureRange::LastLines(n) => usize::from(n),
-        CaptureRange::History(n) | CaptureRange::JoinedHistory(n) => {
-            usize::try_from(n).unwrap_or(usize::MAX)
-        }
-    };
-    let trailing = capture.text.ends_with('\n');
-    let kept: Vec<&str> = capture.text.lines().collect();
-    let count = kept.len();
-    let skip = count.saturating_sub(lines);
-    let mut text = kept.into_iter().skip(skip).collect::<Vec<_>>().join("\n");
-    // `lines` drops the terminator. An exact append is `before + payload`, so a
-    // prompt that ended with a newline has to keep it or every paste looks partial.
-    if trailing && skip < count {
-        text.push('\n');
-    }
-    Capture::new(text, capture.cursor)
 }

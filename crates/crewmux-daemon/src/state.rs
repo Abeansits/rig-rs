@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crewmux_adapters::AdapterRegistry;
@@ -63,6 +63,33 @@ pub(crate) struct App {
     persist_crash: Arc<tokio::sync::Mutex<Option<&'static str>>>,
     /// Compaction attempts and the in-memory enforcer.
     pub compaction: Arc<tokio::sync::Mutex<crate::compaction::Runtime>>,
+    /// In-process direct-delivery phase. `before`, `ack`, or absent.
+    ///
+    /// The file hook under `$RIG_HOME/direct-phase` is for the binary. Tests
+    /// cannot use `std::env::set_var`, so they set this instead.
+    direct_phase: Arc<tokio::sync::Mutex<Option<&'static str>>>,
+    /// Crash-cart phase in the low bits and a generation in the high bits.
+    ///
+    /// Cancel only applies to the generation that was running when it arrived.
+    cart_state: Arc<AtomicU64>,
+    /// The next `restore_rig` raises the crash-cart cancel flag and still finishes.
+    cancel_on_restore: Arc<AtomicBool>,
+}
+
+const CART_IDLE: u64 = 0;
+const CART_RUNNING: u64 = 1;
+const CART_CANCEL: u64 = 2;
+
+fn cart_phase(state: u64) -> u64 {
+    state & 0b11
+}
+
+fn cart_generation(state: u64) -> u64 {
+    state >> 2
+}
+
+fn cart_pack(generation: u64, phase: u64) -> u64 {
+    (generation << 2) | phase
 }
 
 /// One queue snapshot for the writer, plus the callers waiting on that commit.
@@ -110,7 +137,98 @@ impl App {
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
             persist_crash: Arc::new(tokio::sync::Mutex::new(None)),
             compaction: Arc::new(tokio::sync::Mutex::new(crate::compaction::Runtime::new())),
+            direct_phase: Arc::new(tokio::sync::Mutex::new(None)),
+            cart_state: Arc::new(AtomicU64::new(cart_pack(0, CART_IDLE))),
+            cancel_on_restore: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Stop the fleet after the rig that is currently restoring.
+    ///
+    /// Returns whether a walk was in progress. A cancel that arrives after the
+    /// walk has finished does not stick to the next cart.
+    pub(crate) fn request_cart_cancel(&self) -> bool {
+        let current = self.cart_state.load(Ordering::SeqCst);
+        let phase = cart_phase(current);
+        if phase == CART_IDLE {
+            return false;
+        }
+        if phase == CART_CANCEL {
+            return true;
+        }
+        let next = cart_pack(cart_generation(current), CART_CANCEL);
+        if self
+            .cart_state
+            .compare_exchange(current, next, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            return true;
+        }
+        let now = self.cart_state.load(Ordering::SeqCst);
+        cart_generation(now) == cart_generation(current) && cart_phase(now) == CART_CANCEL
+    }
+
+    /// Whether a crash-cart cancel arrived, including during the in-flight rig.
+    pub(crate) fn cart_cancel_requested(&self) -> bool {
+        cart_phase(self.cart_state.load(Ordering::SeqCst)) == CART_CANCEL
+    }
+
+    /// Claim the single crash-cart walk. False when one is already in progress.
+    pub(crate) fn try_begin_cart(&self) -> bool {
+        loop {
+            let current = self.cart_state.load(Ordering::SeqCst);
+            if cart_phase(current) != CART_IDLE {
+                return false;
+            }
+            let next = cart_pack(cart_generation(current), CART_RUNNING);
+            if self
+                .cart_state
+                .compare_exchange(current, next, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                return true;
+            }
+        }
+    }
+
+    /// The walk returned. The next cart starts with cancel clear.
+    pub(crate) fn end_cart(&self) {
+        loop {
+            let current = self.cart_state.load(Ordering::SeqCst);
+            if cart_phase(current) == CART_IDLE {
+                return;
+            }
+            let next = cart_pack(cart_generation(current).wrapping_add(1), CART_IDLE);
+            if self
+                .cart_state
+                .compare_exchange(current, next, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                return;
+            }
+        }
+    }
+
+    /// The next restore raises the crash-cart cancel flag as that rig starts.
+    #[cfg(test)]
+    pub(crate) fn arm_cancel_on_restore(&self) {
+        self.cancel_on_restore.store(true, Ordering::SeqCst);
+    }
+
+    /// Take the one-shot "cancel during this restore" arm.
+    pub(crate) fn take_cancel_on_restore(&self) -> bool {
+        self.cancel_on_restore.swap(false, Ordering::SeqCst)
+    }
+
+    /// Drive the direct-delivery crash phase for in-process tests.
+    #[cfg(test)]
+    pub(crate) async fn set_direct_phase(&self, phase: Option<&'static str>) {
+        *self.direct_phase.lock().await = phase;
+    }
+
+    /// The in-process phase, when a test set one.
+    pub(crate) async fn direct_phase(&self) -> Option<&'static str> {
+        *self.direct_phase.lock().await
     }
 
     /// Fail the next queue snapshot at the store's `before-commit` hook.

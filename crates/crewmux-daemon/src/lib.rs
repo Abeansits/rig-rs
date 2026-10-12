@@ -1,12 +1,17 @@
 //! The daemon: HTTP on a Unix socket, stub-seat launch, and pane death.
 
 mod ask_http;
+mod cart;
 mod chat;
+mod check_run;
+mod checkpoint;
 mod compaction;
 mod composer;
 mod db;
 mod death;
 mod deliver;
+mod direct;
+mod durable_http;
 mod error;
 mod events;
 mod http;
@@ -19,14 +24,18 @@ mod persist;
 mod query;
 mod queue_http;
 mod reconcile;
+mod restore;
+mod resume;
 mod runtime;
 mod send_http;
 mod serve;
 mod settle;
+mod snapshot;
 mod state;
 mod submit;
 mod taps;
 mod transcripts;
+mod turns;
 mod view;
 
 pub use error::Error;
@@ -38,3 +47,9 @@ mod flow;
 mod receipt_tests;
 #[cfg(test)]
 mod slice4_tests;
+#[cfg(test)]
+mod slice8_delivery_tests;
+#[cfg(test)]
+mod slice8_harness;
+#[cfg(test)]
+mod slice8_restore_tests;

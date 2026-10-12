@@ -41,6 +41,7 @@ async fn route(app: &App, body: &[u8], all: bool) -> Response {
         interact: parsed.dangerously_interact,
         reason: parsed.reason,
         verify: parsed.verify,
+        track_direct: true,
     };
     match deliver(app, outbound).await {
         Ok(value) => crate::http::ok(value),

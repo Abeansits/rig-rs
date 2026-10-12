@@ -35,7 +35,7 @@ pub use ladder::{
 };
 pub use machine::admit;
 pub use model::{Actor, NewItem, NudgeRecord, QueueItem, Transition, Update};
-pub use nudge::{leaks_body, nudge_pointer, obligation_fingerprint};
+pub use nudge::{leaks_body, nudge_pointer, obligation_fingerprint, unconfirmed_ids};
 pub use paste_display::{PasteDisplay, claude_visible, expand_tabs, transcript_hit};
 pub use receipt::{DeliveryOutcome, DeliveryReceipt};
 pub use repo::QueueRepo;

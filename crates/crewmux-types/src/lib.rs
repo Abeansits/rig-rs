@@ -12,6 +12,7 @@ mod error;
 mod id;
 mod readiness;
 mod runtime;
+mod snapshot;
 mod ui;
 
 pub mod tmux_version;
@@ -27,6 +28,7 @@ pub use error::TypeError;
 pub use id::{MAX_NAME_LEN, QItemId, RigId, RigName, SeatId, SeatName, SessionId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
+pub use snapshot::{DeliveryId, SnapshotId};
 pub use tmux_version::{Version, parse_version};
 pub use ui::{LauncherKind, PodName, SeatKey, TmuxSession};
 

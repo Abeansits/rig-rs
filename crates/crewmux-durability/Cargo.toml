@@ -9,6 +9,12 @@ publish.workspace = true
 
 [dependencies]
 crewmux-core.workspace = true
+crewmux-messaging.workspace = true
+crewmux-transcript.workspace = true
+crewmux-types.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

@@ -560,6 +560,7 @@ dependencies = [
  "crewmux-adapters",
  "crewmux-api",
  "crewmux-core",
+ "crewmux-durability",
  "crewmux-health",
  "crewmux-integrations",
  "crewmux-messaging",
@@ -587,6 +588,12 @@ name = "crewmux-durability"
 version = "0.0.0"
 dependencies = [
  "crewmux-core",
+ "crewmux-messaging",
+ "crewmux-transcript",
+ "crewmux-types",
+ "serde",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

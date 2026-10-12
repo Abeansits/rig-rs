@@ -113,6 +113,50 @@ CREATE TABLE seat_tokens (
 );
 ";
 
+const DURABILITY: &str = "
+CREATE TABLE seat_restore (
+    seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    posture TEXT NOT NULL,
+    resume_kind TEXT,
+    resume_value TEXT,
+    transcript_cursor INTEGER,
+    startup_status TEXT
+);
+CREATE TABLE seat_edges (
+    rig_id TEXT NOT NULL REFERENCES rigs(id) ON DELETE CASCADE,
+    source_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    PRIMARY KEY (rig_id, source_id, target_id, kind)
+);
+CREATE TABLE checkpoints (
+    id TEXT PRIMARY KEY NOT NULL,
+    seat_id TEXT NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    summary TEXT NOT NULL,
+    current_task TEXT,
+    next_step TEXT,
+    blocked_on TEXT,
+    key_artifacts TEXT NOT NULL,
+    confidence TEXT,
+    created_ms INTEGER NOT NULL
+);
+CREATE INDEX idx_checkpoints_seat ON checkpoints (seat_id, created_ms);
+CREATE TABLE direct_deliveries (
+    id TEXT PRIMARY KEY NOT NULL,
+    rig_id TEXT NOT NULL,
+    seat_id TEXT NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    body TEXT NOT NULL,
+    delivered_at_ms INTEGER,
+    cursor INTEGER,
+    acked INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE rig_kernel (
+    rig_id TEXT PRIMARY KEY NOT NULL REFERENCES rigs(id) ON DELETE CASCADE
+);
+";
+
 const COMPACTION: &str = "
 CREATE TABLE compaction_attempts (
     id TEXT PRIMARY KEY NOT NULL,
@@ -123,15 +167,19 @@ CREATE TABLE compaction_attempts (
 CREATE INDEX idx_compaction_attempts_seat ON compaction_attempts (seat_key);
 ";
 
-/// Rig tables, then the queue, inbox, and receipt tables, then chat, then attempts.
+/// Rig tables, queue tables, chat, snapshot/restore, then compaction attempts.
+///
+/// Durability stays migration 4, matching a database written by slice 8.
+/// Compaction attempts are migration 5.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
         M::up(QUEUE_SCHEMA),
         M::up(CHAT),
+        M::up(DURABILITY),
         M::up(COMPACTION),
     ]),
-    len: 4,
+    len: 5,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

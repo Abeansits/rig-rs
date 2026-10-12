@@ -71,6 +71,15 @@ pub enum DomainEvent {
         /// When.
         at: Timestamp,
     },
+    /// A rig restore finished. Published on the existing `/api/events` hub.
+    RestoreCompleted {
+        /// Rig.
+        rig: RigId,
+        /// Rollup token (`fully_restored`, `partially_restored`, `failed`).
+        outcome: String,
+        /// When.
+        at: Timestamp,
+    },
     /// Post-paste contamination, or another attention signal.
     AttentionRaised {
         /// Seat session.
@@ -94,6 +103,7 @@ impl DomainEvent {
             Self::SeatDied { .. } => "seat_died",
             Self::QueueChanged { .. } => "queue_changed",
             Self::DeliveryRecorded { .. } => "delivery_recorded",
+            Self::RestoreCompleted { .. } => "restore_completed",
             Self::AttentionRaised { .. } => "attention_raised",
         }
     }
@@ -109,6 +119,7 @@ impl DomainEvent {
             | Self::SeatDied { at, .. }
             | Self::QueueChanged { at, .. }
             | Self::DeliveryRecorded { at, .. }
+            | Self::RestoreCompleted { at, .. }
             | Self::AttentionRaised { at, .. } => *at,
         }
     }

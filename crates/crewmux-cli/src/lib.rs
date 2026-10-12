@@ -21,6 +21,7 @@ mod setup_apply;
 mod setup_cmd;
 mod setup_plan;
 mod slice4;
+mod slice8;
 mod spawn;
 mod tui_cmd;
 
@@ -152,6 +153,16 @@ enum Commands {
         /// Hook event name, such as `PreCompact`.
         event: String,
     },
+    /// Capture or inspect a rig snapshot.
+    Snapshot(slice8::SnapshotArgs),
+    /// Relaunch a rig and reconcile in-flight deliveries.
+    Restore(slice8::RestoreArgs),
+    /// Read-only restore readiness report.
+    RestoreCheck(slice8::RestoreCheckArgs),
+    /// Fleet restore.
+    CrashCart(slice8::CrashCartArgs),
+    /// Agent checkpoints.
+    Checkpoint(slice8::CheckpointArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -196,6 +207,11 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Chatroom(args) => chatroom::run(&args),
         Commands::Compact(args) => compact::run(&args),
         Commands::Hook { event } => Ok(hook::run(&event)),
+        Commands::Snapshot(args) => slice8::snapshot(&args),
+        Commands::Restore(args) => slice8::restore(&args),
+        Commands::RestoreCheck(args) => slice8::restore_check(&args),
+        Commands::CrashCart(args) => slice8::crash_cart(&args),
+        Commands::Checkpoint(args) => slice8::checkpoint(&args),
     }
 }
 
