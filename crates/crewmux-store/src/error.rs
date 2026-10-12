@@ -33,6 +33,9 @@ pub enum Error {
     /// JSON stored in the event log could not be read.
     #[error("event json: {0}")]
     Event(String),
+    /// A test crash hook rolled the transaction back.
+    #[error("crash hook {0}")]
+    CrashHook(&'static str),
     /// A chat write or history query failed.
     #[error(transparent)]
     Chat(#[from] crewmux_core::chat::ChatError),
@@ -51,7 +54,8 @@ impl Error {
             | Self::Migration(_)
             | Self::Io(_)
             | Self::Domain(_)
-            | Self::Event(_) => crewmux_core::chat::ChatError::Store(rendered),
+            | Self::Event(_)
+            | Self::CrashHook(_) => crewmux_core::chat::ChatError::Store(rendered),
         }
     }
 }

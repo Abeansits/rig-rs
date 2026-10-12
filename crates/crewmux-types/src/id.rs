@@ -90,6 +90,60 @@ impl FromStr for SeatId {
     }
 }
 
+/// Queue item id. Caller-supplied tokens such as `baton-1` are allowed.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct QItemId(String);
+
+impl QItemId {
+    /// Reject an empty id or one that contains whitespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError::Name`] when `text` is empty or has whitespace or a control character.
+    pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
+        let text = text.into();
+        let ok = !text.is_empty() && !text.chars().any(|ch| ch.is_whitespace() || ch.is_control());
+        if ok {
+            Ok(Self(text))
+        } else {
+            Err(TypeError::Name(text))
+        }
+    }
+
+    /// A new `qitem-<ulid>` id.
+    #[must_use]
+    pub fn generate() -> Self {
+        Self(format!("qitem-{}", Ulid::generate()))
+    }
+
+    /// Borrow the id.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for QItemId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl AsRef<str> for QItemId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for QItemId {
+    type Err = TypeError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Self::new(text)
+    }
+}
+
 /// Opaque session identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

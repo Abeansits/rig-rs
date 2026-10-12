@@ -50,12 +50,13 @@ pub(super) async fn boot() -> Harness {
         Arc::clone(&shared),
         "rig-stub-agent",
     )));
-    let app = crate::state::App::new(
+    let app = crate::state::App::assemble(
         store,
         shared,
+        Arc::new(registry),
         None,
         CancellationToken::new(),
-        Arc::new(registry),
+        PathBuf::from("."),
     );
     let listener = crate::runtime::bind_socket(&sock).expect("bind");
     let served = app.clone();

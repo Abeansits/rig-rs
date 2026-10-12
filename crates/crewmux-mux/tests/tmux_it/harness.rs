@@ -7,7 +7,7 @@
 
         use crewmux_mux::{
             CONTROL_SESSION, CaptureRange, DeathStream, Key, Multiplexer, MuxEvent, OutputStream,
-            PaneRef, PasteOpts, SessionSpec, TmuxConfig, TmuxMux,
+            PaneRef, PasteOpts, SessionSpec, TmuxConfig, TmuxMux, socket_owned_by,
         };
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::process::{Child, Command};
@@ -47,6 +47,7 @@ while True:
 
         impl Server {
             async fn boot() -> Self {
+                reap_stale_sockets().await;
                 let socket = next_socket();
                 let mux = TmuxMux::connect(TmuxConfig {
                     binary: PathBuf::from("tmux"),
@@ -61,7 +62,7 @@ while True:
 
         impl Drop for Server {
             fn drop(&mut self) {
-                if !crewmux_mux::socket_owned_by(&self.socket, std::process::id()) {
+                if !socket_owned_by(&self.socket, std::process::id()) {
                     return;
                 }
                 drop(
@@ -81,6 +82,53 @@ while True:
 
         fn socket_file(name: &str) -> PathBuf {
             socket_dir().join(name)
+        }
+
+        async fn reap_stale_sockets() {
+            let dir = socket_dir();
+            let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+                return;
+            };
+            let pid = std::process::id();
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else {
+                    continue;
+                };
+                // Another process's `rig-rs-<pid>` stays up, even if that pid is gone.
+                if !socket_owned_by(name, pid) {
+                    continue;
+                }
+                reap_one(name, &entry.path()).await;
+            }
+        }
+
+        async fn reap_one(name: &str, path: &Path) {
+            if !socket_owned_by(name, std::process::id()) {
+                return;
+            }
+            let output = Command::new("tmux")
+                .args(["-L", name, "-f", "/dev/null", "list-sessions"])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
+                .output()
+                .await;
+            let Ok(output) = output else {
+                return;
+            };
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let dead = !output.status.success() && stderr.contains("no server running");
+            if !dead {
+                drop(
+                    Command::new("tmux")
+                        .args(["-L", name, "-f", "/dev/null", "kill-server"])
+                        .env_remove("TMUX")
+                        .env_remove("TMUX_TMPDIR")
+                        .output()
+                        .await,
+                );
+            }
+            drop(tokio::fs::remove_file(path).await);
         }
 
         fn next_socket() -> String {

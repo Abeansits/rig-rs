@@ -1,7 +1,7 @@
 //! `rig ps`, `rig capture`, `rig attach`, and `rig down`.
 
 use crewmux_core::{LifecycleService, RigRepo, Seat, SeatRepo, SeatState};
-use crewmux_mux::{CaptureRange, MuxError};
+use crewmux_mux::{CaptureRange, MuxError, PaneRef};
 use crewmux_types::{MAX_NAME_LEN, RigName, SeatName};
 use serde_json::{Value, json};
 
@@ -152,7 +152,7 @@ async fn attached(app: &App, seat: &Seat) -> Result<bool, Error> {
     Ok(!clients.is_empty())
 }
 
-async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
+pub(crate) async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
     if name.len() > MAX_NAME_LEN || SeatName::new(name).is_err() {
         return Err(Error::Message("invalid seat name".to_owned()));
     }
@@ -181,4 +181,39 @@ async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
     resting
         .pop()
         .ok_or_else(|| Error::Message(format!("seat not found: {name}")))
+}
+
+pub(crate) async fn live_seats(app: &App) -> Result<Vec<Seat>, Error> {
+    let seats = read(&app.store, |conn| conn.list_all()).await?;
+    Ok(seats
+        .into_iter()
+        .filter(|seat| !matches!(seat.state, SeatState::Stopped | SeatState::Dead))
+        .collect())
+}
+
+pub(crate) async fn address_of(app: &App, seat: &Seat) -> Result<String, Error> {
+    let id = seat.rig_id;
+    let rig = read(&app.store, move |conn| {
+        crewmux_core::RigRepo::get(conn, &id)
+    })
+    .await?;
+    Ok(format!("{}@{}", seat.name.as_str(), rig.name.as_str()))
+}
+
+pub(crate) async fn find_address(app: &App, target: &str) -> Result<Seat, Error> {
+    let name = target.split_once('@').map_or(target, |(name, _)| name);
+    find_seat(app, name).await
+}
+
+pub(crate) fn pane_of(seat: &Seat) -> Result<PaneRef, Error> {
+    let session = seat
+        .tmux_session
+        .clone()
+        .ok_or_else(|| Error::Message(format!("seat {} has no session", seat.name.as_str())))?;
+    Ok(PaneRef {
+        session,
+        window: Some(0),
+        pane: Some(0),
+        pane_id: seat.pane_id.clone(),
+    })
 }

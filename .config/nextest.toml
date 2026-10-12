@@ -67,6 +67,18 @@ filter = "test(/::tmux_it::/) | test(/^tmux_it::/)"
 test-group = "tmux"
 threads-required = "num-test-threads"
 
+# paste_reliability pastes a 64 KiB payload 200 times. On macOS CI
+# (run 38195117384, head 1c241fb) nextest killed it at 180s while it was
+# still running: SLOW at 60s and 120s, TERMINATING at 180s. That was not a
+# hung read (the per-paste pull is 5s). tmux 3.8 on Ubuntu passed the same
+# commit, and the macOS long-paste checks passed. 120s * 3 covers a runner
+# about three times slower than the 107s local measurement.
+[[profile.ci.overrides]]
+filter = "test(/::tmux_it::paste_reliability/)"
+test-group = "tmux-heavy"
+threads-required = "num-test-threads"
+slow-timeout = { period = "120s", terminate-after = 3 }
+
 [[profile.ci.overrides]]
 filter = "test(/^chatroom_/)"
 threads-required = "num-test-threads"

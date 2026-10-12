@@ -1,0 +1,43 @@
+---
+source: crates/rig/tests/slice4_cli.rs
+assertion_line: 55
+expression: "serde_json::to_string_pretty(&freeze(&shown)).expect(\"json\")"
+---
+{
+  "item": {
+    "blocked_on": null,
+    "body": "hello",
+    "claimed_at": null,
+    "claimed_by": null,
+    "closure": null,
+    "closure_required_at": null,
+    "created_at": 0,
+    "destination": "bob@rig",
+    "expires_at": null,
+    "explicit_human": false,
+    "fingerprint": "a84c927d6726bd48",
+    "handed_off_from": null,
+    "handed_off_to": null,
+    "id": "baton-1",
+    "last_nudge": null,
+    "priority": 0,
+    "source": "alice@rig",
+    "state": "pending",
+    "tags": [],
+    "tier": null,
+    "updated_at": 0
+  },
+  "transitions": [
+    {
+      "actor": {
+        "Session": "alice@rig"
+      },
+      "at": 0,
+      "from": "pending",
+      "id": 1,
+      "note": "created",
+      "qitem": "baton-1",
+      "to": "pending"
+    }
+  ]
+}

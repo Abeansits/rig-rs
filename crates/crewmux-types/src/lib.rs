@@ -20,7 +20,7 @@ pub use chat::{
 };
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
-pub use id::{MAX_NAME_LEN, RigId, RigName, SeatId, SeatName, SessionId};
+pub use id::{MAX_NAME_LEN, QItemId, RigId, RigName, SeatId, SeatName, SessionId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use tmux_version::{Version, parse_version};
@@ -37,6 +37,11 @@ pub enum Key {
     Escape,
     /// Control-C.
     CtrlC,
+    /// Kill the current line. Clears a paste that failed verification.
+    CtrlU,
+    /// Drop a whole draft and redraw the prompt. Used when line clears cannot
+    /// bring a tall buffer paste back to an empty composer.
+    CtrlG,
     /// Up arrow.
     Up,
     /// Down arrow.

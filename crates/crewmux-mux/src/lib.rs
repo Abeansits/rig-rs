@@ -5,8 +5,10 @@
 //! feature.
 
 mod argv;
+mod born;
 mod clients;
 mod control;
+mod control_child;
 mod control_line;
 mod death;
 mod decode;
@@ -14,12 +16,14 @@ mod error;
 mod exec;
 mod fake;
 mod fake_script;
+mod guard;
 mod hashutil;
 mod hub;
 mod parse;
 mod paste;
 mod reap;
 mod session_kill;
+mod tap;
 mod tmux_mux;
 mod types;
 
@@ -27,7 +31,9 @@ pub use crewmux_types::Key;
 pub use crewmux_types::tmux_version::{self, Version, parse_version};
 pub use error::MuxError;
 pub use fake::FakeMux;
-pub use tmux_mux::{TmuxConfig, TmuxMux, socket_owned_by};
+pub use guard::{ComposerState, DeferReason, Evaluated, GuardConfig, GuardVerdict, evaluate};
+pub use tap::SeatInputTap;
+pub use tmux_mux::{TmuxConfig, TmuxMux, socket_owned_by, socket_path};
 pub use types::{
     CONTROL_SESSION, Capture, CaptureRange, ClientInfo, DeathStream, Geometry, GuardInputs,
     MuxEvent, OptScope, OutputStream, PANE_RING_BYTES, PaneInfo, PaneRef, PasteOpts, PasteReceipt,

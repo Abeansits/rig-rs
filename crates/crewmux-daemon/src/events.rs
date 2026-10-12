@@ -1,348 +1,262 @@
-//! `GET /api/events` on the slice 1 daemon.
+//! `GET /api/events` over SSE and WebSocket, plus `/api/queue/watch`.
 //!
-//! The log is [`crewmux_core::EventLog`]. Seat names (not ULIDs) are the TUI
-//! row keys. A cursor inside the log is replayed. A cursor ahead of the log
-//! gets one `gap`, then live events whose ids stay above that cursor.
+//! This hub-backed handler is the canonical stream. It replaces the interim
+//! event-log tail on the same path and the same `{id, type, payload}` envelope.
 
-use std::collections::VecDeque;
 use std::convert::Infallible;
-use std::time::Duration;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use axum::Json;
-use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::body::Body;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{FromRequestParts, Request, State};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use crewmux_api::{SeatKey, StreamEvent, StreamKind, StreamPayload};
-use crewmux_core::{DomainEvent, EventLog, SeatRepo, SeatState, Seq};
-use crewmux_store::Db;
-use serde::Deserialize;
-use serde_json::json;
+use crewmux_api::{StreamEvent, StreamKind};
+use futures_core::Stream;
+use tokio::sync::mpsc;
 
-use crate::db::read;
-use crate::error::Error;
+use crate::hub::Missed;
 use crate::state::App;
 
-/// Route the TUI opens for the live tail.
+/// Route the TUI opens. The interim tail used this path.
 pub(crate) const PATH: &str = "/api/events";
 
-const BATCH: usize = 32;
-const POLL: Duration = Duration::from_millis(200);
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct Resume {
-    #[serde(default)]
-    last_event_id: Option<String>,
+pub(crate) async fn events(State(app): State<App>, req: Request) -> Response {
+    app.touch();
+    dispatch(app, req, false).await
 }
 
-struct Follow {
-    seq: u64,
-    offset: u64,
-    gap_id: Option<u64>,
+pub(crate) async fn watch(State(app): State<App>, req: Request) -> Response {
+    app.touch();
+    dispatch(app, req, true).await
 }
 
-struct Projected {
-    kind: StreamKind,
-    payload: StreamPayload,
-}
-
-struct Tail {
-    app: App,
-    follow: Follow,
-    pending: VecDeque<StreamEvent>,
-    primed: bool,
-    again: bool,
-}
-
-pub(crate) async fn events(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Query(resume): Query<Resume>,
-) -> Response {
-    let tip = match tip_of(&app).await {
-        Ok(tip) => tip,
-        Err(err) => return fail(&err),
-    };
-    let follow = follow(resume_cursor(&headers, &resume), tip);
-    let mut pending = VecDeque::new();
-    if let Some(id) = follow.gap_id {
-        pending.push_back(gap(id));
+async fn dispatch(app: App, req: Request, queue_only: bool) -> Response {
+    let (mut parts, body) = req.into_parts();
+    let last = resume_id(&parts.headers, parts.uri.query());
+    let upgrade = parts
+        .headers
+        .get(header::UPGRADE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+    if upgrade {
+        return match WebSocketUpgrade::from_request_parts(&mut parts, &app).await {
+            Ok(ws) => ws.on_upgrade(move |socket| ws_pump(socket, app, last, queue_only)),
+            Err(err) => err.into_response(),
+        };
     }
-    let tail = Tail {
-        app,
-        follow,
-        pending,
-        primed: false,
-        again: false,
-    };
-    Sse::new(futures_util::stream::unfold(tail, step))
-        .keep_alive(KeepAlive::default())
-        .into_response()
+    drop(parts);
+    drop(body);
+    sse(&app, last, queue_only)
 }
 
-fn follow(last: Option<u64>, tip: u64) -> Follow {
-    match last {
-        None => Follow {
-            seq: tip,
-            offset: 0,
-            gap_id: None,
-        },
-        Some(id) if id <= tip => Follow {
-            seq: id,
-            offset: 0,
-            gap_id: None,
-        },
-        Some(id) => Follow {
-            seq: tip,
-            offset: id.saturating_add(1).saturating_sub(tip),
-            gap_id: Some(id.saturating_add(1)),
-        },
+fn sse(app: &App, last: Option<u64>, queue_only: bool) -> Response {
+    let (tx, rx) = mpsc::channel(32);
+    let hub = std::sync::Arc::clone(&app.hub);
+    let cancel = app.cancel.clone();
+    app.tasks.spawn(async move {
+        let replay = replay(&hub, last, queue_only).await;
+        for event in replay {
+            if tx.send(format_sse(&event)).await.is_err() {
+                return;
+            }
+        }
+        let mut live = hub.subscribe();
+        loop {
+            tokio::select! {
+                () = cancel.cancelled() => break,
+                event = live.recv() => {
+                    match event {
+                        Ok(event) if !queue_only || event.kind == StreamKind::QueueChanged => {
+                            if tx.send(format_sse(&event)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            let gap = StreamEvent { id: 0, kind: StreamKind::Gap, payload: None };
+                            if tx.send(format_sse(&gap)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            }
+        }
+    });
+    let stream = ReceiverStream { rx };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+async fn ws_pump(mut socket: WebSocket, app: App, last: Option<u64>, queue_only: bool) {
+    for event in replay(&app.hub, last, queue_only).await {
+        let text = serde_json::to_string(&event).unwrap_or_default();
+        if socket.send(Message::Text(text.into())).await.is_err() {
+            return;
+        }
+    }
+    let mut live = app.hub.subscribe();
+    loop {
+        tokio::select! {
+            () = app.cancel.cancelled() => break,
+            event = live.recv() => {
+                let Ok(event) = event else { break };
+                if queue_only && event.kind != StreamKind::QueueChanged {
+                    continue;
+                }
+                let text = serde_json::to_string(&event).unwrap_or_default();
+                if socket.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+        }
     }
 }
 
-fn resume_cursor(headers: &HeaderMap, resume: &Resume) -> Option<u64> {
+async fn replay(
+    hub: &crate::hub::EventHub,
+    last: Option<u64>,
+    queue_only: bool,
+) -> Vec<StreamEvent> {
+    let mut out = Vec::new();
+    match hub.missed(last).await {
+        Missed::CaughtUp => {}
+        Missed::Replay(events) => out.extend(events),
+        Missed::Gap(events) => {
+            // No buffered event to name. The id is the head itself, so the next
+            // real event is `head + 1`. A client that resumes from this gap
+            // still receives that event.
+            let id = events.first().map_or_else(|| hub.head(), |event| event.id);
+            out.push(StreamEvent {
+                id,
+                kind: StreamKind::Gap,
+                payload: None,
+            });
+            out.extend(events);
+        }
+    }
+    if queue_only {
+        out.retain(|event| event.kind == StreamKind::QueueChanged || event.kind == StreamKind::Gap);
+    }
+    out
+}
+
+fn resume_id(headers: &axum::http::HeaderMap, query: Option<&str>) -> Option<u64> {
     let header = headers
         .get("last-event-id")
-        .and_then(|value| value.to_str().ok());
-    header.or(resume.last_event_id.as_deref()).and_then(|text| {
-        if text.len() > 20 {
-            None
-        } else {
-            text.parse().ok()
+        .and_then(|value| value.to_str().ok())
+        .and_then(bounded_id);
+    header.or_else(|| query_id(query))
+}
+
+/// Numeric event ids are short. A longer header or query is ignored rather than parsed.
+fn bounded_id(text: &str) -> Option<u64> {
+    if text.len() > 20 {
+        None
+    } else {
+        text.parse().ok()
+    }
+}
+
+fn query_id(query: Option<&str>) -> Option<u64> {
+    let query = query?;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=')?;
+        if key == "last_event_id" {
+            return bounded_id(value);
         }
-    })
-}
-
-fn project(event: &DomainEvent, seat: Option<&SeatKey>) -> Option<Projected> {
-    let seat = seat?;
-    let (kind, state) = match event {
-        DomainEvent::RigCreated { .. } => return None,
-        DomainEvent::SeatLaunched { .. } => {
-            (StreamKind::SeatStateChanged, Some(SeatState::Launching))
-        }
-        DomainEvent::SeatReady { .. } => (StreamKind::SeatStateChanged, Some(SeatState::Ready)),
-        DomainEvent::SeatStopped { .. } => (StreamKind::SeatStateChanged, Some(SeatState::Stopped)),
-        DomainEvent::SeatDied { .. } => (StreamKind::SeatDied, None),
-    };
-    Some(Projected {
-        kind,
-        payload: StreamPayload {
-            seat: seat.clone(),
-            state,
-            summary: None,
-        },
-    })
-}
-
-fn note_seq(
-    follow: &mut Follow,
-    pending: &mut VecDeque<StreamEvent>,
-    seq: u64,
-    projected: Option<Projected>,
-) {
-    if seq <= follow.seq {
-        return;
     }
-    if seq > follow.seq.saturating_add(1) {
-        let missed = seq.saturating_sub(1);
-        pending.push_back(gap(missed.saturating_add(follow.offset)));
-    }
-    follow.seq = seq;
-    if let Some(projected) = projected {
-        pending.push_back(StreamEvent {
-            id: seq.saturating_add(follow.offset),
-            kind: projected.kind,
-            payload: Some(projected.payload),
-        });
-    }
+    None
 }
 
-fn enqueue(tail: &mut Tail, rows: Vec<(u64, DomainEvent, Option<SeatKey>)>) {
-    for (seq, event, seat) in rows {
-        let projected = project(&event, seat.as_ref());
-        note_seq(&mut tail.follow, &mut tail.pending, seq, projected);
-    }
-}
-
-async fn step(mut tail: Tail) -> Option<(Result<Event, Infallible>, Tail)> {
-    loop {
-        if let Some(event) = tail.pending.pop_front() {
-            return Some((Ok(frame(&event)), tail));
-        }
-        if !wait_ready(&mut tail).await {
-            return None;
-        }
-        let rows = pull(&tail.app, tail.follow.seq).await.ok()?;
-        tail.again = rows.len() == BATCH;
-        enqueue(&mut tail, rows);
-    }
-}
-
-async fn wait_ready(tail: &mut Tail) -> bool {
-    if tail.app.cancel.is_cancelled() {
-        return false;
-    }
-    if tail.again || !tail.primed {
-        tail.primed = true;
-        return true;
-    }
-    tokio::select! {
-        biased;
-        () = tail.app.cancel.cancelled() => false,
-        () = tokio::time::sleep(POLL) => true,
-    }
-}
-
-async fn tip_of(app: &App) -> Result<u64, Error> {
-    read(&app.store, |conn| Ok(EventLog::tip(conn)?.0)).await
-}
-
-async fn pull(app: &App, after: u64) -> Result<Vec<(u64, DomainEvent, Option<SeatKey>)>, Error> {
-    read(&app.store, move |conn| load_after(conn, after)).await
-}
-
-fn load_after(
-    conn: &Db<'_>,
-    after: u64,
-) -> Result<Vec<(u64, DomainEvent, Option<SeatKey>)>, crewmux_core::Error> {
-    let rows = EventLog::after(conn, Seq(after))?;
-    let mut out = Vec::with_capacity(rows.len());
-    for (seq, event) in rows {
-        let name = name_of(conn, &event)?;
-        out.push((seq.0, event, name));
-    }
-    Ok(out)
-}
-
-fn name_of(conn: &Db<'_>, event: &DomainEvent) -> Result<Option<SeatKey>, crewmux_core::Error> {
-    let Some(id) = seat_id(event) else {
-        return Ok(None);
-    };
-    match SeatRepo::get(conn, id) {
-        Ok(seat) => Ok(SeatKey::parse(seat.name.as_str()).ok()),
-        Err(crewmux_core::Error::SeatNotFound(_)) => Ok(None),
-        Err(err) => Err(err),
-    }
-}
-
-fn seat_id(event: &DomainEvent) -> Option<&crewmux_types::SeatId> {
-    match event {
-        DomainEvent::RigCreated { .. } => None,
-        DomainEvent::SeatLaunched { seat, .. }
-        | DomainEvent::SeatReady { seat, .. }
-        | DomainEvent::SeatStopped { seat, .. }
-        | DomainEvent::SeatDied { seat, .. } => Some(seat),
-    }
-}
-
-fn gap(id: u64) -> StreamEvent {
-    StreamEvent {
-        id,
-        kind: StreamKind::Gap,
-        payload: None,
-    }
-}
-
-fn frame(event: &StreamEvent) -> Event {
-    let data = serde_json::to_string(event).unwrap_or_default();
-    Event::default().id(event.id.to_string()).data(data)
-}
-
-fn fail(err: &Error) -> Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": err.to_string()})),
+fn format_sse(event: &StreamEvent) -> String {
+    let data = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_owned());
+    format!(
+        "id: {}\nevent: {}\ndata: {data}\n\n",
+        event.id,
+        event.kind.as_str()
     )
-        .into_response()
+}
+
+struct ReceiverStream {
+    rx: mpsc::Receiver<String>,
+}
+
+impl Stream for ReceiverStream {
+    type Item = Result<String, Infallible>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut().rx.poll_recv(cx).map(|item| item.map(Ok))
+    }
+}
+
+pub(crate) async fn terminal(State(app): State<App>, req: Request) -> Response {
+    app.touch();
+    let seat = query_seat(req.uri().query()).unwrap_or_else(|| "seat".to_owned());
+    let (mut parts, body) = req.into_parts();
+    match WebSocketUpgrade::from_request_parts(&mut parts, &app).await {
+        Ok(upgrade) => upgrade.on_upgrade(move |socket| terminal_pump(socket, app, seat)),
+        Err(err) => {
+            drop(parts);
+            drop(body);
+            err.into_response()
+        }
+    }
+}
+
+fn query_seat(query: Option<&str>) -> Option<String> {
+    let query = query?;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=')?;
+        if key == "seat" && !value.is_empty() {
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
+async fn terminal_pump(mut socket: WebSocket, app: App, seat: String) {
+    while let Some(message) = socket.recv().await {
+        let Ok(message) = message else {
+            break;
+        };
+        if matches!(message, Message::Text(_) | Message::Binary(_)) {
+            app.taps.record_name(&seat, std::time::Instant::now());
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use super::replay;
+    use crate::hub::EventHub;
+    use crewmux_api::StreamKind;
 
-    use crewmux_api::{SeatKey, StreamKind};
-    use crewmux_core::{DomainEvent, SeatState, Timestamp};
-    use crewmux_types::{SeatId, SessionId};
-
-    use super::{follow, note_seq, project};
-
-    fn seat() -> SeatKey {
-        SeatKey::parse("alpha").expect("seat")
-    }
-
-    #[test]
-    fn fresh_cursor_starts_at_the_tip() {
-        let cursor = follow(None, 4);
-        assert_eq!(cursor.seq, 4);
-        assert_eq!(cursor.offset, 0);
-        assert!(cursor.gap_id.is_none());
-    }
-
-    #[test]
-    fn resume_inside_the_log_replays_after_that_id() {
-        let cursor = follow(Some(2), 4);
-        assert_eq!(cursor.seq, 2);
-        assert_eq!(cursor.offset, 0);
-        assert!(cursor.gap_id.is_none());
-    }
-
-    #[test]
-    fn resume_ahead_of_the_log_is_one_gap() {
-        let cursor = follow(Some(10), 8);
-        assert_eq!(cursor.seq, 8);
-        assert_eq!(cursor.gap_id, Some(11));
-        assert_eq!(cursor.offset, 3);
-        assert!(9_u64.saturating_add(cursor.offset) > 11);
-    }
-
-    #[test]
-    fn domain_kinds_map_to_stream_kinds() {
-        let key = seat();
-        let id = SeatId::new();
-        let at = Timestamp::from_millis(0);
-        let launched = DomainEvent::SeatLaunched {
-            seat: id,
-            session: SessionId::new(),
-            at,
-        };
-        let projected = project(&launched, Some(&key)).expect("launched");
-        assert_eq!(projected.kind, StreamKind::SeatStateChanged);
-        assert_eq!(projected.payload.state, Some(SeatState::Launching));
-        assert_eq!(projected.payload.seat.as_str(), "alpha");
-
-        let died = DomainEvent::SeatDied {
-            seat: SeatId::new(),
-            at,
-        };
-        let projected = project(&died, Some(&key)).expect("died");
-        assert_eq!(projected.kind, StreamKind::SeatDied);
-        assert!(projected.payload.state.is_none());
-
-        let created = DomainEvent::RigCreated {
-            rig: crewmux_types::RigId::new(),
-            name: crewmux_types::RigName::new("pair").expect("rig"),
-            at,
-        };
-        assert!(project(&created, Some(&key)).is_none());
-        assert!(project(&died, None).is_none());
-    }
-
-    #[test]
-    fn a_hole_emits_one_gap_then_the_event() {
-        let mut cursor = follow(Some(5), 8);
-        let mut pending = VecDeque::new();
-        let died = DomainEvent::SeatDied {
-            seat: SeatId::new(),
-            at: Timestamp::from_millis(0),
-        };
-        let projected = project(&died, Some(&seat()));
-        note_seq(&mut cursor, &mut pending, 8, projected);
-        let gap = pending.front().expect("gap");
+    #[tokio::test]
+    async fn last_event_id_past_the_head_is_a_gap() {
+        let hub = EventHub::new();
+        let missed = replay(&hub, Some(3), false).await;
+        let gap = missed.first().expect("gap");
         assert_eq!(gap.kind, StreamKind::Gap);
-        assert_eq!(gap.id, 7);
-        let event = pending.get(1).expect("event");
-        assert_eq!(event.kind, StreamKind::SeatDied);
-        assert_eq!(event.id, 8);
-        assert_eq!(cursor.seq, 8);
+        assert_eq!(gap.id, hub.head());
+        assert_ne!(gap.id, hub.head().saturating_add(1));
+        assert_eq!(hub.head(), 0);
+        assert_eq!(missed.len(), 1);
+
+        let published = hub.publish(StreamKind::Activity, None).await;
+        let caught = replay(&hub, Some(published.id), false).await;
+        assert_eq!(caught.len(), 0);
+        let ahead = replay(&hub, Some(published.id.saturating_add(2)), false).await;
+        let gap = ahead.first().expect("ahead");
+        assert_eq!(gap.kind, StreamKind::Gap);
+        assert_eq!(gap.id, hub.head());
+        assert_ne!(gap.id, hub.head().saturating_add(1));
+        assert!(ahead.iter().all(|event| event.kind == StreamKind::Gap));
     }
 }

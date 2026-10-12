@@ -1,0 +1,6 @@
+---
+source: crates/rig/tests/slice4_cli.rs
+assertion_line: 73
+expression: err.trim()
+---
+Refused: 'one@pair' is at an interactive prompt (trust_gate). A message must not select or approve it. To deliberately drive the prompt: rig send one@pair "<text>" --dangerously-interact --reason "<why>". No text was sent.

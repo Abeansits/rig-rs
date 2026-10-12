@@ -585,9 +585,9 @@ fn seat_state_change_flashes_that_row() {
         id: 1,
         kind: StreamKind::SeatStateChanged,
         payload: Some(StreamPayload {
-            seat: SeatKey::parse("s1").expect("seat"),
-            state: Some(SeatState::Dead),
-            summary: None,
+            seat: Some("s1".to_owned()),
+            state: Some("dead".to_owned()),
+            ..StreamPayload::default()
         }),
     };
     let (next, _) = update(state, Msg::Live(event));
