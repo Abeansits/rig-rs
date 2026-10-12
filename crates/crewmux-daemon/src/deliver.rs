@@ -127,6 +127,8 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
     let seat = crate::query::find_address(app, target).await?;
     let address = address_of(app, &seat).await?;
     let pane = pane_of(&seat)?;
+    // Check-then-paste matches the TypeScript sender: the process can still
+    // change after this returns and before the paste.
     crate::lineage::ensure(app, &seat, &pane).await?;
     let runtime = seat.runtime;
     let shown = Shown {

@@ -36,11 +36,15 @@ fn seat(name: &str) -> SessionRef {
 }
 
 fn pressure(name: &str, used: u64, limit: u64) -> HealthObservation {
+    pressure_at(name, used, limit, at())
+}
+
+fn pressure_at(name: &str, used: u64, limit: u64, at: Timestamp) -> HealthObservation {
     HealthObservation::ContextPressure {
         seat: seat(name),
         used_tokens: used,
         limit,
-        at: at(),
+        at,
     }
 }
 
@@ -309,6 +313,85 @@ fn ceremony_is_reserved_ahead_of_context_samples() {
     );
     assert_eq!(projected.schema, "openrig.health-list/v0alpha1");
     assert_eq!(projected.records[0].schema, "openrig.health/v0alpha1");
+}
+
+#[test]
+fn an_apostrophe_does_not_hide_outcome_failed() {
+    let failed = TransitionNote {
+        lineage_id: QItemId::new("row-a").expect("id"),
+        note: "wake-attempt: 1/3 the seat didn't finish outcome=failed".into(),
+        next_action: false,
+    };
+    let cited = TransitionNote {
+        lineage_id: QItemId::new("row-b").expect("id"),
+        note: "wake-attempt: 1/3 cited 'outcome=failed' only".into(),
+        next_action: false,
+    };
+    let (observations, _) = wake_from_notes(&[failed, cited], 100, at());
+    let mut saw_failed = false;
+    let mut saw_cited = false;
+    for observation in observations {
+        let HealthObservation::WakeLineage {
+            lineage_id, failed, ..
+        } = observation
+        else {
+            panic!("wake observation");
+        };
+        if lineage_id == "row-a" {
+            assert!(failed);
+            saw_failed = true;
+        }
+        if lineage_id == "row-b" {
+            assert!(!failed);
+            saw_cited = true;
+        }
+    }
+    assert!(saw_failed && saw_cited);
+}
+
+#[test]
+fn context_pressure_fresh_matches_the_summary_window() {
+    let now = at();
+    let fresh = pressure_evidence(Timestamp::from_millis(now.millis() - 599_000), now);
+    let stale = pressure_evidence(Timestamp::from_millis(now.millis() - 600_000), now);
+    assert_eq!(fresh, Some(true));
+    assert_eq!(stale, Some(false));
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "a projection error fails the freshness test"
+)]
+fn pressure_evidence(sampled: Timestamp, now: Timestamp) -> Option<bool> {
+    let observations = vec![pressure_at("seat@rig", 99, 100, sampled)];
+    let projected = project(
+        &HealthPolicy::default(),
+        &[crewmux_health::SourceRead {
+            name: "context".into(),
+            result: Ok((
+                observations,
+                Some(Coverage {
+                    evaluated: 1,
+                    omitted: 0,
+                    limit_hit: false,
+                }),
+            )),
+        }],
+        &HealthQuery {
+            limit: 100,
+            now,
+            severity: None,
+            status: None,
+        },
+    )
+    .expect("project");
+    projected
+        .records
+        .first()?
+        .evidence
+        .first()?
+        .get("fresh")?
+        .as_bool()
 }
 
 #[test]

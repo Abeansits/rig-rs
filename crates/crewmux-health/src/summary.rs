@@ -56,7 +56,8 @@ pub struct ContextSummary {
     pub stale: u32,
 }
 
-const FRESHNESS_SECONDS: u64 = 600;
+/// A context sample younger than this is fresh. The summary and the finding agree.
+pub(crate) const FRESHNESS_SECONDS: u64 = 600;
 const CRITICAL_PERCENT: u32 = 80;
 const WARNING_PERCENT: u32 = 60;
 

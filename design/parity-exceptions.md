@@ -123,6 +123,12 @@ The design index calls this PE-006. That id is already the setup/doctor exceptio
 - **Rust behaviour:** the id is `session_meta.payload.id` in `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Candidates are the before-snapshot difference, the per-cwd launch lock, and first-message correlation. A tie is `ThreadIdError::Ambiguous`. The id is never guessed from a process or a log row.
 - **Required tests:** `back_to_back_launches_get_distinct_ids`, `outside_rollout_is_correlated_by_the_first_message`, `unresolvable_tie_is_ambiguous`, and `snapshot_excludes_rollouts_from_before_launch`.
 
+## PE-019: the process-lineage selector is not the pre-send check
+
+- **TS behaviour:** `native-process-lineage.test.ts` selects the agent through a process tree (nix wrappers, the executable path, launcher shims). `native-claude-delivery.test.ts` pairs that selector with the ordinary transport.
+- **Rust behaviour:** before a paste or `POST /api/seats/submit`, the daemon checks the recorded pid, the process start time, that the foreground is not a shell, and that a session id still present in argv matches the id stored at launch. A version-number process title (`2.1.289`) counts as Claude, because Node's `process.title` overwrites the command line. The process-tree selector is not ported.
+- **Required test:** `pid_mismatch_refuses_before_paste`, `session_id_mismatch_refuses_before_paste`, `exec_into_another_session_pastes_nothing`, `respawn_under_another_session_pastes_nothing`, and `exec_into_bash_pastes_nothing`.
+
 ## Status of real-login testing
 
 A Mac rerun on 2026-10-11 with Claude Code 2.1.286 observed multi-line pastes wrapped in a pasted-content tag and tabs expanded to four spaces (ADR-0009 Amendment 2). Live Claude runs are gated on `RIG_LIVE_CLAUDE=1` inside the `tmux-it` feature and are not part of CI. This change did not execute that live suite. Codex real-login coverage is still pending.

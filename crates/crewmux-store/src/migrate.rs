@@ -174,6 +174,10 @@ CREATE TABLE pane_lineage (
 );
 ";
 
+const LINEAGE_START: &str = "
+ALTER TABLE pane_lineage ADD COLUMN started_ticks INTEGER;
+";
+
 /// Rig tables, the queue, chat, health, then the pane lineage recorded at launch.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
@@ -182,8 +186,9 @@ pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
         M::up(CHAT),
         M::up(HEALTH),
         M::up(LINEAGE),
+        M::up(LINEAGE_START),
     ]),
-    len: 5,
+    len: 6,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

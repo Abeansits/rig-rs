@@ -55,6 +55,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Result<PaneInfo, MuxError> {
         window_id,
         session,
         pid,
+        started_ticks: None,
         current_cmd,
         argv: None,
         dead,

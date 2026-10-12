@@ -2,6 +2,7 @@
 
 //! Context-pressure findings. A zero limit is not a zero-percent sample.
 
+use crewmux_core::Timestamp;
 use serde_json::json;
 
 use super::Draft;
@@ -9,9 +10,14 @@ use crate::detector::DetectorId;
 use crate::observation::HealthObservation;
 use crate::policy::HealthPolicy;
 use crate::record::{HealthRecord, Severity, Status, seat_scope};
+use crate::summary::FRESHNESS_SECONDS;
 use crate::time::iso_timestamp;
 
-pub(super) fn context(observation: &HealthObservation, policy: &HealthPolicy) -> Vec<HealthRecord> {
+pub(super) fn context(
+    observation: &HealthObservation,
+    policy: &HealthPolicy,
+    now: Timestamp,
+) -> Vec<HealthRecord> {
     let HealthObservation::ContextPressure {
         seat,
         used_tokens,
@@ -36,6 +42,7 @@ pub(super) fn context(observation: &HealthObservation, policy: &HealthPolicy) ->
         Severity::Warning
     };
     let seat = seat.as_str();
+    let fresh = now.saturating_duration_since(*at).as_secs() < FRESHNESS_SECONDS;
     vec![
         Draft {
             detector: DetectorId::ContextPressure,
@@ -54,7 +61,7 @@ pub(super) fn context(observation: &HealthObservation, policy: &HealthPolicy) ->
                 "nodeId": seat,
                 "usedPercentage": pct,
                 "available": true,
-                "fresh": true,
+                "fresh": fresh,
                 "observedAt": iso_timestamp(*at),
                 "sourceOrder": 0
             })],

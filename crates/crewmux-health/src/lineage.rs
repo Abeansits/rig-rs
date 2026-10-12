@@ -76,24 +76,36 @@ fn is_wake_note(note: &str) -> bool {
     text.contains("wake-attempt:") || text.contains("escalation-rung:")
 }
 
-/// Drop single- and double-quoted spans so a cited phrase is not a marker.
+/// Drop quoted spans so a cited phrase is not a marker.
+///
+/// An apostrophe inside a word (`didn't`, `agents'`) is not a quote, so it
+/// cannot hide a later `outcome=failed`. A single quote still starts a span
+/// at a boundary (`'outcome=failed'`).
 fn outside_quotes(note: &str) -> String {
     let mut out = String::new();
     let mut quote = None;
+    let mut prev_word = false;
     for ch in note.chars() {
         if let Some(mark) = quote {
             if ch == mark {
                 quote = None;
             }
+            prev_word = is_word(ch);
             continue;
         }
-        if ch == '\'' || ch == '"' {
+        if ch == '"' || (ch == '\'' && !prev_word) {
             quote = Some(ch);
+            prev_word = false;
             continue;
         }
         out.push(ch);
+        prev_word = is_word(ch);
     }
     out
+}
+
+fn is_word(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
 }
 
 mod messaging_notes {

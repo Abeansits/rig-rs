@@ -15,13 +15,14 @@ use crate::record::{HealthRecord, Severity, Status, finding_id, instance_scope};
 pub(crate) fn evaluate(
     observation: &HealthObservation,
     policy: &HealthPolicy,
+    now: Timestamp,
 ) -> Vec<HealthRecord> {
     match observation {
         HealthObservation::CoordinationLineage { .. } => coordination(observation, policy),
         HealthObservation::WakeLineage { .. } => wake(observation, policy),
         HealthObservation::Directive { .. } => directive(observation),
         HealthObservation::ScopeAdmission { .. } => admission(observation),
-        HealthObservation::ContextPressure { .. } => context::context(observation, policy),
+        HealthObservation::ContextPressure { .. } => context::context(observation, policy, now),
     }
 }
 

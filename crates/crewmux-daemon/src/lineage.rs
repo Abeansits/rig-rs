@@ -1,4 +1,8 @@
 //! Pre-send process check. Paste waits until the pane is still the launched agent.
+//!
+//! The check and the later paste are not one atomic step. A process can
+//! still change in that gap. That check-then-paste window matches the
+//! TypeScript sender.
 
 use std::sync::Arc;
 
@@ -35,10 +39,12 @@ impl Fault {
 
     fn message(self) -> String {
         let detail = match self {
-            Self::PidMismatch => "the pane pid does not match the pid recorded at launch",
+            Self::PidMismatch => "the pane process is not the one recorded at launch",
             Self::BareShell => "the pane is at a bare shell",
             Self::Backgrounded => "the pane foreground is not the agent",
-            Self::SessionMismatch => "the session-id in argv does not match",
+            Self::SessionMismatch => {
+                "the live process does not prove the session recorded at launch"
+            }
             Self::ResumeUnproven => "exact resume cannot be proven",
         };
         format!("lineage:{}: {detail}. No text was sent.", self.code())
@@ -61,14 +67,20 @@ pub(crate) async fn record(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
         .pid
         .ok_or_else(|| Error::Message(Fault::PidMismatch.message()))?;
     let command = live.current_cmd.clone();
+    let known_start = live.started_ticks;
     let from_argv = live.argv.as_deref().and_then(token_in_argv);
     let session_id = read_claude_id(app, seat).await.or(from_argv);
+    let started_ticks = match known_start {
+        Some(ticks) => Some(ticks),
+        None => read_start(pid).await,
+    };
     let row = PaneLineage {
         seat_id: seat.id.to_string(),
         pid,
         command,
         session_id,
         runtime: seat.runtime.as_str().to_owned(),
+        started_ticks,
     };
     let store = Arc::clone(&app.store);
     tokio::task::spawn_blocking(move || {
@@ -80,6 +92,12 @@ pub(crate) async fn record(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
 }
 
 /// Refuse before paste when the pane is no longer the launched process.
+///
+/// Claude accepts a version-number process title (`2.1.289`) as well as
+/// `claude` and `node`. Node's `process.title` overwrites `/proc` cmdline, so
+/// a matching pid and start time plus the session id stored at launch prove
+/// the process when argv no longer contains `--session-id`. An argv session
+/// that disagrees with the launch record is still a refusal.
 ///
 /// # Errors
 ///
@@ -95,17 +113,28 @@ pub(crate) async fn ensure(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
     .map_err(Error::from)?;
     let panes = app.mux.list_panes().await?;
     let live = panes.iter().find(|info| same_pane(info, pane));
-    let argv = match live {
-        Some(info) => match info.argv.clone() {
-            Some(argv) => Some(argv),
-            None => match info.pid {
-                Some(pid) => read_cmdline(pid).await,
-                None => None,
-            },
-        },
-        None => None,
+    let snapshot = live.map(|info| (info.pid, info.argv.clone(), info.started_ticks));
+    let (argv, live_started) = match snapshot {
+        Some((pid, recorded_argv, known_start)) => {
+            let argv = match recorded_argv {
+                Some(argv) => Some(argv),
+                None => match pid {
+                    Some(pid) => read_cmdline(pid).await,
+                    None => None,
+                },
+            };
+            let started = match known_start {
+                Some(ticks) => Some(ticks),
+                None => match pid {
+                    Some(pid) => read_start(pid).await,
+                    None => None,
+                },
+            };
+            (argv, started)
+        }
+        None => (None, None),
     };
-    if let Some(fault) = judge(recorded.as_ref(), live, argv.as_deref()) {
+    if let Some(fault) = judge(recorded.as_ref(), live, argv.as_deref(), live_started) {
         return Err(Error::Message(fault.message()));
     }
     Ok(())
@@ -115,6 +144,7 @@ fn judge(
     recorded: Option<&PaneLineage>,
     live: Option<&PaneInfo>,
     argv: Option<&str>,
+    live_started: Option<u64>,
 ) -> Option<Fault> {
     let Some(recorded) = recorded else {
         return Some(Fault::ResumeUnproven);
@@ -128,24 +158,83 @@ fn judge(
     if pid != recorded.pid {
         return Some(Fault::PidMismatch);
     }
+    if let (Some(saved), Some(live_started)) = (recorded.started_ticks, live_started)
+        && saved != live_started
+    {
+        return Some(Fault::PidMismatch);
+    }
     if is_shell(&live.current_cmd) {
         return Some(Fault::BareShell);
     }
-    if command_base(&live.current_cmd) != command_base(&recorded.command) {
+    if !same_foreground(&recorded.runtime, &recorded.command, &live.current_cmd) {
         return Some(Fault::Backgrounded);
     }
+    session_fault(recorded, argv, live_started)
+}
+
+fn session_fault(
+    recorded: &PaneLineage,
+    argv: Option<&str>,
+    live_started: Option<u64>,
+) -> Option<Fault> {
     if recorded.runtime == "claude-code" && recorded.session_id.is_none() {
         return Some(Fault::ResumeUnproven);
     }
     let expected = recorded.session_id.as_deref()?;
-    let Some(argv) = argv.filter(|text| !text.is_empty()) else {
-        return Some(Fault::ResumeUnproven);
-    };
-    if session_in_argv(argv, expected) {
+    if let Some(argv) = argv.filter(|text| !text.is_empty())
+        && token_in_argv(argv).is_some()
+    {
+        if session_in_argv(argv, expected) {
+            return None;
+        }
+        return Some(Fault::SessionMismatch);
+    }
+    let same_process = matches!(
+        (recorded.started_ticks, live_started),
+        (Some(saved), Some(live)) if saved == live
+    );
+    if same_process {
         None
     } else {
         Some(Fault::SessionMismatch)
     }
+}
+
+/// `node` and a version title are the same Claude process.
+///
+/// Real Claude sets `process.title` to its version, which replaces the
+/// command name tmux reports.
+fn same_foreground(runtime: &str, recorded: &str, live: &str) -> bool {
+    let recorded = command_base(recorded);
+    let live = command_base(live);
+    if recorded == live {
+        return true;
+    }
+    runtime == "claude-code" && claude_process(recorded) && claude_process(live)
+}
+
+fn claude_process(name: &str) -> bool {
+    matches!(name, "claude" | "node" | "nodejs") || version_process(name)
+}
+
+/// `2.1.289`, the shape of Claude's `process.title`.
+fn version_process(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let (Some(major), Some(minor), Some(patch)) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    if parts.next().is_some() {
+        return false;
+    }
+    all_digits(major) && all_digits(minor) && patch_starts_with_digit(patch)
+}
+
+fn all_digits(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn patch_starts_with_digit(text: &str) -> bool {
+    matches!(text.chars().next(), Some(ch) if ch.is_ascii_digit())
 }
 
 fn same_pane(info: &PaneInfo, pane: &PaneRef) -> bool {
@@ -229,13 +318,45 @@ async fn read_claude_id(app: &App, seat: &Seat) -> Option<String> {
     }
 }
 
+async fn read_start(pid: u32) -> Option<u64> {
+    tokio::task::spawn_blocking(move || crewmux_mux::process_start_ticks(pid))
+        .await
+        .ok()
+        .flatten()
+}
+
 async fn read_cmdline(pid: u32) -> Option<String> {
     let path = format!("/proc/{pid}/cmdline");
-    let bytes = tokio::task::spawn_blocking(move || std::fs::read(path))
+    if let Some(text) = tokio::task::spawn_blocking(move || std::fs::read(path))
         .await
-        .ok()?
+        .ok()
+        .and_then(std::result::Result::ok)
+        .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " "))
+    {
+        let text = text.trim();
+        if !text.is_empty() {
+            return Some(text.to_owned());
+        }
+    }
+    read_ps_args(pid).await
+}
+
+async fn read_ps_args(pid: u32) -> Option<String> {
+    let output = tokio::process::Command::new("ps")
+        .args(["-ww", "-p", &pid.to_string(), "-o", "args="])
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output()
+        .await
         .ok()?;
-    let text = String::from_utf8_lossy(&bytes).replace('\0', " ");
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_owned())
 }
@@ -245,9 +366,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crewmux_mux::{FakeMux, Multiplexer};
+    use crewmux_mux::{FakeMux, Geometry, Multiplexer, PaneInfo};
+    use crewmux_store::PaneLineage;
 
-    use super::session_in_argv;
+    use super::{Fault, judge, session_in_argv};
     use crate::deliver::{Outbound, deliver};
     use crate::flow::{harness_with, two_stub};
     use crate::launch::bring_up;
@@ -355,7 +477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_session_id_refuses_before_paste() {
+    async fn same_process_without_a_session_token_keeps_the_launch_record() {
         let (app, mux) = launched().await;
         let pane = one_pane(&mux).await;
         plant_session(&app, "expected-session").await;
@@ -366,7 +488,95 @@ mod tests {
             Some("rig-stub-agent"),
         )
         .await;
-        refuse(&mux, &app, "lineage:session_id_mismatch").await;
+        let seat = crate::query::find_address(&app, "one@pair")
+            .await
+            .expect("seat");
+        let pref = crewmux_mux::PaneRef {
+            session: pane.session,
+            window: Some(0),
+            pane: Some(0),
+            pane_id: Some(pane.pane_id),
+        };
+        super::ensure(&app, &seat, &pref)
+            .await
+            .expect("pid and start time prove the launch");
+    }
+
+    #[test]
+    fn version_title_after_launch_is_the_same_agent() {
+        let row = sample_row("node", Some("sess"), 9);
+        let live = sample_pane("2.1.289", 9);
+        assert_eq!(
+            judge(Some(&row), Some(&live), Some("2.1.289"), Some(9)),
+            None
+        );
+    }
+
+    #[test]
+    fn version_title_before_launch_uses_the_launch_record() {
+        let row = sample_row("2.1.289", Some("sess"), 9);
+        let live = sample_pane("2.1.289", 9);
+        assert_eq!(
+            judge(Some(&row), Some(&live), Some("2.1.289"), Some(9)),
+            None
+        );
+    }
+
+    #[test]
+    fn same_start_time_still_refuses_a_different_session_token() {
+        let row = sample_row("node", Some("sess"), 9);
+        let live = sample_pane("node", 9);
+        assert_eq!(
+            judge(
+                Some(&row),
+                Some(&live),
+                Some("node --session-id other"),
+                Some(9)
+            ),
+            Some(Fault::SessionMismatch)
+        );
+    }
+
+    #[test]
+    fn a_reused_pid_with_a_new_start_time_is_a_mismatch() {
+        let row = sample_row("node", Some("sess"), 9);
+        let live = sample_pane("node", 10);
+        assert_eq!(
+            judge(
+                Some(&row),
+                Some(&live),
+                Some("node --session-id sess"),
+                Some(10)
+            ),
+            Some(Fault::PidMismatch)
+        );
+    }
+
+    fn sample_row(command: &str, session: Option<&str>, started: u64) -> PaneLineage {
+        PaneLineage {
+            seat_id: "s".to_owned(),
+            pid: 1,
+            command: command.to_owned(),
+            session_id: session.map(str::to_owned),
+            runtime: "claude-code".to_owned(),
+            started_ticks: Some(started),
+        }
+    }
+
+    fn sample_pane(command: &str, started: u64) -> PaneInfo {
+        PaneInfo {
+            pane_id: "%1".to_owned(),
+            window_id: "@1".to_owned(),
+            session: "seat".to_owned(),
+            pid: Some(1),
+            started_ticks: Some(started),
+            current_cmd: command.to_owned(),
+            argv: None,
+            dead: false,
+            dead_status: None,
+            size: Geometry { cols: 80, rows: 24 },
+            in_mode: false,
+        }
     }
 
     #[tokio::test]

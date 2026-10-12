@@ -127,6 +127,8 @@ async fn wake_notes(app: &App) -> Vec<TransitionNote> {
             notes.push(TransitionNote {
                 lineage_id: item.id.clone(),
                 note: transition.note,
+                // Stand-in until the queue stores a next-action field: a
+                // non-empty body counts as an obligation the wake duplicates.
                 next_action: !item.body.is_empty(),
             });
         }

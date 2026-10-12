@@ -40,6 +40,8 @@ pub use serve::run;
 mod flow;
 #[cfg(test)]
 mod health_tests;
+#[cfg(all(test, feature = "tmux-it"))]
+mod lineage_it;
 #[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]

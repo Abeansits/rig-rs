@@ -96,7 +96,10 @@ pub fn project(
         fold_read(
             policy,
             read,
-            &stamped,
+            &Fold {
+                stamped: &stamped,
+                now: query.now,
+            },
             &mut records,
             &mut coverage,
             &mut failures,
@@ -182,17 +185,25 @@ fn skipped(policy: &HealthPolicy, detectors: &[DetectorId]) -> bool {
     !detectors.is_empty() && detectors.iter().all(|id| !policy.allows(*id))
 }
 
+struct Fold<'a> {
+    stamped: &'a str,
+    now: crewmux_core::Timestamp,
+}
+
 fn fold_read(
     policy: &HealthPolicy,
     read: &SourceRead,
-    stamped: &str,
+    clock: &Fold<'_>,
     records: &mut Vec<HealthRecord>,
     coverage: &mut Vec<CoverageRow>,
     failures: &mut Vec<CoverageRow>,
 ) {
     match &read.result {
         Err(reason) => {
-            let row = stamp(CoverageRow::failed(&read.name, reason.clone()), stamped);
+            let row = stamp(
+                CoverageRow::failed(&read.name, reason.clone()),
+                clock.stamped,
+            );
             failures.push(row.clone());
             coverage.push(row);
         }
@@ -201,12 +212,15 @@ fn fold_read(
                 &read.name,
                 "input table is not in this schema; not evaluated",
             ),
-            stamped,
+            clock.stamped,
         )),
         Ok((observations, Some(bounds))) => {
-            coverage.push(stamp(CoverageRow::bounded(&read.name, *bounds), stamped));
+            coverage.push(stamp(
+                CoverageRow::bounded(&read.name, *bounds),
+                clock.stamped,
+            ));
             for observation in observations {
-                for mut record in evaluate(observation, policy) {
+                for mut record in evaluate(observation, policy, clock.now) {
                     record.coverage = Some(*bounds);
                     records.push(record);
                 }

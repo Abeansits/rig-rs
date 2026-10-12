@@ -320,6 +320,8 @@ fn seat(spec: &SessionSpec, session: &str, pane_id: &str) -> PaneInfo {
         window_id: format!("@{pane_id}"),
         session: session.to_owned(),
         pid: Some(1),
+        // Stable token. Tests must not read the real start time of pid 1.
+        started_ticks: Some(7),
         current_cmd,
         argv: Some(spec.argv.join(" ")),
         dead: false,
