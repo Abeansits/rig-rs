@@ -414,6 +414,7 @@ mod tmux_it {
         )
         .with_submit_wait(Duration::from_secs(3));
         let session = format!("five__{}", std::process::id());
+        let rig_cwd = cwd.to_string_lossy().into_owned();
         let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, &session);
         let mut opts = super::opts(None);
         opts.session_name = session.clone();
@@ -422,6 +423,9 @@ mod tmux_it {
             .insert("HOME".to_owned(), home.display().to_string());
         opts.env
             .insert("PYTHONUNBUFFERED".to_owned(), "1".to_owned());
+        // macOS getcwd resolves /var to /private/var. The adapter slugs the cwd
+        // it was given, so the fixture must write the jsonl under that path.
+        opts.env.insert("RIG_CWD".to_owned(), rig_cwd);
         opts.budget = Some(crewmux_adapters::LaunchBudget::with_overrides(
             crewmux_adapters::BudgetOverrides {
                 first_screen: Some(Duration::from_secs(3)),
@@ -452,7 +456,7 @@ import json, os, sys, time
 args = sys.argv[1:]
 sid = args[args.index("--session-id") + 1]
 home = os.environ["HOME"]
-slug = "".join(ch if ch.isascii() and ch.isalnum() else "-" for ch in os.getcwd())
+slug = "".join(ch if ch.isascii() and ch.isalnum() else "-" for ch in os.environ.get("RIG_CWD", os.getcwd()))
 path = os.path.join(home, ".claude", "projects", slug, sid + ".jsonl")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 
