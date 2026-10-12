@@ -13,9 +13,11 @@ use crate::exec::TmuxExec;
 use crate::types::{PasteOpts, PasteReceipt};
 
 /// macOS discards unread pty input at 1024 bytes (`MAX_INPUT` / `TTYHOG`).
-/// tmux can flush one `paste-buffer` as a single write, so each write stays
-/// under that even when the payload is one long line.
-const PASTE_CHUNK: usize = 512;
+/// tmux can flush one `paste-buffer` as a single write. 1000 leaves room for
+/// the 6-byte bracket when that write is still queued (`1006 <= 1024`). The
+/// next chunk waits for [`CHUNK_GAP`], so a second 1000-byte write is not
+/// added on top.
+const PASTE_CHUNK: usize = 1000;
 
 /// Seconds between chunk writes. Long enough for the pane to drain 512 bytes,
 /// short enough that a 64 KiB paste still finishes inside the tmux exec timeout.
@@ -454,7 +456,7 @@ mod tests {
         assert_eq!(files.len(), pastes.len());
         let mut joined = String::new();
         for bytes in &files {
-            assert!(bytes.len() <= 512, "{}", bytes.len());
+            assert!(bytes.len() <= super::PASTE_CHUNK, "{}", bytes.len());
             joined.push_str(&String::from_utf8_lossy(bytes));
         }
         assert_eq!(joined, text);
@@ -576,7 +578,7 @@ mod tests {
         assert_eq!(files.len(), pastes);
         let mut joined = String::new();
         for bytes in &files {
-            assert!(bytes.len() <= 512, "{}", bytes.len());
+            assert!(bytes.len() <= super::PASTE_CHUNK, "{}", bytes.len());
             joined.push_str(&String::from_utf8_lossy(bytes));
         }
         assert_eq!(joined, text);
@@ -593,7 +595,7 @@ mod tests {
         let err = perform_paste(
             exec.as_ref(),
             "%missing",
-            &"W".repeat(1000),
+            &"W".repeat(2_000),
             PasteOpts::default(),
         )
         .await
