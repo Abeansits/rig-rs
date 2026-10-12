@@ -101,7 +101,9 @@ pub(crate) async fn record(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
 /// file has to name that id, or the send is refused. Claude Code 2.1.286 keeps
 /// `--session-id` in argv, so the native binary is covered by the token check.
 /// A version title that erases the token is refused. An in-app resume that
-/// leaves argv and open files unchanged is only caught after the send.
+/// leaves argv and open files unchanged is only caught after the send. A shell
+/// in the live argv is a bare shell even when tmux still reports the command
+/// recorded at launch. Stub seats use this same record.
 ///
 /// # Errors
 ///
@@ -192,13 +194,22 @@ fn judge(
     {
         return Some(Fault::PidMismatch);
     }
-    if is_shell(&live.current_cmd) {
+    if is_shell(&live.current_cmd) || argv_is_shell(argv) {
         return Some(Fault::BareShell);
     }
     if !same_foreground(&recorded.runtime, &recorded.command, &live.current_cmd) {
         return Some(Fault::Backgrounded);
     }
     session_fault(recorded, argv, holds_session)
+}
+
+/// `exec` keeps the pid and can leave tmux reporting the launch command.
+///
+/// The live argv is the process image. A shell there is a bare shell even
+/// when `pane_current_command` still names the agent.
+fn argv_is_shell(argv: Option<&str>) -> bool {
+    argv.and_then(|text| text.split_whitespace().next())
+        .is_some_and(|program| !program.is_empty() && is_shell(program))
 }
 
 fn session_fault(recorded: &PaneLineage, argv: Option<&str>, holds_session: bool) -> Option<Fault> {
@@ -559,6 +570,33 @@ mod tests {
                 true
             ),
             Some(Fault::SessionMismatch)
+        );
+    }
+
+    #[test]
+    fn shell_argv_is_a_bare_shell_when_tmux_still_names_the_agent() {
+        let row = PaneLineage {
+            seat_id: "s".to_owned(),
+            pid: 1,
+            command: "rig-stub-agent".to_owned(),
+            session_id: None,
+            runtime: "stub".to_owned(),
+            started_ticks: Some(9),
+        };
+        let live = sample_pane("rig-stub-agent", 9);
+        assert_eq!(
+            judge(Some(&row), Some(&live), Some("bash"), Some(9), false),
+            Some(Fault::BareShell)
+        );
+        assert_eq!(
+            judge(
+                Some(&row),
+                Some(&live),
+                Some("python3 /tmp/stay.py"),
+                Some(9),
+                false
+            ),
+            None
         );
     }
 
