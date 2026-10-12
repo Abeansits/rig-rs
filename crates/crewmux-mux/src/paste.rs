@@ -26,6 +26,10 @@ const CHUNK_GAP: &str = "0.002";
 /// batch stays under this so a long temp path still fits.
 const CLIENT_BUDGET: usize = 14_000;
 
+/// tmux 3.7+ `cmd_unpack_argv` rejects `argc > 1000` and reports it as
+/// `command too long`, even when the packed bytes still fit.
+const CLIENT_ARGS: usize = 1000;
+
 const BRACKET_START: &str = "\u{1b}[200~";
 const BRACKET_END: &str = "\u{1b}[201~";
 
@@ -60,9 +64,9 @@ pub(crate) async fn perform_paste(
 ///
 /// The delay is `run-shell -d` with no shell command, so the server waits and
 /// then continues the same command queue. Batches that would exceed
-/// [`CLIENT_BUDGET`] go out as later clients; the bracket is opened on the
-/// first and closed on the last. A failed queue can leave the pane inside the
-/// open bracket; the close is sent again on that path.
+/// [`CLIENT_BUDGET`] or [`CLIENT_ARGS`] go out as later clients; the bracket
+/// is opened on the first and closed on the last. A failed queue can leave
+/// the pane inside the open bracket; the close is sent again on that path.
 async fn paste_parts(
     exec: &dyn TmuxExec,
     target: &str,
@@ -129,7 +133,7 @@ fn command_batches(
     for (index, (buffer, path)) in staged.iter().enumerate() {
         let gap = index > 0 && !args.is_empty();
         let piece = chunk_piece(target, buffer, path, bare, gap);
-        if !args.is_empty() && joined_span(&args, &piece) > CLIENT_BUDGET {
+        if batch_full(&args, &piece) {
             batches.push(std::mem::take(&mut args));
             push_cmd(&mut args, chunk_piece(target, buffer, path, bare, false));
         } else {
@@ -138,7 +142,7 @@ fn command_batches(
     }
     if opts.bracketed {
         let close = send_literal(target, BRACKET_END);
-        if !args.is_empty() && joined_span(&args, &close) > CLIENT_BUDGET {
+        if batch_full(&args, &close) {
             batches.push(std::mem::take(&mut args));
         }
         push_cmd(&mut args, close);
@@ -157,6 +161,17 @@ fn chunk_piece(target: &str, buffer: &str, path: &Path, opts: PasteOpts, gap: bo
     push_cmd(&mut piece, load_buffer_args(buffer, path));
     push_cmd(&mut piece, paste_buffer_args(target, buffer, opts));
     piece
+}
+
+fn batch_full(existing: &[String], piece: &[String]) -> bool {
+    if existing.is_empty() {
+        return false;
+    }
+    joined_span(existing, piece) > CLIENT_BUDGET || joined_args(existing, piece) > CLIENT_ARGS
+}
+
+fn joined_args(existing: &[String], piece: &[String]) -> usize {
+    existing.len().saturating_add(1).saturating_add(piece.len())
 }
 
 /// Packed size of `existing`, a joining `;`, and `piece`, matching tmux's
@@ -403,7 +418,9 @@ mod tests {
         assert_eq!(receipt.bytes, text.len());
         let calls = exec.calls.lock().await.clone();
         assert_eq!(calls.len(), 1, "two chunks fit in one tmux client");
-        assert!(super::argv_span(calls.first().expect("argv")) <= super::CLIENT_BUDGET);
+        let argv = calls.first().expect("argv");
+        assert!(super::argv_span(argv) <= super::CLIENT_BUDGET);
+        assert!(argv.len() <= super::CLIENT_ARGS);
         let cmds = commands(calls.first().expect("argv"));
         let pastes: Vec<&&[String]> = cmds
             .iter()
@@ -495,6 +512,7 @@ mod tests {
                 "{}",
                 super::argv_span(batch)
             );
+            assert!(batch.len() <= super::CLIENT_ARGS, "{}", batch.len());
             for cmd in commands(batch) {
                 match cmd.first().map(String::as_str) {
                     Some("paste-buffer") => {
@@ -535,6 +553,7 @@ mod tests {
         let mut keys = Vec::new();
         for call in &calls {
             assert!(super::argv_span(call) <= super::CLIENT_BUDGET);
+            assert!(call.len() <= super::CLIENT_ARGS, "{}", call.len());
             for cmd in commands(call) {
                 match cmd.first().map(String::as_str) {
                     Some("paste-buffer") => {
