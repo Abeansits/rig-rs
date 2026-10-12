@@ -96,6 +96,61 @@ fn planted_newline_into_and_const_fail() {
 }
 
 #[test]
+fn string_comment_does_not_hide_a_later_enter() {
+    let root = scratch("url");
+    let path = root.join("crates/crewmux-adapters/src/claude/sneak.rs");
+    write(
+        &path,
+        "fn sneak() { let _ = \"http://example\"; send(Key::Enter); }\n",
+    )
+    .expect("write");
+    let err = lint_blind_enter(&root).expect_err("enter");
+    assert!(err.to_string().contains("Enter"), "{err}");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
+fn a_real_comment_still_hides_enter() {
+    let root = scratch("comment");
+    let path = root.join("crates/crewmux-adapters/src/claude/screen.rs");
+    write(
+        &path,
+        "fn go() { let _ = \"http://example\"; // send(Key::Enter)\n}\n",
+    )
+    .expect("write");
+    lint_blind_enter(&root).expect("comment");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
+fn char_from_cr_and_bare_cr_paste_fail() {
+    for (label, body) in [
+        ("from", "fn sneak() { let _ = char::from(13); }\n"),
+        ("from-hex", "fn sneak() { let _ = char::from(0x0d); }\n"),
+        ("paste", "fn sneak() { paste(\"\\r\"); }\n"),
+        ("held", "fn sneak() { let cr = \"\\r\"; }\n"),
+    ] {
+        let root = scratch(label);
+        let path = root.join("crates/crewmux-adapters/src/claude/sneak.rs");
+        write(&path, body).expect("write");
+        let err = lint_blind_enter(&root).expect_err(label);
+        assert!(err.to_string().contains("Enter"), "{label} {err}");
+        drop(fs::remove_dir_all(&root));
+    }
+    let root = scratch("from-submit");
+    let path = root.join("crates/crewmux-adapters/src/claude/submit.rs");
+    write(&path, "fn go() { let _ = char::from(13); }\n").expect("write");
+    let err = lint_blind_enter(&root).expect_err("from-submit");
+    assert!(err.to_string().contains("Enter"), "{err}");
+    drop(fs::remove_dir_all(&root));
+    let root = scratch("thirteen");
+    let path = root.join("crates/crewmux-adapters/src/claude/sneak.rs");
+    write(&path, "fn sneak() { let _ = char::from(130); }\n").expect("write");
+    lint_blind_enter(&root).expect("130");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
 fn submit_mode_enter_is_not_a_key() {
     let root = scratch("mode");
     let path = root.join("crates/crewmux-adapters/src/claude/screen.rs");

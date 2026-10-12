@@ -93,20 +93,47 @@ fn carriage_return_literal(compact: &str) -> bool {
         "concat!(\"\\x0d\"",
         "concat!(\"\\u{d}\"",
     ];
-    const ESCAPES: &[&str] = &[
+    const BARE_CR: &[&str] = &[
         "\"\\r\"",
-        "\"\\n\"",
         "\"\\x0d\"",
         "\"\\u{d}\"",
         "\"\\u{000d}\"",
+        "'\\r'",
+        "'\\x0d'",
+        "'\\u{d}'",
+        "'\\u{000d}'",
     ];
-    if NEEDLES.iter().any(|needle| compact.contains(needle)) {
+    const NEWLINES: &[&str] = &["\"\\n\""];
+    if NEEDLES.iter().any(|needle| compact.contains(needle)) || cr_constructor(compact) {
         return true;
     }
-    // A const or a split literal still contains the escape. Flag it when the
-    // file also builds a key from that value.
-    let has_escape = ESCAPES.iter().any(|escape| compact.contains(escape));
-    has_escape && (compact.contains("Key::Literal") || compact.contains("send_keys"))
+    if BARE_CR.iter().any(|needle| compact.contains(needle)) {
+        return true;
+    }
+    // A const or a split newline still contains the escape. Flag it when the
+    // file also builds a key from that value. A bare `"\r"` is already a hit.
+    let has_newline = NEWLINES.iter().any(|escape| compact.contains(escape));
+    has_newline && (compact.contains("Key::Literal") || compact.contains("send_keys"))
+}
+
+fn cr_constructor(compact: &str) -> bool {
+    let mut rest = compact;
+    while let Some(pos) = rest.find("char::from(") {
+        let after = rest
+            .get(pos.saturating_add("char::from(".len())..)
+            .unwrap_or("");
+        if after.starts_with("13)")
+            || after.starts_with("13u8)")
+            || after.starts_with("0x0d)")
+            || after.starts_with("0x0D)")
+            || after.starts_with("0xd)")
+            || after.starts_with("0xD)")
+        {
+            return true;
+        }
+        rest = after;
+    }
+    false
 }
 
 fn forbidden_literal(compact: &str) -> bool {
@@ -129,6 +156,11 @@ fn strip_comments(text: &str) -> String {
     let mut out = String::new();
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
+        if ch == '"' {
+            out.push(ch);
+            copy_string(&mut chars, &mut out);
+            continue;
+        }
         if ch == '/' && chars.peek() == Some(&'/') {
             chars.next();
             for next in chars.by_ref() {
@@ -152,6 +184,21 @@ fn strip_comments(text: &str) -> String {
         out.push(ch);
     }
     out
+}
+
+fn copy_string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
+    while let Some(next) = chars.next() {
+        out.push(next);
+        if next == '\\' {
+            if let Some(escaped) = chars.next() {
+                out.push(escaped);
+            }
+            continue;
+        }
+        if next == '"' {
+            break;
+        }
+    }
 }
 
 fn relative(path: &Path, root: &Path) -> Option<String> {

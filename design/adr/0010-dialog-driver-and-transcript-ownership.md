@@ -106,6 +106,7 @@ impl DialogDriver {
     - `Key::CtrlC`, `Key::Escape`, and `Key::Literal` starting with `q`/`y`/`n`/a digit are forbidden everywhere in adapters.
     - Its tests are `xtask/tests/lint_enter.rs`.
 - Submit paths remain the only other Enter sites. Each requires `Ready` (empty composer), re-captures to see the paste as a non-empty prefix of the body (PR #16's `draft_is_prefix`), and then sends Enter.
+- The stub runtime also sends Enter at `crates/crewmux-daemon/src/deliver.rs:257`, in the `PasteHit::Clean` arm (`app.mux.send_keys(pane, &[Key::Enter])`). That site is outside the adapters scan. It is the stub delivery submit, not a Claude or Codex seat.
 
 ## Decision 2: delivery identity / "durability" code
 - **Owner: a new leaf crate `crewmux-transcript` [`rig-transcript`].** It depends only on `crewmux-types`, `sha2`, `unicode-normalization`, `serde_json` and `uuid`. **Adapters and durability both depend on it. Durability does not depend on adapters** for delivery, so the slice 8 restore orchestrator can depend on adapters without a cycle.

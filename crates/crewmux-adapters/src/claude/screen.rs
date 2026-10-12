@@ -1,14 +1,18 @@
 //! Positive-match Claude screen classifier.
 //!
-//! Ready is the last `❯` between box-drawing rules when that line is empty or
-//! an idle `Try "…"` hint, and the pane is not busy. A dialog is recognised
-//! from the view that starts at that prompt, so a trust screen in the
-//! scrollback is not the current dialog.
+//! Ready is the last `❯` between box-drawing rules when that prompt is empty
+//! or an idle `Try "…"` hint, every line under it until the closing rule is
+//! blank, and the pane is not busy. A completed `✻ <word> for <duration>` row
+//! is not busy. A dialog is recognised from the view that starts at that
+//! prompt, so a trust screen in the scrollback is not the current dialog.
 
 use crewmux_mux::Capture;
 use crewmux_types::{ComposerState, DialogId, ReadinessCode};
 
-use crate::claude::composer::{boxed_body, composer_anchor, composer_view, is_idle_body};
+use crate::claude::composer::{
+    ComposerAnchor, boxed_body, composer_anchor, composer_view, has_continuation, is_box_rule,
+    is_idle_body,
+};
 use crate::claude::dialogs::CLAUDE_DIALOGS;
 use crate::dialog::{MenuOption, is_option_menu, parse_menu, recognise};
 use crate::types::Readiness;
@@ -120,19 +124,21 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
     if let Some(kind) = login_kind(view) {
         return ClaudeScreen::Login(kind);
     }
-    if has_interrupt(text) || spinning(text) {
+    if has_interrupt(text) || pane_is_busy(text, anchor.as_ref()) {
         return ClaudeScreen::Busy;
+    }
+    if let Some(anchor) = anchor.as_ref()
+        && (has_continuation(text, anchor) || !is_idle_body(&anchor.body))
+    {
+        return ClaudeScreen::Draft;
     }
     if is_option_menu(&parse_menu(view)) {
         return ClaudeScreen::UnknownMenu {
             evidence: clip(text),
         };
     }
-    if let Some(anchor) = anchor {
-        if is_idle_body(&anchor.body) {
-            return ClaudeScreen::Ready(ComposerState { bordered: true });
-        }
-        return ClaudeScreen::Draft;
+    if anchor.is_some() {
+        return ClaudeScreen::Ready(ComposerState { bordered: true });
     }
     if let Some(body) = boxed_body(text) {
         if squash_empty(&body) && text.contains("? for shortcuts") && has_box_border(text) {
@@ -220,28 +226,104 @@ fn has_interrupt(text: &str) -> bool {
     text.to_ascii_lowercase().contains("esc to interrupt")
 }
 
-fn spinning(text: &str) -> bool {
-    text.lines().any(|line| {
+fn pane_is_busy(text: &str, anchor: Option<&ComposerAnchor>) -> bool {
+    match anchor {
+        Some(anchor) => live_above(text, anchor),
+        None => text.lines().any(|line| is_live_line(line.trim())),
+    }
+}
+
+/// Status above the composer. A newer unindented line ends an older live row.
+fn live_above(text: &str, anchor: &ComposerAnchor) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut index = anchor.line;
+    while index > 0 {
+        index = index.saturating_sub(1);
+        let Some(line) = lines.get(index) else {
+            return false;
+        };
         let trimmed = line.trim();
-        if trimmed.contains("Crunched") || trimmed.contains("· done") {
+        if trimmed.is_empty() || is_box_rule(line) {
+            continue;
+        }
+        if is_live_line(trimmed) {
+            return true;
+        }
+        if !line.starts_with([' ', '\t']) {
             return false;
         }
-        if trimmed
-            .chars()
-            .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
-        {
-            return true;
-        }
-        if starts_with_spinner(trimmed) {
-            return true;
-        }
-        trimmed.contains('…')
-            && (trimmed.starts_with("Working")
-                || trimmed.contains("Thinking")
-                || trimmed.contains("Onioning")
-                || trimmed.contains("Sketching")
-                || trimmed.contains("Processing"))
-    })
+    }
+    false
+}
+
+fn is_live_line(trimmed: &str) -> bool {
+    if trimmed.contains("· done") || completed_turn(trimmed) {
+        return false;
+    }
+    if trimmed
+        .chars()
+        .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+    {
+        return true;
+    }
+    if starts_with_spinner(trimmed) {
+        return true;
+    }
+    trimmed.contains('…')
+        && (trimmed.starts_with("Working")
+            || trimmed.contains("Thinking")
+            || trimmed.contains("Onioning")
+            || trimmed.contains("Sketching")
+            || trimmed.contains("Processing"))
+}
+
+/// `✻ <Word> for <duration>`, any verb, including Unicode letters.
+fn completed_turn(trimmed: &str) -> bool {
+    let Some(rest) = status_glyph_rest(trimmed) else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    let Some(after_word) = alphabetic_word_rest(rest) else {
+        return false;
+    };
+    let Some(after_for) = after_word.strip_prefix(" for ") else {
+        return false;
+    };
+    has_duration(after_for)
+}
+
+fn status_glyph_rest(trimmed: &str) -> Option<&str> {
+    const GLYPHS: [char; 5] = ['✶', '✽', '✢', '✻', '✳'];
+    let mut chars = trimmed.chars();
+    let first = chars.next()?;
+    GLYPHS.contains(&first).then_some(chars.as_str())
+}
+
+fn alphabetic_word_rest(text: &str) -> Option<&str> {
+    let end = text.find(|ch: char| !ch.is_alphabetic())?;
+    if end == 0 {
+        return None;
+    }
+    text.get(end..)
+}
+
+fn has_duration(text: &str) -> bool {
+    let text = skip_unit(text, 'h');
+    let text = skip_unit(text, 'm');
+    take_unit(text, 's').is_some()
+}
+
+fn skip_unit(text: &str, unit: char) -> &str {
+    take_unit(text, unit).unwrap_or(text)
+}
+
+fn take_unit(text: &str, unit: char) -> Option<&str> {
+    let digits = text.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    let rest = text.get(digits..)?.strip_prefix(unit)?;
+    Some(rest.trim_start())
 }
 
 fn starts_with_spinner(trimmed: &str) -> bool {

@@ -1,4 +1,4 @@
-//! Composer region. The current input is the last `❯` that a rule closes.
+//! Composer region. The current input is the last `❯` that a same-indent rule closes.
 
 use crate::claude::staged::staged_matches;
 
@@ -7,14 +7,18 @@ use crate::claude::staged::staged_matches;
 pub(crate) struct ComposerAnchor {
     /// Line index of the prompt.
     pub(crate) line: usize,
+    /// Line index of the same-indent rule that closes the prompt.
+    pub(crate) close: usize,
     /// Text after the marker. An idle hint is `Try "…"`.
     pub(crate) body: String,
 }
 
-/// Last composer prompt that a `─` or `═` rule closes.
+/// Last composer prompt that a same-indent `─` or `═` rule closes.
 ///
 /// A numbered `❯ 1.` is a menu, not the composer. An ASCII `-` rule is not a
 /// composer border: readiness stays on the box-drawing rules from real panes.
+/// An indented rule does not close a prompt in the column outside it, so a
+/// draft that contains its own border stays the composer.
 #[must_use]
 pub(crate) fn composer_anchor(text: &str) -> Option<ComposerAnchor> {
     let lines: Vec<&str> = text.lines().collect();
@@ -23,17 +27,36 @@ pub(crate) fn composer_anchor(text: &str) -> Option<ComposerAnchor> {
         if !is_composer_prompt(line) {
             continue;
         }
-        let closed = lines
+        let indent = leading_indent(line);
+        let close = lines
             .iter()
+            .enumerate()
             .skip(index.saturating_add(1))
-            .any(|later| is_box_rule(later));
-        if closed {
-            found = Some(index);
+            .find_map(|(later, rule)| {
+                (is_box_rule(rule) && leading_indent(rule) == indent).then_some(later)
+            });
+        if let Some(close) = close {
+            found = Some((index, close));
         }
     }
-    let index = found?;
+    let (index, close) = found?;
     let body = prompt_body(lines.get(index)?);
-    Some(ComposerAnchor { line: index, body })
+    Some(ComposerAnchor {
+        line: index,
+        body,
+        close,
+    })
+}
+
+/// A non-empty line between the prompt and its closing rule is a continuation.
+#[must_use]
+pub(crate) fn has_continuation(text: &str, anchor: &ComposerAnchor) -> bool {
+    let start = anchor.line.saturating_add(1);
+    let span = anchor.close.saturating_sub(start);
+    text.lines()
+        .skip(start)
+        .take(span)
+        .any(|line| !line.trim().is_empty())
 }
 
 /// Suffix that starts at the composer. Dialogs above that line are history.
@@ -117,9 +140,15 @@ fn is_composer_prompt(line: &str) -> bool {
         .is_some_and(|after| after.starts_with('.') || after.starts_with(". "))
 }
 
-fn is_box_rule(line: &str) -> bool {
+pub(crate) fn is_box_rule(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.chars().count() >= 10 && trimmed.chars().all(|ch| ch == '─' || ch == '═')
+}
+
+fn leading_indent(line: &str) -> usize {
+    line.chars()
+        .take_while(|ch| *ch == ' ' || *ch == '\t')
+        .count()
 }
 
 fn prompt_body(line: &str) -> String {
