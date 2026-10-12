@@ -212,31 +212,52 @@ fn session_meta(path: &Path, value: &Value) -> Result<Option<SessionMeta>, Error
     }))
 }
 
+/// A confirming turn is one `response_item` whose role is `user` and whose
+/// `input_text` parts are the submitted body.
+///
+/// `event_msg` / `user_message` is ignored. `<environment_context>` and the
+/// injected AGENTS.md item are not the submit.
 fn user_text(value: &Value) -> Option<String> {
-    let payload = value.get("payload").unwrap_or(value);
-    let role = payload.get("role").and_then(Value::as_str);
-    let kind = payload.get("type").and_then(Value::as_str);
-    if role != Some("user") && kind != Some("user_message") {
+    if value.get("type").and_then(Value::as_str) != Some("response_item") {
         return None;
     }
-    if let Some(text) = payload.get("text").and_then(Value::as_str) {
-        return Some(text.to_owned());
+    let payload = value.get("payload")?;
+    if payload.get("role").and_then(Value::as_str) != Some("user") {
+        return None;
     }
-    if let Some(message) = payload.get("message").and_then(Value::as_str) {
-        return Some(message.to_owned());
-    }
-    let content = payload.get("content")?.as_array()?;
-    let mut combined = String::new();
-    for item in content {
-        if let Some(text) = item.get("text").and_then(Value::as_str) {
-            combined.push_str(text);
-        }
-    }
-    if combined.is_empty() {
+    let text = input_text(payload)?;
+    if is_injected_context(&text) {
         None
     } else {
-        Some(combined)
+        Some(text)
     }
+}
+
+fn input_text(payload: &Value) -> Option<String> {
+    let content = payload.get("content")?.as_array()?;
+    let mut combined = String::new();
+    let mut saw = false;
+    for item in content {
+        if item.get("type").and_then(Value::as_str) != Some("input_text") {
+            continue;
+        }
+        let Some(text) = item.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        combined.push_str(text);
+        saw = true;
+    }
+    saw.then_some(combined)
+}
+
+fn is_injected_context(text: &str) -> bool {
+    text.contains("<environment_context>") || is_agents_md(text)
+}
+
+fn is_agents_md(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("# AGENTS.md")
+        || (trimmed.contains("AGENTS.md") && trimmed.contains("<INSTRUCTIONS>"))
 }
 
 fn parse_rfc3339(text: &str) -> Option<SystemTime> {

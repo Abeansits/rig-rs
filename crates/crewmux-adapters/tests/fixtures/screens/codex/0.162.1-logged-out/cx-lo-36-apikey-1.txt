@@ -1,2 +1,0 @@
-Paste or type your API key
-sk-redacted-1

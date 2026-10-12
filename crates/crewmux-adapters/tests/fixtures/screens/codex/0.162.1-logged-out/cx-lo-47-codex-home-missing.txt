@@ -1,0 +1,40 @@
+hat path does not exist
+Error finding codex home: CODEX_HOME points to "/nonexistent/codex-home", but that path does not exist
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Pane is dead (status 1, Sun Oct 11 19:30:18 2026)

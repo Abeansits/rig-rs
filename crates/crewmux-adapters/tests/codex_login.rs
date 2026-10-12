@@ -23,7 +23,7 @@ fn all_live_logged_out_screens_are_login_required() {
     let index: Vec<Value> =
         serde_json::from_str(&fs::read_to_string(dir.join("index.json")).expect("index"))
             .expect("rows");
-    assert!(index.len() >= 54, "corpus {}", index.len());
+    assert_eq!(index.len(), 54, "corpus {}", index.len());
     let labels = fs::read_to_string(dir.join("labels.jsonl")).expect("sha list");
     let mut sha_rows = std::collections::BTreeMap::new();
     for line in labels.lines() {
@@ -33,10 +33,10 @@ fn all_live_logged_out_screens_are_login_required() {
             row["sha256"].as_str().expect("sha").to_owned(),
         );
     }
+    let mut dead = 0usize;
     for row in index {
         let file = row["file"].as_str().expect("file").to_owned();
-        let expect = row["expect"].as_str().expect("expect");
-        let live = row["live"].as_bool().expect("live");
+        let pane_dead = row["pane_dead"].as_str().expect("pane_dead") == "1";
         let text = fs::read_to_string(dir.join(&file)).expect(&file);
         let sha = crewmux_transcript::fingerprint_raw(&text);
         assert_eq!(
@@ -46,12 +46,19 @@ fn all_live_logged_out_screens_are_login_required() {
         );
         let screen = classify(&text);
         assert_not_waiting(&file, &screen);
-        if live {
-            assert_eq!(login_token(&screen), Some(expect), "{file}");
-        } else {
+        if pane_dead {
+            dead += 1;
             assert!(is_dead(&screen), "{file} => {screen:?}");
+        } else {
+            let kind = login_expect(&text).unwrap_or_else(|| panic!("{file} has no login phrase"));
+            assert_eq!(login_token(&screen), Some(kind), "{file}");
         }
     }
+    assert_eq!(dead, 8, "dead panes");
+    assert!(
+        sha_rows.contains_key("login-status-stale.txt"),
+        "stale login status is labelled"
+    );
 }
 
 #[tokio::test]
@@ -291,6 +298,20 @@ fn assert_not_waiting(file: &str, screen: &CodexScreen) {
         !matches!(screen, CodexScreen::UnknownMenu { .. }),
         "{file} menu"
     );
+}
+
+fn login_expect(text: &str) -> Option<&'static str> {
+    if text.contains("Enter this one-time code") {
+        Some("device_code")
+    } else if text.contains("Finish signing in via your browser") {
+        Some("chatgpt_browser")
+    } else if text.contains("Paste or type your API key") {
+        Some("api_key_entry")
+    } else if text.contains("Sign in with ChatGPT") && text.contains("Provide your own API key") {
+        Some("menu")
+    } else {
+        None
+    }
 }
 
 #[expect(

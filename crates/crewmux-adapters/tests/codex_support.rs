@@ -132,30 +132,35 @@ pub(crate) fn write_rollout(
         .to_string(),
     ];
     if let Some(text) = user {
-        lines.push(
-            serde_json::json!({
-                "type": "response_item",
-                "payload": {"role": "user", "text": text}
-            })
-            .to_string(),
-        );
+        lines.push(user_line(text));
     }
     fs::write(&path, lines.join("\n") + "\n").expect("rollout");
     path
 }
 
-pub(crate) fn append_user(path: &Path, text: &str) {
-    use std::io::Write;
-    let line = serde_json::json!({
+pub(crate) fn user_line(text: &str) -> String {
+    serde_json::json!({
         "type": "response_item",
-        "payload": {"role": "user", "text": text}
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": text}]
+        }
     })
-    .to_string();
+    .to_string()
+}
+
+pub(crate) fn append_line(path: &Path, line: &str) {
+    use std::io::Write;
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(path)
         .expect("rollout");
     writeln!(file, "{line}").expect("append");
+}
+
+pub(crate) fn append_user(path: &Path, text: &str) {
+    append_line(path, &user_line(text));
 }
 
 pub(crate) fn fixtures() -> PathBuf {

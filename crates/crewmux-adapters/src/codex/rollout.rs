@@ -211,6 +211,8 @@ fn correlate(found: Vec<RolloutFile>, submitted: Option<&str>) -> Result<ThreadI
     };
     let mut hits = Vec::new();
     for file in found {
+        // `users` is the same filter as delivery: response_item role=user
+        // input_text, without environment_context, AGENTS.md, or event_msg.
         let Some(first) = file.users.first() else {
             continue;
         };

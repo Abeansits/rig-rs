@@ -42,14 +42,26 @@ pub async fn codex_preflight_bin(
     codex_home: &Path,
     timeout: Duration,
 ) -> Preflight {
-    let run = tokio::process::Command::new(bin)
+    let mut command = tokio::process::Command::new(bin);
+    command
         .arg("login")
         .arg("status")
         .env("HOME", home)
         .env("CODEX_HOME", codex_home)
         .stdin(Stdio::null())
-        .output();
-    match tokio::time::timeout(timeout, run).await {
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return Preflight::Unrecognised {
+                code: -1,
+                out: format!("codex login status failed: {err}"),
+            };
+        }
+    };
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => {
             let mut out = String::from_utf8_lossy(&output.stdout).into_owned();
             out.push_str(&String::from_utf8_lossy(&output.stderr));

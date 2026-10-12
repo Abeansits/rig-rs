@@ -68,7 +68,7 @@ pub fn classify(text: &str) -> CodexScreen {
     if let Some(kind) = login_kind(live) {
         return CodexScreen::Login(kind);
     }
-    if busy(text) {
+    if busy(live) {
         return CodexScreen::Busy;
     }
     if let Some(screen) = composer_screen(text) {
@@ -308,6 +308,38 @@ fn is_status_line(line: &str) -> bool {
         || trimmed.starts_with(">_")
         || trimmed.starts_with('•')
         || trimmed.starts_with('◦')
+        || is_model_footer(trimmed)
+}
+
+/// `gpt-5-codex medium · ~/src` and `o3 high · ~/src` are the status footer.
+fn is_model_footer(line: &str) -> bool {
+    let Some((head, _)) = line.split_once(" · ") else {
+        return false;
+    };
+    let mut words = head.split_whitespace();
+    let Some(model) = words.next() else {
+        return false;
+    };
+    let Some(effort) = words.next() else {
+        return false;
+    };
+    words.next().is_none() && is_model_name(model) && is_effort(effort)
+}
+
+fn is_model_name(model: &str) -> bool {
+    let lower = model.to_ascii_lowercase();
+    if lower.starts_with("gpt") || lower == "codex" {
+        return true;
+    }
+    let mut chars = lower.chars();
+    chars.next() == Some('o') && chars.next().is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn is_effort(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "minimal" | "low" | "medium" | "high" | "xhigh"
+    )
 }
 
 fn footer_after(text: &str, end: usize) -> Option<String> {
@@ -343,6 +375,9 @@ fn stale(text: &str) -> bool {
 }
 
 fn returned_to_shell(text: &str) -> bool {
+    if live_screen(text).contains("Pane is dead") {
+        return true;
+    }
     if text.contains("? for shortcuts") {
         return false;
     }
@@ -355,11 +390,12 @@ fn is_shell_prompt(line: &str) -> bool {
 }
 
 fn login_kind(text: &str) -> Option<LoginKind> {
-    if text.contains("Finish signing in via your browser") {
-        return Some(LoginKind::ChatGptBrowser);
-    }
+    // The device-code screen also says "Finish signing in via your browser".
     if text.contains("Enter this one-time code") {
         return Some(LoginKind::DeviceCode);
+    }
+    if text.contains("Finish signing in via your browser") {
+        return Some(LoginKind::ChatGptBrowser);
     }
     if text.contains("Paste or type your API key") {
         return Some(LoginKind::ApiKeyEntry);

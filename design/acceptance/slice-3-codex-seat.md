@@ -1,5 +1,5 @@
 # Slice 3: Codex seat
-Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), PE-002, PE-005, PE-006. Spikes S1a, S3 (answered by S9), S4, S13: Mac rerun 2026-10-11 (`spikes/scratch/mac-rerun/`) and the logged-out corpus (`spikes/scratch/3b-codex-logged-out/`, 54 captures, codex-cli 0.162.1). PLAN 2.6. TS sources: `daemon/src/adapters/codex-adapter.ts`, `resume-metadata-refresher.ts` (thread-id scrape at line 161), `codex-login-preflight` paths, `assessNativeResumeProbe`.
+Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), PE-002, PE-005, PE-013. Spikes S1a, S3 (answered by S9), S4, S13: Mac rerun 2026-10-11 (`spikes/scratch/mac-rerun/`) and the logged-out corpus (`spikes/scratch/3b-codex-logged-out/`, 54 captures, codex-cli 0.162.1). PLAN 2.6. TS sources: `daemon/src/adapters/codex-adapter.ts`, `resume-metadata-refresher.ts` (thread-id scrape at line 161), `codex-login-preflight` paths, `assessNativeResumeProbe`.
 
 ## Scope
 - `CodexAdapter: AgentAdapter`:
@@ -10,7 +10,7 @@ Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), PE-002, PE
   - thread-id capture from rollout metadata;
   - `resume <thread-id>`.
 - Gate classifier v2 (`rig-adapters::codex::screen`), positive matches only.
-- Codex `KnownDialog` variants and their allowed answers (PE-006).
+- Codex `KnownDialog` variants and their allowed answers (PE-013).
 - Seat approval posture (decision below, pending Sebastian's confirmation).
 
 ## Non-goals
@@ -56,7 +56,7 @@ pub enum CodexApproval { Never, OnRequest, Untrusted }   // maps to `-a`
   - The default policy shows "Allow the rig MCP server to run tool …" (options 1 Allow / 2 Allow for this session / 3 Always allow / 4 Cancel; cursor on 1).
 - **Proposal:**
   - Seats launch with the RigSpec's `approval` field (default `on-request`), never `never`.
-  - The daemon auto-answers `CodexMcpToolApproval` **only if** `server == "rig"` **and** `tool` is one of the 15 ADR-0002 names, choosing "**2. Allow for this session**" via cursor-verified selection (PE-006).
+  - The daemon auto-answers `CodexMcpToolApproval` **only if** `server == "rig"` **and** `tool` is one of the 15 ADR-0002 names, choosing "**2. Allow for this session**" via cursor-verified selection (PE-013).
   - "Always allow" is never chosen, because it persists a choice into the user's Codex state (ADR-0008 spirit).
   - Any other server or tool → `AttentionRequired(McpToolApproval)` on the human seat.
   - The spec can disable the auto-answer (`auto_approve_rig_tools: false`).
@@ -85,7 +85,7 @@ pub enum CodexApproval { Never, OnRequest, Untrusted }   // maps to `-a`
 3. **Login-required (PE-002, divergence from TS, where all 46 live screens read as still-waiting):**
    - **(a) Pre-flight:** `codex login status` runs under the seat's HOME/CODEX_HOME before every launch and resume. Exit 1 "Not logged in" → `SeatState::LoginRequired(PreflightNotLoggedIn)`, and **no tmux session is created**. A missing-CODEX_HOME error → `HardFailure(CodexHomeMissing)`.
    - **(b) Screen fallback:** every one of the 46 live captures `cx-lo-*` → `Login(kind)` within one poll, with the kind from `index.json`. The 8 dead-pane captures → `ReturnedToShell`/`HardFailure`.
-   - **(c)** No key is ever sent while in `LoginRequired`; `q`/Ctrl-C/digits quit or choose (PE-006 3a).
+   - **(c)** No key is ever sent while in `LoginRequired`; `q`/Ctrl-C/digits quit or choose (PE-013 3a).
    - **(d)** The seat is never `Ready` after a not-logged-in pre-flight, even if a composer is visible. This mitigates the unreproduced stale-server false-ready.
    - **(e)** "control socket is already in use" → `StaleServer` → `AttentionRequired(StaleCodexServer)`. Doctor lists stale app-servers; we never kill them.
 4. `codex-106-s6-approval` → `Dialog(CodexMcpToolApproval{server:"rig",tool:"seat_send"})`. Under the proposal it is **escalated**, because `seat_send` is not one of our 15 names (the spike server's name). The same capture with the tool name rewritten to `agent_send` → auto-answered "Allow for this session".
@@ -100,13 +100,13 @@ pub enum CodexApproval { Never, OnRequest, Untrusted }   // maps to `-a`
 9. MCP registration per seat uses `-c 'mcp_servers.rig.command=…'` (+ args/env). The user's `config.toml` is unchanged after a launch (checksum).
 
 ## Required tests
-`codex_screen.rs` (labelled corpus, every file labelled); `codex_gates.rs::{background_server_menu_is_attention, mcp_tool_approval_is_attention, update_answers_skip_never_update}`; `rollout_locator.rs` (AC6); `normalize_real.rs` (Codex rows); `launch_argv.rs`; the PE-006 `dialog_driver.rs` set. `codex_login.rs::{all_live_logged_out_screens_are_login_required, preflight_exit1_short_circuits, codex_home_missing_is_hard_failure, no_keys_sent_while_login_required, preflight_not_logged_in_never_ready_even_with_composer, stale_server_text_is_attention}`, with fixtures from `3b-codex-logged-out/captures` (redacted). **Live (gated `RIG_LIVE_CODEX=1`):** launch + gate skip, MCP call through the auto-answer, kill-server + resume. A logged-out pre-flight against a throwaway CODEX_HOME runs in CI on the box when `codex` is installed (no login needed).
+`codex_screen.rs` (labelled corpus, every file labelled); `codex_gates.rs::{background_server_menu_is_attention, mcp_tool_approval_is_attention, codex_update_answers_skip_never_update}`; `rollout_locator.rs` (AC6); `normalize_real.rs` (Codex rows); `launch_argv.rs`; the PE-013 `dialog_driver.rs` set. `codex_login.rs::{all_live_logged_out_screens_are_login_required, preflight_exit1_short_circuits, codex_home_missing_is_hard_failure, no_keys_sent_while_login_required, preflight_not_logged_in_never_ready_even_with_composer, stale_server_text_is_attention}`, with fixtures from `3b-codex-logged-out/captures` (redacted). **Live (gated `RIG_LIVE_CODEX=1`):** launch + gate skip, MCP call through the auto-answer, kill-server + resume. A logged-out pre-flight against a throwaway CODEX_HOME runs in CI on the box when `codex` is installed (no login needed).
 
 ## CI vs gated
 CI: all fixture and temp-dir tests. Gated: the live set. Launch, resume and MCP are covered by Mac evidence. The logged-out screens are covered by the box corpus (done).
 
 ## Definition of done
-CI is green. Ledger rows are `ported`, or `diverged` with PE-002/PE-006. The approval posture is confirmed by Sebastian, and the live set has passed once.
+CI is green. Ledger rows are `ported`, or `diverged` with PE-002/PE-013. The approval posture is confirmed by Sebastian, and the live set has passed once.
 
 ## Dependencies
 Slices 1, 1b; the slice 7 codex writer (for `rig setup` only). Live runs need Sebastian's Codex login (available).

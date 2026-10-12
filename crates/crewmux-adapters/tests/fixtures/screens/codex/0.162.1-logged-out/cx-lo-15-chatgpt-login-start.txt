@@ -1,0 +1,39 @@
+  Welcome to Codex, OpenAI's command-line coding agent
+
+  Finish signing in via your browser
+
+  If the link doesn't open automatically, press c to copy it:
+
+  https://auth.openai.com/oauth/authorize?REDACTED
+REDACTED
+d=S256&state=S1BuuS4CQG8JFqTeJkUgjcpfC_tL6Vvlxep30vCejJM&scope=openid+profile+email+offline_access+api.connectors.read+a
+REDACTED
+  On a remote or headless machine? Press esc and choose Sign in with Device Code.
+
+  Press esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

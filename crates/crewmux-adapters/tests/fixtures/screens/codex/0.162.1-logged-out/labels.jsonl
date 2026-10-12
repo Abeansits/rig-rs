@@ -1,54 +1,55 @@
-{"file": "cx-lo-00-menu-0.txt", "sha256": "38aee6573105e4ba65fe842aac523207a7fb47dcfab6c47a4abff770ae251e6a", "screen": "menu", "live": true}
-{"file": "cx-lo-01-menu-1.txt", "sha256": "49cfa3aadb863642d20d5ac34f598e96bf837e8871df44dc690346c19e527774", "screen": "menu", "live": true}
-{"file": "cx-lo-02-menu-2.txt", "sha256": "2c2764c9e47b9005809e2f18623d106c753f951180425e6a7418384fb128b011", "screen": "menu", "live": true}
-{"file": "cx-lo-03-menu-3.txt", "sha256": "e091be7a4729417792981cb5933be2f5777da6583feba032a33fb66d1d34a9d8", "screen": "menu", "live": true}
-{"file": "cx-lo-04-menu-4.txt", "sha256": "5b343d01fb69e38782332549b6dd8455d680657ebb86c10d854804a623120873", "screen": "menu", "live": true}
-{"file": "cx-lo-05-menu-5.txt", "sha256": "eb194de770a1dc0e7514f78c919125bcbcf549ec6086dd891e1cf6567fcb4547", "screen": "menu", "live": true}
-{"file": "cx-lo-06-menu-6.txt", "sha256": "fa456db94b322bd93f959a5e5bf06aeb77e266e4d44b17cf3876eecb71373e7a", "screen": "menu", "live": true}
-{"file": "cx-lo-07-menu-7.txt", "sha256": "62e11eb5a62e84726d20d461dcd746937a292385b6b8b8642e986ea4e190ee49", "screen": "menu", "live": true}
-{"file": "cx-lo-08-menu-8.txt", "sha256": "493943116f2a2ba9c7a03231d98fb986783e2c833a298637d258ab3efc2fe1c4", "screen": "menu", "live": true}
-{"file": "cx-lo-09-menu-9.txt", "sha256": "018661e781d39b457afdc990c1b9583ca82e5e231543311d5d46d53da3f3b34e", "screen": "menu", "live": true}
-{"file": "cx-lo-10-menu-10.txt", "sha256": "42565ec74265101520f0a7735ccba8e860d48c508f38895eb431656c90a9fac1", "screen": "menu", "live": true}
-{"file": "cx-lo-11-menu-11.txt", "sha256": "79ef5700692346abce6751c7461541bc0965f6168a0acf53712854cadc9cfb91", "screen": "menu", "live": true}
-{"file": "cx-lo-12-browser-0.txt", "sha256": "a5c35a1ce5ab4731836b4612b0ff06b7ca32679da120afbd852f148d3eb76d36", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-13-browser-1.txt", "sha256": "ced1de39fe65c2b9ef857210f3c61bc7fb409a659f7b5556980ed674fa4f200d", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-14-browser-2.txt", "sha256": "33b129b3f36691ff06dbcaa243ac3d42280a5faae7697ffc24d31237a0ac90c9", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-15-browser-3.txt", "sha256": "2d4501c166ebe38aee19f7ddcdd91366807fb4b87dc9b012f7b7ac3aafabb411", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-16-browser-4.txt", "sha256": "564706a851d1e6ba2710c1b92895c5c13516a35da0745316e8156c677fa4a479", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-17-browser-5.txt", "sha256": "53425f030139b5c91d10055da0240cc261c628d9aa31493c0e3a79a52f3e59eb", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-18-browser-6.txt", "sha256": "562680e34d40208e4505b357a5d41711af21e670694eeba4f28b4d85eb4980ce", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-19-browser-7.txt", "sha256": "ce86be0a343834b8acaf8d5144d7fea9266c772d6a5b44a7a18297f968e121f3", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-20-browser-8.txt", "sha256": "8ad1a15a43493232a05258509fc61ad302815c4bd4ec309856c3e7ad65dee1ec", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-21-browser-9.txt", "sha256": "84e07e498f09bdacfd213af696a5a6bffcb66a652c2b3b72c607a2b82cfdfd59", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-22-browser-10.txt", "sha256": "c33b2bc29a15147b9e20d3135626a2e9a169ca7a40da9f40018fdcae829e4927", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-23-browser-11.txt", "sha256": "0cedfa7a914ec93d94db614b284e36df25497aaf1389e8cd641460e4c8a8775c", "screen": "chatgpt_browser", "live": true}
-{"file": "cx-lo-24-device-0.txt", "sha256": "b29ecf47c22f166dcc56cb60665127123f8e3907d3335dd8a138c3c93e97d057", "screen": "device_code", "live": true}
-{"file": "cx-lo-25-device-1.txt", "sha256": "42e2521dd2730848accebc0b7b80553b1dfa28ca02a80017727641ce8a9f7ec2", "screen": "device_code", "live": true}
-{"file": "cx-lo-26-device-2.txt", "sha256": "98d17a94094ad37815c3573e95cc1f4a1727ac38bb1c0a453b439968aa66a9b4", "screen": "device_code", "live": true}
-{"file": "cx-lo-27-device-3.txt", "sha256": "126bd0e7b9624dfb3b15f69fdfe2f6c540f818bebca1185d813a2d3b872f8e8a", "screen": "device_code", "live": true}
-{"file": "cx-lo-28-device-4.txt", "sha256": "68785b78fa8016481b52038315ae7d12c3ec3cd8cde394fdb3fc994f675e904d", "screen": "device_code", "live": true}
-{"file": "cx-lo-29-device-5.txt", "sha256": "cdfeaecdb306b0a82d1731abef91c4ba84ea556abac27ee5b5f5905e718c285f", "screen": "device_code", "live": true}
-{"file": "cx-lo-30-device-6.txt", "sha256": "882c91606c3d8a9a237689b1bc990535fa26d87dc5c1f1a4d584a32407c6d2da", "screen": "device_code", "live": true}
-{"file": "cx-lo-31-device-7.txt", "sha256": "c353cf7a5fe1f0aa4abc08aae16a1567495d19795bb21b9b946854aba9d3fd32", "screen": "device_code", "live": true}
-{"file": "cx-lo-32-device-8.txt", "sha256": "96c687ceb13963f810fd4c7af544dcc434ece228e3b4ef2f3cc8ed1f0be3716a", "screen": "device_code", "live": true}
-{"file": "cx-lo-33-device-9.txt", "sha256": "178962da168296fab2e6ca01e3aff7021e64ddc124d82e200e24ace374483625", "screen": "device_code", "live": true}
-{"file": "cx-lo-34-device-10.txt", "sha256": "243a0867a772eecf5c437b7d4f95be05acc5d34f0986252c0348afe95f8387ac", "screen": "device_code", "live": true}
-{"file": "cx-lo-35-apikey-0.txt", "sha256": "eaca4224fb31f76336811dd771a5788168196d952b48364f9aba979f3510b649", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-36-apikey-1.txt", "sha256": "658f379fea185f7e9be2b3b38b989ae142ed7a02b325e82eceb3af618a06e17f", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-37-apikey-2.txt", "sha256": "a98edbe1a1e267e17571cacd1a08744fae2b6af4a9a24e606479e18997a5977f", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-38-apikey-3.txt", "sha256": "ac3cb5c436fec2fdc471f0a757750f5bec86a238dd60fa28e6d099c025ca32c6", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-39-apikey-4.txt", "sha256": "dcdd55f13acbdab1faf2e02cbd9ac37b197d70be7e10199b9c78ffe184a3c0ac", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-40-apikey-5.txt", "sha256": "ec462e589ded41718f6ae2a8a658eb0650bb84366857a75d71a3b59a2b80841d", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-41-apikey-6.txt", "sha256": "0299aa505e6312375338974dd3580739e91198f758df4e6fd12974a99156439b", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-42-apikey-7.txt", "sha256": "945fda803b4ca11223b5e28cd5db885798c52f369c7acd9a11f4dd3883a6c117", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-43-apikey-8.txt", "sha256": "aa1e22f6ec9249e53925736a5408518cf0558395af425b57eb2af589d48611d5", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-44-apikey-9.txt", "sha256": "7ca97527f16235a8687fff8bcc2c8f7162f5de2d749c1e7ddd2e35a807f7966f", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-45-apikey-10.txt", "sha256": "5ed6b890924c3e2c1e66bfc04b4af08c1235a011973778afe4b2bd037094f92f", "screen": "api_key_entry", "live": true}
-{"file": "cx-lo-46-ctrl-c-a.txt", "sha256": "bc01653bc23142e10d31fc5c7c2e53807a22339530f973e7e1651bb49e8d426b", "screen": "dead", "live": false}
-{"file": "cx-lo-47-ctrl-c-b.txt", "sha256": "0123fab18dcdc5fb22f62e0fa2769b3d082cd2a0442fa39d1e78237382cd06d4", "screen": "dead", "live": false}
-{"file": "cx-lo-48-quit-a.txt", "sha256": "6ed4b281351edb3fca4759b86e5ae35fa61935b4193d2c2823b656ddab06c83b", "screen": "dead", "live": false}
-{"file": "cx-lo-49-quit-b.txt", "sha256": "51fd70be7edf9e2d4bb5b84f26583336177e88405c7a7757d8c24478d99ee036", "screen": "dead", "live": false}
-{"file": "cx-lo-50-login-status.txt", "sha256": "d38d1db19c0ce956ecce8cd185cff66fa9f57482cff5d4eb440d5a614120c5c4", "screen": "dead", "live": false}
-{"file": "cx-lo-51-login-status-2.txt", "sha256": "d38d1db19c0ce956ecce8cd185cff66fa9f57482cff5d4eb440d5a614120c5c4", "screen": "dead", "live": false}
-{"file": "cx-lo-52-exec.txt", "sha256": "dea4d7d359e3aa07ab4390791cebf2baa2b53d18f761e36d3cca841e4c20aedd", "screen": "dead", "live": false}
-{"file": "cx-lo-53-missing-home.txt", "sha256": "737ca16c85a7261058ccab8b283b8815586d738c95027436f4d0f4a9b8977f7f", "screen": "dead", "live": false}
+{"file": "cx-lo-00-first-launch.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-01-menu-80x24.txt", "sha256": "aa5609c4b64c507d64102d90a42f3cef742a5d1a390368f2cdb1f5180719c686"}
+{"file": "cx-lo-02-menu-200x50.txt", "sha256": "c71acb361159b741ba9621e0964a4f17c90ab1a3200943317ec3be7ebeed51ad"}
+{"file": "cx-lo-03-menu-60x20.txt", "sha256": "70228a0504851d64efeac7d798b60101891ba11b7ae291020c8ce3b2cb6e52a1"}
+{"file": "cx-lo-04-menu-120x40.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-05-menu-opt2-device.txt", "sha256": "1a86075250a2a5ac7e9f046bba64c4f2db55a83360b8bd6a7c76cb287f15f3a5"}
+{"file": "cx-lo-06-menu-opt3-apikey.txt", "sha256": "9ffbcce64c5b209bb412fbcd8319edeadc3261e138d15d6eb5679d6abed40c81"}
+{"file": "cx-lo-07-menu-down-past-end.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-08-menu-up-to-opt1.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-09-menu-after-esc.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-10-menu-after-esc2.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-11-first-launch.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-12-after-esc.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-13-second-launch-same-home.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-14-menu.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-15-chatgpt-login-start.txt", "sha256": "d22296de0f962aeebaf91c822cae48d83b42956fa711c803c0c9273322b066dc"}
+{"file": "cx-lo-16-chatgpt-login-later.txt", "sha256": "d22296de0f962aeebaf91c822cae48d83b42956fa711c803c0c9273322b066dc"}
+{"file": "cx-lo-17-chatgpt-login-80x24.txt", "sha256": "f7e0ff2c71e1f8f94f7e3c5b4bd72292395579a303d956dde2e769710dbac006"}
+{"file": "cx-lo-18-chatgpt-login-120x40.txt", "sha256": "d22296de0f962aeebaf91c822cae48d83b42956fa711c803c0c9273322b066dc"}
+{"file": "cx-lo-19-chatgpt-after-esc.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-20-chatgpt-after-esc2.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-21-menu.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-22-device-code-start.txt", "sha256": "3b7c1938a48043c73e507f8c4787fbd0b43fe298fe9f6647bb4545061fe43a8c"}
+{"file": "cx-lo-23-device-code-later.txt", "sha256": "3b7c1938a48043c73e507f8c4787fbd0b43fe298fe9f6647bb4545061fe43a8c"}
+{"file": "cx-lo-24-device-code-80x24.txt", "sha256": "284262796de15d238ead34f7287490195727a204cc833491499b4d3f7aea948a"}
+{"file": "cx-lo-25-device-after-esc.txt", "sha256": "1a86075250a2a5ac7e9f046bba64c4f2db55a83360b8bd6a7c76cb287f15f3a5"}
+{"file": "cx-lo-26-device-after-esc2.txt", "sha256": "1a86075250a2a5ac7e9f046bba64c4f2db55a83360b8bd6a7c76cb287f15f3a5"}
+{"file": "cx-lo-27-menu.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-28-apikey-entry.txt", "sha256": "7fbf3381248ff72358bdcf5b20cea4c15ef11c23272a2814ca18091daa472085"}
+{"file": "cx-lo-29-apikey-entry-80x24.txt", "sha256": "3b11774e915447acfcdea5d50e79d0cc4de016294561e750878a691509b7011e"}
+{"file": "cx-lo-30-apikey-entry-120x40.txt", "sha256": "7fbf3381248ff72358bdcf5b20cea4c15ef11c23272a2814ca18091daa472085"}
+{"file": "cx-lo-31-apikey-empty-enter.txt", "sha256": "09af3c3f686488431b8dbc8b7d4393efd518286c80e8f1dbebf60535bae926bb"}
+{"file": "cx-lo-32-apikey-after-esc.txt", "sha256": "9ffbcce64c5b209bb412fbcd8319edeadc3261e138d15d6eb5679d6abed40c81"}
+{"file": "cx-lo-33-apikey-after-esc2.txt", "sha256": "9ffbcce64c5b209bb412fbcd8319edeadc3261e138d15d6eb5679d6abed40c81"}
+{"file": "cx-lo-34-menu.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-35-menu-ctrl-c.txt", "sha256": "09a89fc08871daddc011aeda53b47db4347da4f16bc37bcae7713412727fc7e3"}
+{"file": "cx-lo-36-menu-ctrl-c2.txt", "sha256": "09a89fc08871daddc011aeda53b47db4347da4f16bc37bcae7713412727fc7e3"}
+{"file": "cx-lo-37-menu.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-38-menu-q.txt", "sha256": "62f046b251580863e93a1843ba81e443b96e587c6e7655c08e15cb3443b24017"}
+{"file": "cx-lo-39-menu-digit3.txt", "sha256": "62f046b251580863e93a1843ba81e443b96e587c6e7655c08e15cb3443b24017"}
+{"file": "cx-lo-40-menu-digit3-enter.txt", "sha256": "62f046b251580863e93a1843ba81e443b96e587c6e7655c08e15cb3443b24017"}
+{"file": "cx-lo-41-launch-60x20.txt", "sha256": "70228a0504851d64efeac7d798b60101891ba11b7ae291020c8ce3b2cb6e52a1"}
+{"file": "cx-lo-42-launch-git-repo.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-43-resume-logged-out.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-44-launch-no-daemon.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-45-login-status.txt", "sha256": "333316a5f492c83789148197ebe4547c54d0184c8d8b79d5a50d48c7d1023b95"}
+{"file": "cx-lo-46-exec-logged-out.txt", "sha256": "6fe548803519a2fad5c06787abd8c2de2f71bc228878835fe59411dbface06ac"}
+{"file": "cx-lo-47-codex-home-missing.txt", "sha256": "91314e6d9413dd1e6720980e21703a07c217983757d9ceabe842025ac2a88f9f"}
+{"file": "cx-lo-48-menu.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-49-relaunch-1.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-50-relaunch-2.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-51-relaunch-3.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-52-relaunch-4.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "cx-lo-53-relaunch-4-esc.txt", "sha256": "d842b50d81e763a4605c55d3884d163e447fae58479004b53eca8ffaf9ce3a13"}
+{"file": "login-status-stale.txt", "sha256": "a06d5ca8261150a5175e866fc3dc401070fb4ea30e849a1b9394b7e252fa1677"}

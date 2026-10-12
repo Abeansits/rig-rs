@@ -81,6 +81,31 @@ fn continuation_under_an_empty_prompt_is_a_draft() {
 }
 
 #[test]
+fn model_footer_without_a_gpt_prefix_is_ready() {
+    for footer in ["gpt-5-codex medium · ~/src", "o3 high · ~/src"] {
+        let text = format!("› Ask Codex to do anything\n  {footer}\n  ? for shortcuts\n");
+        assert!(
+            matches!(classify(&text), CodexScreen::Ready(_)),
+            "{footer} => {:?}",
+            classify(&text)
+        );
+    }
+}
+
+#[test]
+fn interrupt_in_scrollback_does_not_hide_a_ready_composer() {
+    let text = "\
+esc to interrupt
+◦ Working
+╭──╮
+│ ›  │
+╰──╯
+  ? for shortcuts
+";
+    assert!(matches!(classify(text), CodexScreen::Ready(_)));
+}
+
+#[test]
 fn shell_prompt_is_not_ready() {
     assert!(matches!(
         classify("codex exited\n$"),

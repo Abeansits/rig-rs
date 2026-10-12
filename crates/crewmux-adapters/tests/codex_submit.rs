@@ -15,6 +15,44 @@ use support::{
     LOGGED_IN, READY, adapter, append_user, binding, calls_include, home_with, opts, write_rollout,
 };
 
+fn context_line() -> String {
+    serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "<environment_context>\n  <cwd>/tmp</cwd>\n</environment_context>"
+            }]
+        }
+    })
+    .to_string()
+}
+
+fn agents_line() -> String {
+    serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\nbe brief\n</INSTRUCTIONS>"
+            }]
+        }
+    })
+    .to_string()
+}
+
+fn event_line(text: &str) -> String {
+    serde_json::json!({
+        "type": "event_msg",
+        "payload": {"type": "user_message", "message": text}
+    })
+    .to_string()
+}
+
 #[tokio::test]
 async fn submit_matches_the_rollout_byte_for_byte() {
     let body = "hello\nworld";
@@ -135,7 +173,92 @@ async fn submit_refuses_enter_when_the_draft_is_not_the_body() {
         .expect_err("mismatch");
     assert!(err.to_string().contains("paste"));
     let extra = &mux.recorded().await[before..];
-    assert!(!calls_include(extra, "send-keys"));
+    assert!(
+        calls_include(extra, "C-u"),
+        "rejected draft is cleared: {extra:?}"
+    );
+    assert!(!calls_include(extra, "Enter"), "{extra:?}");
+}
+
+#[tokio::test]
+async fn collapsed_placeholder_matches_the_char_count() {
+    let body = "é".repeat(1001);
+    let (seat, binding, home, mux) = ready_seat().await;
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let placeholder = format!("[Pasted Content {} chars]", body.chars().count());
+    mux.set_capture_after_paste(Capture::new(
+        format!("╭──╮\n│ › {placeholder} │\n╰──╯\n  ? for shortcuts\n"),
+        (0, 1),
+    ))
+    .await;
+    let finished = body.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        append_user(&path, &finished);
+    });
+    let receipt = seat
+        .submit(&binding, &body, SubmitMode::Enter)
+        .await
+        .expect("submit");
+    assert_eq!(receipt.bytes, body.len());
+    assert!(calls_include(&mux.recorded().await, "Enter"));
+}
+
+#[tokio::test]
+async fn collapsed_placeholder_with_the_wrong_count_is_cleared() {
+    let (seat, binding, _home, mux) = ready_seat().await;
+    mux.set_capture_after_paste(Capture::new(
+        "╭──╮\n│ › [Pasted Content 2002 chars] │\n╰──╯\n  ? for shortcuts\n".to_owned(),
+        (0, 1),
+    ))
+    .await;
+    let body = "é".repeat(1001);
+    let before = mux.recorded().await.len();
+    let err = seat
+        .submit(&binding, &body, SubmitMode::Enter)
+        .await
+        .expect_err("count");
+    assert!(err.to_string().contains("placeholder"), "{err}");
+    let extra = &mux.recorded().await[before..];
+    assert!(calls_include(extra, "C-u"), "{extra:?}");
+    assert!(!calls_include(extra, "Enter"), "{extra:?}");
+}
+
+#[tokio::test]
+async fn context_after_the_baseline_does_not_hide_the_send() {
+    let body = "hello\nworld";
+    let (seat, binding, home, _mux) = ready_seat().await;
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let finished = body.to_owned();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        support::append_line(&path, &context_line());
+        support::append_line(&path, &agents_line());
+        support::append_line(&path, &event_line(&finished));
+        append_user(&path, &finished);
+    });
+    let receipt = seat
+        .submit(&binding, body, SubmitMode::Enter)
+        .await
+        .expect("submit");
+    assert_eq!(receipt.bytes, body.len());
+}
+
+#[tokio::test]
+async fn event_msg_alone_does_not_confirm_delivery() {
+    let body = "hello";
+    let (seat, binding, home, _mux) = ready_seat().await;
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        support::append_line(&path, &event_line(body));
+    });
+    let err = seat
+        .submit(&binding, body, SubmitMode::Enter)
+        .await
+        .expect_err("event");
+    assert!(err.to_string().contains("rollout"), "{err}");
+    assert!(!err.to_string().contains("single submit"), "{err}");
 }
 
 #[tokio::test]
@@ -146,11 +269,7 @@ async fn partial_last_line_is_skipped_until_it_completes() {
     let finished = body.to_owned();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-        let line = serde_json::json!({
-            "type": "response_item",
-            "payload": {"role": "user", "text": finished}
-        })
-        .to_string();
+        let line = support::user_line(&finished);
         let mid = line.len() / 2;
         let Some((head, tail)) = line.split_at_checked(mid) else {
             return;

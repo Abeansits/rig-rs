@@ -1,3 +1,0 @@
-Sign in with ChatGPT
-Provide your own API key
-size 10

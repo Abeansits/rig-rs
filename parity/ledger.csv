@@ -587,7 +587,7 @@
 "packages/daemon/test/codex-runtime-adapter.test.ts > deliverStartup only handles files, no action execution","3","waived","","","outside slice 3: startup projection, global config, hooks, model, effort, profile, and queue roots are not this seat"
 "packages/daemon/test/codex-runtime-adapter.test.ts > replaces legacy using-openrig managed block when delivering openrig-start guidance","3","waived","","","outside slice 3: startup projection, global config, hooks, model, effort, profile, and queue roots are not this seat"
 "packages/daemon/test/codex-runtime-adapter.test.ts > returns structured failure when delivery fails","3","ported","missing_rollout_item_is_not_verified","",""
-"packages/daemon/test/codex-runtime-adapter.test.ts > submits send_text startup files after pasting","3","ported","submit_matches_the_rollout_byte_for_byte","",""
+"packages/daemon/test/codex-runtime-adapter.test.ts > submits send_text startup files after pasting","3","waived","","","Codex deliver_startup is a no-op; startup-file projection is outside slice 3"
 "packages/daemon/test/codex-runtime-adapter.test.ts > delivers a large (>100KB) send_text startup file via sendText then submits with Enter","3","waived","","","startup-file projection is outside slice 3; submit verification covers a 64 KB body"
 "packages/daemon/test/codex-runtime-adapter.test.ts > replay on restore is safe for already-projected content","3","waived","","","outside slice 3: startup projection, global config, hooks, model, effort, profile, and queue roots are not this seat"
 "packages/daemon/test/codex-runtime-adapter.test.ts > launchHarness sends correct fresh launch command","3","ported","mcp_override_uses_dash_c_and_never_passes_never","",""

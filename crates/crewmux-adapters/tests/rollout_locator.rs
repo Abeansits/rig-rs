@@ -8,7 +8,9 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crewmux_adapters::codex::{RolloutLocator, ThreadIdError, user_turn_texts, user_turns_after};
+use crewmux_adapters::codex::{
+    RolloutLocator, RolloutSet, ThreadIdError, user_turn_texts, user_turns_after,
+};
 use crewmux_adapters::{AgentAdapter, LaunchOutcome};
 use crewmux_mux::FakeMux;
 use crewmux_types::ThreadId;
@@ -213,6 +215,57 @@ async fn resume_argv_names_the_existing_thread() {
         seat.thread_id(binding.seat).await.expect("id").as_str(),
         "thread-a"
     );
+}
+
+#[test]
+fn correlate_ignores_context_agents_and_event_msg() {
+    let home = home_with(LOGGED_IN);
+    let alpha = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let beta = write_rollout(&home.codex_dir, "thread-b", &home.cwd, None);
+    for (path, real, decoy) in [(&alpha, "alpha", "beta"), (&beta, "beta", "alpha")] {
+        support::append_line(
+            path,
+            &injected("<environment_context>\n  <cwd>/tmp</cwd>\n</environment_context>"),
+        );
+        support::append_line(
+            path,
+            &injected(
+                "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\nbe brief\n</INSTRUCTIONS>",
+            ),
+        );
+        support::append_line(path, &event_msg(decoy));
+        support::append_user(path, real);
+    }
+    assert_eq!(user_turn_texts(&alpha).expect("texts"), ["alpha"]);
+    let id = locator_for(&home)
+        .resolve(
+            &RolloutSet::default(),
+            &home.cwd,
+            SystemTime::UNIX_EPOCH,
+            Some("alpha"),
+        )
+        .expect("id");
+    assert_eq!(id.as_str(), "thread-a");
+}
+
+fn injected(text: &str) -> String {
+    serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": text}]
+        }
+    })
+    .to_string()
+}
+
+fn event_msg(text: &str) -> String {
+    serde_json::json!({
+        "type": "event_msg",
+        "payload": {"type": "user_message", "message": text}
+    })
+    .to_string()
 }
 
 fn locator_for(home: &support::Home) -> RolloutLocator {

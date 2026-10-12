@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crewmux_mux::PasteOpts;
 use crewmux_types::{Key, ReadinessCode, SeatId, ThreadId};
@@ -44,9 +44,10 @@ impl CodexAdapter {
             .paste(&binding.pane, text, PasteOpts::default())
             .await?;
         if mode == SubmitMode::Enter {
-            let pasted = self.visible_screen(binding).await?;
-            if !draft_is_prefix(&pasted, text) {
-                return Err(Error::Message("composer did not show the paste".to_owned()));
+            let pasted = self.settled_draft(binding, text).await?;
+            if !draft_accepts(&pasted, text) {
+                self.clear_rejected_draft(binding, &pasted).await?;
+                return Err(Error::Message(draft_error(&pasted, text)));
             }
             self.mux().send_keys(&binding.pane, &[Key::Enter]).await?;
         }
@@ -189,11 +190,85 @@ fn rollout_path(err: &crewmux_transcript::Error) -> std::path::PathBuf {
     }
 }
 
-fn draft_is_prefix(screen: &CodexScreen, body: &str) -> bool {
+impl CodexAdapter {
+    /// Wait until the composer stops changing, then return that screen.
+    ///
+    /// Codex collapses a paste over 1000 characters after the bracket closes.
+    /// Checking the first frame accepts a prefix that is about to be replaced,
+    /// or rejects the placeholder before it is drawn.
+    async fn settled_draft(&self, binding: &NodeBinding, text: &str) -> Result<CodexScreen, Error> {
+        let deadline = Instant::now() + paste_window(self.budget().poll);
+        let mut seen = self.visible_screen(binding).await?;
+        loop {
+            if Instant::now() >= deadline {
+                return Ok(seen);
+            }
+            tokio::time::sleep(self.budget().poll).await;
+            let next = self.visible_screen(binding).await?;
+            if next == seen && (draft_accepts(&next, text) || visible_draft(&next)) {
+                return Ok(next);
+            }
+            seen = next;
+        }
+    }
+
+    async fn clear_rejected_draft(
+        &self,
+        binding: &NodeBinding,
+        screen: &CodexScreen,
+    ) -> Result<(), Error> {
+        if visible_draft(screen) {
+            self.mux().send_keys(&binding.pane, &[Key::CtrlU]).await?;
+        }
+        Ok(())
+    }
+}
+
+fn paste_window(poll: Duration) -> Duration {
+    let scaled = poll.saturating_mul(30);
+    if scaled < Duration::from_millis(250) {
+        Duration::from_millis(250)
+    } else {
+        scaled
+    }
+}
+
+fn visible_draft(screen: &CodexScreen) -> bool {
+    matches!(screen, CodexScreen::Draft { visible } if !visible.is_empty())
+}
+
+fn draft_accepts(screen: &CodexScreen, body: &str) -> bool {
     let CodexScreen::Draft { visible } = screen else {
         return false;
     };
-    !visible.is_empty() && body.starts_with(visible.as_str())
+    if visible.is_empty() {
+        return false;
+    }
+    body.starts_with(visible.as_str()) || pasted_placeholder_matches(visible, body)
+}
+
+/// `[Pasted Content N chars]` counts Unicode scalar values, not bytes.
+fn pasted_placeholder_matches(visible: &str, body: &str) -> bool {
+    pasted_content_count(visible).is_some_and(|count| count == body.chars().count())
+}
+
+fn pasted_content_count(visible: &str) -> Option<usize> {
+    let rest = visible.trim().strip_prefix("[Pasted Content ")?;
+    let (digits, tail) = rest.split_once(" chars]")?;
+    if !tail.is_empty() || digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+fn draft_error(screen: &CodexScreen, body: &str) -> String {
+    if let CodexScreen::Draft { visible } = screen
+        && pasted_content_count(visible).is_some()
+        && !pasted_placeholder_matches(visible, body)
+    {
+        return "paste placeholder count did not match".to_owned();
+    }
+    "composer did not show the paste".to_owned()
 }
 
 fn malformed(path: &std::path::Path) -> Error {
