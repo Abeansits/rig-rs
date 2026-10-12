@@ -3,14 +3,11 @@
 //! The id is `session_meta.payload.id`. A file already in the pre-launch
 //! snapshot is never chosen. Two new files are correlated by the first user
 //! item, and a remaining tie is [`ThreadIdError::Ambiguous`].
-
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// Rollout timestamps are whole seconds. A file written in the same second as
-/// launch can look older once the fraction is dropped.
 const TIMESTAMP_SKEW: Duration = Duration::from_secs(2);
 
 use serde_json::Value;
@@ -68,6 +65,18 @@ pub struct RolloutLocator {
 }
 
 impl RolloutLocator {
+    /// Byte length of each rollout file. A file created later is absent.
+    #[must_use]
+    pub fn byte_baseline(&self) -> BTreeMap<PathBuf, u64> {
+        let mut lengths = BTreeMap::new();
+        for path in list_rollouts(&self.sessions_root) {
+            let path = canonical(&path);
+            let len = fs::metadata(&path).map_or(0, |meta| meta.len());
+            lengths.insert(path, len);
+        }
+        lengths
+    }
+
     /// Every rollout file currently on disk.
     #[must_use]
     pub fn snapshot(&self) -> RolloutSet {
@@ -148,10 +157,26 @@ impl RolloutLocator {
 ///
 /// # Errors
 ///
-/// Returns [`ThreadIdError::Malformed`] when a complete line is not JSON.
-/// A partial last line, with no trailing newline, is skipped.
+/// Returns [`ThreadIdError::Malformed`] when a complete line is not UTF-8 JSON.
+/// A partial last line, including one cut mid-character, is skipped.
 pub fn user_turn_texts(path: &Path) -> Result<Vec<String>, ThreadIdError> {
     Ok(read_rollout(path)?.users)
+}
+
+/// User texts whose jsonl line starts at or after `baseline`.
+///
+/// # Errors
+///
+/// Same as [`user_turn_texts`].
+pub fn user_turns_after(path: &Path, baseline: u64) -> Result<Vec<String>, ThreadIdError> {
+    let file = read_rollout(path)?;
+    Ok(file
+        .users
+        .into_iter()
+        .zip(file.user_at)
+        .filter(|(_, at)| *at >= baseline)
+        .map(|(text, _)| text)
+        .collect())
 }
 
 struct RolloutFile {
@@ -160,6 +185,7 @@ struct RolloutFile {
     cwd: PathBuf,
     at: SystemTime,
     users: Vec<String>,
+    user_at: Vec<u64>,
 }
 
 fn pick(found: Vec<RolloutFile>, submitted: Option<&str>) -> Result<ThreadId, ThreadIdError> {
@@ -209,33 +235,55 @@ fn one_file(matches: Vec<RolloutFile>) -> Result<RolloutFile, ThreadIdError> {
 }
 
 fn read_rollout(path: &Path) -> Result<RolloutFile, ThreadIdError> {
+    let bytes = fs::read(path).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
+    let kept = complete_prefix(&bytes).ok_or_else(|| {
+        if bytes.is_empty() {
+            ThreadIdError::Malformed(path.to_path_buf())
+        } else {
+            ThreadIdError::NotYet
+        }
+    })?;
     let text =
-        fs::read_to_string(path).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
-    let partial = !text.is_empty() && !text.ends_with('\n');
-    let lines: Vec<&str> = text
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    let last = lines.len().saturating_sub(1);
+        std::str::from_utf8(kept).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
+    parse_rollout(path, text)
+}
+
+fn complete_prefix(bytes: &[u8]) -> Option<&[u8]> {
+    if bytes.is_empty() {
+        return None;
+    }
+    if bytes.last() == Some(&b'\n') {
+        return Some(bytes);
+    }
+    let index = bytes.iter().rposition(|byte| *byte == b'\n')?;
+    bytes.get(..=index)
+}
+
+fn parse_rollout(path: &Path, text: &str) -> Result<RolloutFile, ThreadIdError> {
     let mut meta = None;
     let mut users = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let value = match serde_json::from_str::<Value>(line) {
-            Ok(value) => value,
-            Err(_) if partial && index == last => continue,
-            Err(_) => return Err(ThreadIdError::Malformed(path.to_path_buf())),
-        };
+    let mut user_at = Vec::new();
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let start = offset;
+        offset = offset.saturating_add(line.len());
+        let line = line.strip_suffix('\n').unwrap_or(line);
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str::<Value>(line)
+            .map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
         if meta.is_none() {
             meta = session_meta(&value, path)?;
         }
         if let Some(turn) = user_text(&value) {
+            let at =
+                u64::try_from(start).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
             users.push(turn);
+            user_at.push(at);
         }
     }
     let Some((id, cwd, at)) = meta else {
-        if partial {
-            return Err(ThreadIdError::NotYet);
-        }
         return Err(ThreadIdError::Malformed(path.to_path_buf()));
     };
     Ok(RolloutFile {
@@ -244,6 +292,7 @@ fn read_rollout(path: &Path) -> Result<RolloutFile, ThreadIdError> {
         cwd,
         at,
         users,
+        user_at,
     })
 }
 

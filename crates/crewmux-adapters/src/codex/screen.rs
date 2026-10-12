@@ -1,9 +1,10 @@
 //! Positive-match Codex screen classifier.
 //!
 //! Ready requires an empty composer and `? for shortcuts`, with no interrupt
-//! hint and no option menu. A composer that already holds a draft is not
-//! ready. Dialog titles match only as their own line, and an empty composer
-//! wins over a dialog title left earlier in scrollback.
+//! hint and no option menu. Any non-empty text inside the composer box is a
+//! draft, not only the last cursor line. Login, a stale server, and a missing
+//! Codex home match the current screen (from the last box), not earlier
+//! scrollback. Dialog titles match only as their own line.
 
 use crewmux_types::LoginKind;
 
@@ -24,7 +25,7 @@ pub enum CodexScreen {
     Ready(ComposerState),
     /// The composer holds a non-empty draft. Not ready to submit.
     Draft {
-        /// Text after the cursor. A prefix of the pasted body is enough.
+        /// Non-empty text inside the box. A prefix of the pasted body is enough.
         visible: String,
     },
     /// A turn is in progress (`esc to interrupt`).
@@ -51,19 +52,20 @@ pub enum CodexScreen {
     Inconclusive,
 }
 
-/// Classify `text`. Login and hard failures win over a composer.
+/// Classify `text`. Login and hard failures on the current screen win over a composer.
 #[must_use]
 pub fn classify(text: &str) -> CodexScreen {
-    if let Some(screen) = hard_failure(text) {
+    let live = live_screen(text);
+    if let Some(screen) = hard_failure(live) {
         return screen;
     }
-    if stale(text) {
+    if stale(live) {
         return CodexScreen::StaleServer;
     }
     if returned_to_shell(text) {
         return CodexScreen::ReturnedToShell;
     }
-    if let Some(kind) = login_kind(text) {
+    if let Some(kind) = login_kind(live) {
         return CodexScreen::Login(kind);
     }
     if busy(text) {
@@ -140,14 +142,47 @@ fn last_box(text: &str) -> Option<BoxRegion> {
     })
 }
 
+fn live_screen(text: &str) -> &str {
+    text.rfind('╭')
+        .and_then(|start| text.get(start..))
+        .unwrap_or(text)
+}
+
 fn composer_draft(inside: &str) -> Result<String, ()> {
-    let mut found = None;
+    let mut parts = Vec::new();
+    let mut saw_cursor = false;
     for line in inside.lines() {
         if let Some(draft) = cursor_draft(line) {
-            found = Some(draft);
+            saw_cursor = true;
+            if !draft.is_empty() {
+                parts.push(draft);
+            }
+            continue;
+        }
+        if let Some(text) = plain_box_line(line) {
+            parts.push(text);
         }
     }
-    found.ok_or(())
+    if parts.is_empty() {
+        if saw_cursor {
+            Ok(String::new())
+        } else {
+            Err(())
+        }
+    } else {
+        Ok(parts.join("\n"))
+    }
+}
+
+fn plain_box_line(line: &str) -> Option<String> {
+    let text = line
+        .trim()
+        .trim_matches(['│', '┃', '╭', '╮', '╰', '╯', '─', ' ']);
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_owned())
+    }
 }
 
 fn cursor_draft(line: &str) -> Option<String> {

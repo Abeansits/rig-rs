@@ -26,6 +26,7 @@ pub(crate) const NOT_LOGGED_IN: &str = "#!/bin/sh\nprintf '%s\\n' 'Not logged in
 pub(crate) const MISSING_HOME: &str =
     "#!/bin/sh\nprintf '%s\\n' 'Error finding codex home config.toml: does not exist'\nexit 1\n";
 pub(crate) const UNRECOGNISED: &str = "#!/bin/sh\nprintf '%s\\n' 'status unavailable'\nexit 2\n";
+pub(crate) const HANGING: &str = "#!/bin/sh\nexec sleep 60\n";
 
 pub(crate) const READY: &str =
     "╭────────────────╮\n│ ›              │\n╰────────────────╯\n  ? for shortcuts\n";
@@ -70,7 +71,8 @@ pub(crate) fn fast_budget() -> LaunchBudget {
         ready_after_last_gate: Duration::from_millis(50),
         inconclusive_stable: Duration::from_millis(50),
         overall: Duration::from_secs(2),
-        thread_id_after_submit: Duration::from_millis(80),
+        thread_id_after_submit: Duration::from_millis(400),
+        preflight: Duration::from_secs(2),
     }
 }
 
@@ -140,6 +142,20 @@ pub(crate) fn write_rollout(
     }
     fs::write(&path, lines.join("\n") + "\n").expect("rollout");
     path
+}
+
+pub(crate) fn append_user(path: &Path, text: &str) {
+    use std::io::Write;
+    let line = serde_json::json!({
+        "type": "response_item",
+        "payload": {"role": "user", "text": text}
+    })
+    .to_string();
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .expect("rollout");
+    writeln!(file, "{line}").expect("append");
 }
 
 pub(crate) fn fixtures() -> PathBuf {

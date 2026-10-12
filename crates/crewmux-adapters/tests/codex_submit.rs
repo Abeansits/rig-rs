@@ -10,13 +10,20 @@ use crewmux_adapters::{AgentAdapter, ResumeToken, SubmitMode};
 use crewmux_mux::{Capture, FakeMux};
 use crewmux_types::ReadinessCode;
 
-use support::{LOGGED_IN, READY, adapter, binding, calls_include, home_with, opts, write_rollout};
+use support::{
+    LOGGED_IN, READY, adapter, append_user, binding, calls_include, home_with, opts, write_rollout,
+};
 
 #[tokio::test]
 async fn submit_matches_the_rollout_byte_for_byte() {
     let body = "hello\nworld";
     let (seat, binding, home, _mux) = ready_seat().await;
-    write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some(body));
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let finished = body.to_owned();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        append_user(&path, &finished);
+    });
     let receipt = seat
         .submit(&binding, body, SubmitMode::Enter)
         .await
@@ -32,12 +39,29 @@ async fn submit_matches_the_rollout_byte_for_byte() {
 async fn submit_accepts_a_64kb_body() {
     let body = "x".repeat(64 * 1024);
     let (seat, binding, home, _mux) = ready_seat().await;
-    write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some(&body));
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let finished = body.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        append_user(&path, &finished);
+    });
     let receipt = seat
         .submit(&binding, &body, SubmitMode::Enter)
         .await
         .expect("submit");
     assert_eq!(receipt.bytes, 64 * 1024);
+}
+
+#[tokio::test]
+async fn earlier_identical_user_text_does_not_confirm_submit() {
+    let (seat, binding, home, _mux) = ready_seat().await;
+    write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some("yes"));
+    let err = seat
+        .submit(&binding, "yes", SubmitMode::Enter)
+        .await
+        .expect_err("old yes");
+    assert!(err.to_string().contains("rollout"), "{err}");
+    assert!(!err.to_string().contains("malformed"), "{err}");
 }
 
 #[tokio::test]
@@ -118,15 +142,29 @@ async fn partial_last_line_is_skipped_until_it_completes() {
     let body = "hello\nworld";
     let (seat, binding, home, mux) = ready_seat().await;
     let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
-    let mut partial = fs::read_to_string(&path).expect("rollout");
-    partial.push_str("{\"payload\":{\"text\":\"hel\"");
-    fs::write(&path, &partial).expect("partial");
-    let codex = home.codex_dir.clone();
-    let cwd = home.cwd.clone();
     let finished = body.to_owned();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        write_rollout(&codex, "thread-a", &cwd, Some(&finished));
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        let line = serde_json::json!({
+            "type": "response_item",
+            "payload": {"role": "user", "text": finished}
+        })
+        .to_string();
+        let mid = line.len() / 2;
+        let Some((head, tail)) = line.split_at_checked(mid) else {
+            return;
+        };
+        fs::write(&path, {
+            let mut bytes = fs::read(&path).unwrap_or_default();
+            bytes.extend(head.as_bytes());
+            bytes
+        })
+        .expect("partial");
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        let mut bytes = fs::read(&path).unwrap_or_default();
+        bytes.extend(tail.as_bytes());
+        bytes.push(b'\n');
+        fs::write(&path, bytes).expect("complete");
     });
     let receipt = seat
         .submit(&binding, body, SubmitMode::Enter)

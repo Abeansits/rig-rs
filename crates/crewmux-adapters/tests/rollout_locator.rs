@@ -8,12 +8,12 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crewmux_adapters::codex::{RolloutLocator, ThreadIdError, user_turn_texts};
+use crewmux_adapters::codex::{RolloutLocator, ThreadIdError, user_turn_texts, user_turns_after};
 use crewmux_adapters::{AgentAdapter, LaunchOutcome};
 use crewmux_mux::FakeMux;
 use crewmux_types::ThreadId;
 
-use support::{LOGGED_IN, STAMP, adapter, binding, home_with, opts, write_rollout};
+use support::{LOGGED_IN, STAMP, adapter, append_user, binding, home_with, opts, write_rollout};
 
 #[tokio::test]
 async fn back_to_back_launches_get_distinct_ids() {
@@ -113,6 +113,36 @@ fn two_files_without_user_text_stay_not_yet() {
         .resolve(&before, &home.cwd, SystemTime::UNIX_EPOCH, Some("later"))
         .expect_err("waiting");
     assert!(matches!(err, ThreadIdError::NotYet));
+}
+
+#[test]
+fn incomplete_utf8_tail_is_not_malformed() {
+    let home = home_with(LOGGED_IN);
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some("kept"));
+    let mut bytes = fs::read(&path).expect("bytes");
+    bytes.push(0xC3);
+    fs::write(&path, &bytes).expect("tail");
+    let turns = user_turn_texts(&path).expect("skip tail");
+    assert_eq!(turns, ["kept"]);
+    bytes.push(b'\n');
+    fs::write(&path, &bytes).expect("complete bad line");
+    let err = user_turn_texts(&path).expect_err("malformed");
+    assert!(matches!(err, ThreadIdError::Malformed(_)));
+    fs::write(&path, [0xC3]).expect("only a partial character");
+    let err = user_turn_texts(&path).expect_err("pending");
+    assert!(matches!(err, ThreadIdError::NotYet));
+}
+
+#[test]
+fn user_text_before_the_baseline_does_not_count() {
+    let home = home_with(LOGGED_IN);
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some("yes"));
+    let baseline = fs::metadata(&path).expect("meta").len();
+    let turns = user_turns_after(&path, baseline).expect("offset");
+    assert_eq!(turns, Vec::<String>::new());
+    append_user(&path, "yes");
+    let turns = user_turns_after(&path, baseline).expect("new");
+    assert_eq!(turns, ["yes"]);
 }
 
 #[test]

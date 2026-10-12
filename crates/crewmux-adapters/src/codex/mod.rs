@@ -21,6 +21,6 @@ pub use budget::LaunchBudget;
 pub use lock::CodexLaunchLock;
 pub use normalize::{delivery_fingerprint, normalize_for, same_delivery};
 pub use preflight::{Preflight, classify_preflight, codex_preflight, codex_preflight_bin};
-pub use rollout::{RolloutLocator, RolloutSet, ThreadIdError, user_turn_texts};
+pub use rollout::{RolloutLocator, RolloutSet, ThreadIdError, user_turn_texts, user_turns_after};
 pub use screen::{CodexScreen, ComposerState, apply_preflight, classify};
 pub use tools::{RIG_TOOL_NAMES, is_rig_tool};

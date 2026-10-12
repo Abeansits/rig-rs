@@ -5,8 +5,9 @@ mod support;
 
 use std::fs;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use crewmux_adapters::codex::{CodexScreen, Preflight, classify, classify_preflight};
+use crewmux_adapters::codex::{CodexScreen, LaunchBudget, Preflight, classify, classify_preflight};
 use crewmux_adapters::{AgentAdapter, LaunchOutcome, Readiness};
 use crewmux_mux::{Capture, FakeMux};
 use crewmux_types::{LoginKind, ReadinessCode};
@@ -128,7 +129,7 @@ async fn preflight_not_logged_in_never_ready_even_with_composer() {
 }
 
 #[tokio::test]
-async fn unrecognised_preflight_is_recorded_and_launch_continues() {
+async fn unrecognised_preflight_refuses_the_session() {
     let home = home_with(support::UNRECOGNISED);
     let mux = Arc::new(FakeMux::new());
     let adapter = adapter(&mux, &home.bin);
@@ -137,10 +138,66 @@ async fn unrecognised_preflight_is_recorded_and_launch_continues() {
         .launch(&binding, opts(&home, "seat"))
         .await
         .expect("launch");
-    assert!(matches!(outcome, LaunchOutcome::Ok { .. }));
-    let note = adapter.preflight_note(binding.seat).await.expect("note");
-    assert!(note.contains("preflight_unrecognised"));
-    assert!(calls_include(&mux.recorded().await, "new-session"));
+    match outcome {
+        LaunchOutcome::Failed { error, .. } => {
+            assert!(error.contains("codex login status failed"), "{error}");
+            assert!(error.contains("status unavailable"), "{error}");
+        }
+        other @ (LaunchOutcome::Ok { .. } | LaunchOutcome::LoginRequired { .. }) => {
+            panic!("expected a preflight failure, got {other:?}");
+        }
+    }
+    assert!(!calls_include(&mux.recorded().await, "new-session"));
+}
+
+#[tokio::test]
+async fn missing_codex_binary_refuses_the_session() {
+    let home = home_with(support::LOGGED_IN);
+    fs::remove_file(&home.bin).expect("remove");
+    let mux = Arc::new(FakeMux::new());
+    let adapter = adapter(&mux, &home.bin);
+    let binding = binding(&home.cwd, "seat");
+    let outcome = adapter
+        .launch(&binding, opts(&home, "seat"))
+        .await
+        .expect("launch");
+    match outcome {
+        LaunchOutcome::Failed { error, .. } => {
+            assert!(error.contains("codex login status failed"), "{error}");
+        }
+        other @ (LaunchOutcome::Ok { .. } | LaunchOutcome::LoginRequired { .. }) => {
+            panic!("expected a missing binary, got {other:?}");
+        }
+    }
+    assert!(!calls_include(&mux.recorded().await, "new-session"));
+}
+
+#[tokio::test]
+async fn hanging_login_status_times_out_without_a_session() {
+    let home = home_with(support::HANGING);
+    let mux = Arc::new(FakeMux::new());
+    let adapter = adapter(&mux, &home.bin).with_budget(LaunchBudget {
+        preflight: Duration::from_millis(200),
+        ..support::fast_budget()
+    });
+    let binding = binding(&home.cwd, "seat");
+    let started = Instant::now();
+    let outcome = adapter
+        .launch(&binding, opts(&home, "seat"))
+        .await
+        .expect("launch");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "login status hung for {:?}",
+        started.elapsed()
+    );
+    match outcome {
+        LaunchOutcome::Failed { error, .. } => assert!(error.contains("timed out"), "{error}"),
+        other @ (LaunchOutcome::Ok { .. } | LaunchOutcome::LoginRequired { .. }) => {
+            panic!("expected a timeout, got {other:?}");
+        }
+    }
+    assert!(!calls_include(&mux.recorded().await, "new-session"));
 }
 
 #[tokio::test]

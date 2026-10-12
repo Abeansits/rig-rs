@@ -163,7 +163,13 @@ impl AgentAdapter for CodexAdapter {
         }
         let paths = SeatPaths::from_binding(binding, &opts);
         let bin = codex_bin(&self.bin, &opts);
-        let preflight = codex_preflight_bin(&bin, &paths.home, &paths.codex_home).await;
+        let preflight = codex_preflight_bin(
+            &bin,
+            &paths.home,
+            &paths.codex_home,
+            self.budget().preflight,
+        )
+        .await;
         let note = unrecognised_note(&preflight);
         if let Some(outcome) = short_circuit(&preflight) {
             self.note_blocked(binding, preflight, &paths, note).await;
@@ -380,7 +386,10 @@ impl CodexAdapter {
             Preflight::CodexHomeMissing => {
                 Some(Readiness::HardFailure("codex_home_missing".to_owned()))
             }
-            Preflight::LoggedIn | Preflight::Unrecognised { .. } => None,
+            Preflight::Unrecognised { code, out } => {
+                Some(Readiness::HardFailure(preflight_failure(*code, out)))
+            }
+            Preflight::LoggedIn => None,
         }
     }
 
@@ -541,7 +550,20 @@ fn short_circuit(preflight: &Preflight) -> Option<LaunchOutcome> {
             recovery: None,
             evidence: Some("codex home does not exist".to_owned()),
         }),
-        Preflight::LoggedIn | Preflight::Unrecognised { .. } => None,
+        Preflight::Unrecognised { code, out } => Some(LaunchOutcome::Failed {
+            error: preflight_failure(*code, out),
+            recovery: None,
+            evidence: Some(out.clone()),
+        }),
+        Preflight::LoggedIn => None,
+    }
+}
+
+fn preflight_failure(code: i32, out: &str) -> String {
+    if out.starts_with("codex login status") {
+        out.to_owned()
+    } else {
+        format!("codex login status failed: exit {code}: {out}")
     }
 }
 

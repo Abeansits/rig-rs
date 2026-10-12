@@ -17,6 +17,8 @@ pub struct LaunchBudget {
     pub overall: Duration,
     /// How long after the first submit the rollout id may stay unresolved.
     pub thread_id_after_submit: Duration,
+    /// Bound for `codex login status`. A hang must not stall launch.
+    pub preflight: Duration,
 }
 
 impl LaunchBudget {
@@ -30,6 +32,7 @@ impl LaunchBudget {
             inconclusive_stable: Duration::from_secs(15),
             overall: Duration::from_secs(45),
             thread_id_after_submit: Duration::from_secs(10),
+            preflight: Duration::from_secs(5),
         }
     }
 }

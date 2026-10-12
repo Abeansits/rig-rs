@@ -76,8 +76,97 @@ fn draft_composer_is_not_ready() {
 
 #[test]
 fn unparsed_composer_is_not_ready() {
-    let text = "╭──╮\n│ working │\n╰──╯\n  ? for shortcuts\n";
+    let text = "╭──╮\n│ │\n╰──╯\n  ? for shortcuts\n";
     assert!(matches!(classify(text), CodexScreen::Inconclusive));
+}
+
+#[test]
+fn text_above_an_empty_cursor_is_a_draft() {
+    let text = "╭──╮\n│ line1│\n│ › │\n╰──╯\n  ? for shortcuts\n";
+    match classify(text) {
+        CodexScreen::Draft { visible } => assert_eq!(visible, "line1"),
+        other => panic!("draft was {other:?}"),
+    }
+}
+
+#[test]
+fn text_in_the_box_without_a_cursor_is_a_draft() {
+    let text = "╭──╮\n│ working │\n╰──╯\n  ? for shortcuts\n";
+    match classify(text) {
+        CodexScreen::Draft { visible } => assert_eq!(visible, "working"),
+        other => panic!("draft was {other:?}"),
+    }
+}
+
+#[test]
+fn login_scrollback_does_not_hide_a_ready_composer() {
+    let text = "\
+Sign in with ChatGPT
+Provide your own API key
+╭──╮
+│ ›  │
+╰──╯
+  ? for shortcuts
+";
+    assert!(matches!(classify(text), CodexScreen::Ready(_)));
+}
+
+#[test]
+fn stale_scrollback_does_not_hide_a_ready_composer() {
+    let text = "\
+control socket is already in use
+╭──╮
+│ ›  │
+╰──╯
+  ? for shortcuts
+";
+    assert!(matches!(classify(text), CodexScreen::Ready(_)));
+}
+
+#[test]
+fn hard_failure_scrollback_does_not_hide_a_ready_composer() {
+    let text = "\
+Error finding codex home config.toml: does not exist
+╭──╮
+│ ›  │
+╰──╯
+  ? for shortcuts
+";
+    assert!(matches!(classify(text), CodexScreen::Ready(_)));
+}
+
+#[test]
+fn login_on_the_live_screen_stays_login() {
+    let text = "\
+╭──╮
+│ ›  │
+╰──╯
+Sign in with ChatGPT
+Provide your own API key
+";
+    assert!(matches!(classify(text), CodexScreen::Login(_)));
+}
+
+#[test]
+fn stale_on_the_live_screen_stays_stale() {
+    let text = "\
+╭──╮
+│ ›  │
+╰──╯
+control socket is already in use
+";
+    assert!(matches!(classify(text), CodexScreen::StaleServer));
+}
+
+#[test]
+fn hard_failure_on_the_live_screen_stays_a_hard_failure() {
+    let text = "\
+╭──╮
+│ ›  │
+╰──╯
+Error finding codex home config.toml: does not exist
+";
+    assert!(matches!(classify(text), CodexScreen::HardFailure { .. }));
 }
 
 #[test]

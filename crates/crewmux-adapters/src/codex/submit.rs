@@ -1,12 +1,14 @@
 //! Submit only while the composer is ready, then require a byte-exact rollout item.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crewmux_mux::PasteOpts;
 use crewmux_types::{Key, ReadinessCode, SeatId, ThreadId};
 
 use crate::codex::adapter::{CodexAdapter, IdQuery, blocking};
-use crate::codex::rollout::{ThreadIdError, user_turn_texts};
+use crate::codex::rollout::{ThreadIdError, user_turns_after};
 use crate::codex::screen::CodexScreen;
 use crate::error::Error;
 use crate::types::{DeliveryReceipt, NodeBinding, SubmitMode};
@@ -33,6 +35,7 @@ impl CodexAdapter {
                 "submit requires a ready composer".to_owned(),
             ));
         }
+        let baseline = self.rollout_baseline(binding.seat).await?;
         self.mux()
             .paste(&binding.pane, text, PasteOpts::default())
             .await?;
@@ -43,7 +46,7 @@ impl CodexAdapter {
             }
             self.mux().send_keys(&binding.pane, &[Key::Enter]).await?;
         }
-        self.confirm_delivery(binding.seat, text).await?;
+        self.confirm_delivery(binding.seat, text, &baseline).await?;
         Ok(DeliveryReceipt { bytes: text.len() })
     }
 
@@ -62,10 +65,15 @@ impl CodexAdapter {
         ))
     }
 
-    async fn confirm_delivery(&self, seat: SeatId, text: &str) -> Result<(), Error> {
+    async fn confirm_delivery(
+        &self,
+        seat: SeatId,
+        text: &str,
+        baseline: &BTreeMap<PathBuf, u64>,
+    ) -> Result<(), Error> {
         let deadline = Instant::now() + self.budget().thread_id_after_submit;
         loop {
-            match self.delivery_state(seat, text).await? {
+            match self.delivery_state(seat, text, baseline).await? {
                 Delivery::Landed => return Ok(()),
                 Delivery::Waiting => {
                     if Instant::now() >= deadline {
@@ -84,14 +92,26 @@ impl CodexAdapter {
         }
     }
 
-    async fn delivery_state(&self, seat: SeatId, text: &str) -> Result<Delivery, Error> {
+    async fn rollout_baseline(&self, seat: SeatId) -> Result<BTreeMap<PathBuf, u64>, Error> {
+        let Some(query) = self.id_query(seat).await else {
+            return Ok(BTreeMap::new());
+        };
+        blocking(move || query.locator.byte_baseline()).await
+    }
+
+    async fn delivery_state(
+        &self,
+        seat: SeatId,
+        text: &str,
+        baseline: &BTreeMap<PathBuf, u64>,
+    ) -> Result<Delivery, Error> {
         let Some(query) = self.id_query(seat).await else {
             return Ok(Delivery::Waiting);
         };
         let body = text.to_owned();
         let resolved = resolve_for(&query, &body).await?;
         match resolved {
-            Ok(id) => exact_user_item(self, seat, &query, id, &body).await,
+            Ok(id) => exact_user_item(self, seat, &query, id, &body, baseline).await,
             Err(ThreadIdError::NotYet) => Ok(Delivery::Waiting),
             Err(ThreadIdError::Ambiguous(_)) => Ok(Delivery::Ambiguous),
             Err(ThreadIdError::Malformed(path)) => Err(malformed(&path)),
@@ -123,13 +143,18 @@ async fn exact_user_item(
     query: &IdQuery,
     id: ThreadId,
     body: &str,
+    baseline: &BTreeMap<PathBuf, u64>,
 ) -> Result<Delivery, Error> {
     let locator = query.locator.clone();
     let cwd = query.cwd.clone();
     let wanted = id.clone();
     let exact = body.to_owned();
+    let lengths = baseline.clone();
     let matched = blocking(move || match locator.verify_resume(&wanted, &cwd) {
-        Ok(path) => user_turn_texts(&path).map(|turns| turns.iter().any(|turn| turn == &exact)),
+        Ok(path) => {
+            let offset = lengths.get(&path).copied().unwrap_or(0);
+            user_turns_after(&path, offset).map(|turns| turns.iter().any(|turn| turn == &exact))
+        }
         Err(ThreadIdError::NotYet) => Ok(false),
         Err(err) => Err(err),
     })
