@@ -15,6 +15,7 @@ mod decode;
 mod error;
 mod exec;
 mod fake;
+mod fake_screen;
 mod fake_script;
 mod guard;
 mod hashutil;
