@@ -49,6 +49,9 @@ os.execv(sys.executable, [
 ])
 "#;
 
+    /// Node `process.title` overwrites `/proc` cmdline and tmux's command name on
+    /// Linux. macOS keeps the original argv, so this launcher is not the bug.
+    #[cfg(target_os = "linux")]
     const NODE: &str = r"
 const fs = require('fs');
 const args = process.argv.slice(2);
@@ -362,6 +365,7 @@ setInterval(() => {}, 1000);
         refuse(&live.app, &pane, &live.mux, "lineage:bare_shell").await;
     }
 
+    #[cfg(target_os = "linux")]
     #[expect(clippy::panic, reason = "the process.title test needs a node binary")]
     async fn node_bin() -> String {
         for name in ["node", "nodejs"] {
@@ -378,6 +382,7 @@ setInterval(() => {}, 1000);
         panic!("node is required to reproduce process.title");
     }
 
+    #[cfg(target_os = "linux")]
     async fn node_pane(live: &Live, when: &str) -> (PaneRef, PathBuf, PathBuf) {
         let bin = node_bin().await;
         let script = live.root.join("launch.js");
@@ -402,6 +407,7 @@ setInterval(() => {}, 1000);
         (pane, ready, go)
     }
 
+    #[cfg(target_os = "linux")]
     async fn title_still_submits(when: &str) {
         let live = boot().await;
         let (pane, ready, go) = node_pane(&live, when).await;
@@ -462,11 +468,13 @@ setInterval(() => {}, 1000);
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn node_title_before_launch_still_submits() {
         title_still_submits("before").await;
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn node_title_after_launch_still_submits() {
         title_still_submits("after").await;
