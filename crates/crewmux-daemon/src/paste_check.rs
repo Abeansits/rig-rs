@@ -228,18 +228,37 @@ fn located(after_flat: &str, payload_flat: &str) -> bool {
     if after_flat.contains(payload_flat) {
         return true;
     }
-    let mut any = false;
-    for line in payload_flat.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+    covers_in_order(after_flat, payload_flat)
+}
+
+/// Each payload line is consumed in order. One screen row may hold several
+/// payload lines glued together. A repeated line counts once per copy, so a
+/// single `W` does not stand in for a tall run of `W` lines.
+fn covers_in_order(after_flat: &str, payload_flat: &str) -> bool {
+    let mut parts = payload_flat
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(mut next) = parts.next() else {
+        return false;
+    };
+    for line in after_flat.lines() {
+        let mut row = line.trim();
+        if row.is_empty() || row == "stub>" {
             continue;
         }
-        any = true;
-        if !after_flat.contains(line) {
-            return false;
+        while let Some(tail) = row.strip_prefix(next) {
+            row = tail;
+            match parts.next() {
+                Some(following) => next = following,
+                None => return true,
+            }
+            if row.is_empty() {
+                break;
+            }
         }
     }
-    any
+    false
 }
 
 fn leftover(before: &str, after: &str, payload_flat: &str) -> bool {
@@ -480,6 +499,21 @@ mod tests {
         let body = format!("From: operator@host\n{}", "C".repeat(20));
         let after = format!("{before}{body}");
         assert_eq!(classify_paste(&before, &after, &body), PasteHit::Clean);
+    }
+
+    #[test]
+    fn one_repeated_line_does_not_cover_a_tall_run() {
+        let before = "stub> \n";
+        let body = "W\nW\nW\n";
+        assert_eq!(
+            classify_paste(before, "stub> \nW\n", body),
+            PasteHit::Missing
+        );
+        assert_eq!(
+            classify_paste(before, "stub> \nW\nW\nW\n", body),
+            PasteHit::Clean
+        );
+        assert_eq!(classify_paste(before, "stub> \nWWW", body), PasteHit::Clean);
     }
 
     #[test]
