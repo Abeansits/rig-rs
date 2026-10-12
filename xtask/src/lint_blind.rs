@@ -63,7 +63,11 @@ fn check_file(path: &Path, text: &str, hits: &mut Vec<String>) {
             continue;
         }
         let line_no = index.saturating_add(1);
-        if forbidden_key(line) {
+        if carriage_return_literal(line) {
+            hits.push(format!(
+                "{display}:{line_no}: carriage return literal is a blind Enter"
+            ));
+        } else if forbidden_key(line) {
             hits.push(format!(
                 "{display}:{line_no}: forbidden key outside a ready composer"
             ));
@@ -83,4 +87,12 @@ fn is_comment(line: &str) -> bool {
 
 fn forbidden_key(line: &str) -> bool {
     line.contains("Key::CtrlC") || line.contains("Key::Escape") || line.contains("Key::Literal")
+}
+
+fn carriage_return_literal(line: &str) -> bool {
+    if !line.contains("Key::Literal") {
+        return false;
+    }
+    let compact: String = line.chars().filter(|ch| !ch.is_whitespace()).collect();
+    compact.contains("\\r") || line.contains('\r')
 }

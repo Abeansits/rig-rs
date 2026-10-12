@@ -99,7 +99,11 @@ impl RolloutLocator {
             if before.contains(&path) {
                 continue;
             }
-            let file = read_rollout(&path)?;
+            let file = match read_rollout(&path) {
+                Ok(file) => file,
+                Err(ThreadIdError::NotYet) => continue,
+                Err(err) => return Err(err),
+            };
             let floor = launched_at
                 .checked_sub(TIMESTAMP_SKEW)
                 .unwrap_or(SystemTime::UNIX_EPOCH);
@@ -122,7 +126,11 @@ impl RolloutLocator {
         let mut matches = Vec::new();
         for path in list_rollouts(&self.sessions_root) {
             let path = canonical(&path);
-            let file = read_rollout(&path)?;
+            let file = match read_rollout(&path) {
+                Ok(file) => file,
+                Err(ThreadIdError::NotYet) => continue,
+                Err(err) => return Err(err),
+            };
             if file.id.as_str() == id.as_str() {
                 matches.push(file);
             }
@@ -140,7 +148,8 @@ impl RolloutLocator {
 ///
 /// # Errors
 ///
-/// Returns [`ThreadIdError::Malformed`] when a line is not JSON.
+/// Returns [`ThreadIdError::Malformed`] when a complete line is not JSON.
+/// A partial last line, with no trailing newline, is skipped.
 pub fn user_turn_texts(path: &Path) -> Result<Vec<String>, ThreadIdError> {
     Ok(read_rollout(path)?.users)
 }
@@ -202,14 +211,20 @@ fn one_file(matches: Vec<RolloutFile>) -> Result<RolloutFile, ThreadIdError> {
 fn read_rollout(path: &Path) -> Result<RolloutFile, ThreadIdError> {
     let text =
         fs::read_to_string(path).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
+    let partial = !text.is_empty() && !text.ends_with('\n');
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let last = lines.len().saturating_sub(1);
     let mut meta = None;
     let mut users = Vec::new();
-    for line in text.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value: Value =
-            serde_json::from_str(line).map_err(|_| ThreadIdError::Malformed(path.to_path_buf()))?;
+    for (index, line) in lines.iter().enumerate() {
+        let value = match serde_json::from_str::<Value>(line) {
+            Ok(value) => value,
+            Err(_) if partial && index == last => continue,
+            Err(_) => return Err(ThreadIdError::Malformed(path.to_path_buf())),
+        };
         if meta.is_none() {
             meta = session_meta(&value, path)?;
         }
@@ -218,6 +233,9 @@ fn read_rollout(path: &Path) -> Result<RolloutFile, ThreadIdError> {
         }
     }
     let Some((id, cwd, at)) = meta else {
+        if partial {
+            return Err(ThreadIdError::NotYet);
+        }
         return Err(ThreadIdError::Malformed(path.to_path_buf()));
     };
     Ok(RolloutFile {

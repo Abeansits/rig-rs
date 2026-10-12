@@ -37,6 +37,7 @@ struct FakeInner {
     in_mode: bool,
     scripted: Option<GuardInputs>,
     fail_paste: bool,
+    after_paste: Option<Capture>,
     next_id: u32,
     hub: Hub,
 }
@@ -84,6 +85,7 @@ impl FakeMux {
                 in_mode: false,
                 scripted: None,
                 fail_paste: false,
+                after_paste: None,
                 next_id: 1,
                 hub: Hub::default(),
             })),
@@ -161,6 +163,11 @@ impl FakeMux {
     /// Screen returned by [`capture`](Multiplexer::capture) and unscripted guard tails.
     pub async fn set_capture(&self, capture: Capture) {
         self.inner.lock().await.capture = capture;
+    }
+
+    /// The next successful paste installs this capture instead of splicing the draft.
+    pub async fn set_capture_after_paste(&self, capture: Capture) {
+        self.inner.lock().await.after_paste = Some(capture);
     }
 
     /// Value returned by [`pane_in_mode`](Multiplexer::pane_in_mode) when no guard is scripted.
@@ -338,7 +345,29 @@ impl Multiplexer for FakeMux {
             inner: Arc::clone(&self.inner),
         };
         let receipt = perform_paste(&exec, &pane_target(pane), text, opts).await?;
-        self.inner.lock().await.fail_paste = false;
+        let mut guard = self.inner.lock().await;
+        guard.fail_paste = false;
+        let session = canonical_session_name(&pane.session);
+        let replacement = guard.after_paste.take();
+        match replacement {
+            Some(next) => {
+                if let Some(screen) = guard.screens.get_mut(&session) {
+                    *screen = next;
+                } else {
+                    guard.capture = next;
+                }
+            }
+            None => {
+                if let Some(screen) = guard.screens.get_mut(&session) {
+                    let cursor = screen.cursor;
+                    let text = spliced_composer(&screen.text, text);
+                    *screen = Capture::new(text, cursor);
+                } else {
+                    guard.capture = spliced_capture(&guard.capture, text);
+                }
+            }
+        }
+        drop(guard);
         self.own_write.send_replace(Some(Instant::now()));
         Ok(receipt)
     }
@@ -420,6 +449,51 @@ fn scripted_plan(guard: &FakeInner, spec: &SessionSpec) -> Option<crate::fake_sc
     }
     let raw = spec.env.get("RIG_STUB_SCRIPT").map_or("", String::as_str);
     Some(crate::fake_script::parse_stub(raw))
+}
+
+fn spliced_capture(capture: &Capture, pasted: &str) -> Capture {
+    Capture::new(spliced_composer(&capture.text, pasted), capture.cursor)
+}
+
+fn spliced_composer(capture: &str, pasted: &str) -> String {
+    let Some(cursor) = last_cursor(capture) else {
+        return capture.to_owned();
+    };
+    let Some(mark) = capture.get(cursor..).and_then(|rest| rest.chars().next()) else {
+        return capture.to_owned();
+    };
+    let prefix_end = cursor.saturating_add(mark.len_utf8());
+    let line_start = capture
+        .get(..cursor)
+        .and_then(|head| head.rfind('\n'))
+        .map_or(0, |index| index.saturating_add(1));
+    let line_end = capture
+        .get(cursor..)
+        .and_then(|rest| rest.find('\n'))
+        .map_or(capture.len(), |index| cursor.saturating_add(index));
+    let Some(prefix) = capture.get(line_start..prefix_end) else {
+        return capture.to_owned();
+    };
+    let trailing = capture
+        .get(prefix_end..line_end)
+        .is_some_and(|tail| tail.trim_end().ends_with(['│', '┃']));
+    let suffix = if trailing { " │" } else { "" };
+    let mut rebuilt = String::new();
+    rebuilt.push_str(capture.get(..line_start).unwrap_or(""));
+    rebuilt.push_str(prefix);
+    rebuilt.push(' ');
+    rebuilt.push_str(pasted);
+    rebuilt.push_str(suffix);
+    rebuilt.push_str(capture.get(line_end..).unwrap_or(""));
+    rebuilt
+}
+
+fn last_cursor(text: &str) -> Option<usize> {
+    match (text.rfind('›'), text.rfind('❯')) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(index), None) | (None, Some(index)) => Some(index),
+        (None, None) => None,
+    }
 }
 
 fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {

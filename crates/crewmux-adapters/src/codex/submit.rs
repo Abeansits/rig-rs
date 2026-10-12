@@ -37,6 +37,10 @@ impl CodexAdapter {
             .paste(&binding.pane, text, PasteOpts::default())
             .await?;
         if mode == SubmitMode::Enter {
+            let pasted = self.visible_screen(binding).await?;
+            if !draft_is_prefix(&pasted, text) {
+                return Err(Error::Message("composer did not show the paste".to_owned()));
+            }
             self.mux().send_keys(&binding.pane, &[Key::Enter]).await?;
         }
         self.confirm_delivery(binding.seat, text).await?;
@@ -139,6 +143,13 @@ async fn exact_user_item(
         Err(ThreadIdError::Ambiguous(_)) => Ok(Delivery::Ambiguous),
         Err(ThreadIdError::Malformed(path)) => Err(malformed(&path)),
     }
+}
+
+fn draft_is_prefix(screen: &CodexScreen, body: &str) -> bool {
+    let CodexScreen::Draft { visible } = screen else {
+        return false;
+    };
+    !visible.is_empty() && body.starts_with(visible.as_str())
 }
 
 fn malformed(path: &std::path::Path) -> Error {

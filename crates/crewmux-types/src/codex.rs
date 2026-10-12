@@ -98,15 +98,27 @@ impl CodexApproval {
 pub struct ThreadId(String);
 
 impl ThreadId {
-    /// Reject an empty id or one that contains whitespace.
+    /// Reject an empty id, a token over 200 characters, or anything outside
+    /// `[A-Za-z0-9._-]`. A `..` segment is rejected. The error never echoes `text`.
     ///
     /// # Errors
     ///
-    /// Returns [`TypeError::Id`] when `text` is empty or has whitespace.
+    /// Returns [`TypeError::Id`] when `text` is empty, too long, or has
+    /// disallowed characters. Surrounding whitespace is trimmed first.
     pub fn new(text: &str) -> Result<Self, TypeError> {
-        if text.is_empty() || text.chars().any(char::is_whitespace) {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(TypeError::Id("thread id is empty".to_owned()));
+        }
+        if text.chars().count() > 200 {
+            return Err(TypeError::Id("thread id is too long".to_owned()));
+        }
+        let safe = text
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+        if !safe || text.contains("..") {
             return Err(TypeError::Id(
-                "thread id is empty or contains whitespace".to_owned(),
+                "thread id contains disallowed characters".to_owned(),
             ));
         }
         Ok(Self(text.to_owned()))
@@ -122,5 +134,31 @@ impl ThreadId {
 impl fmt::Display for ThreadId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ThreadId;
+
+    #[test]
+    fn accepts_a_trimmed_codex_token() {
+        let id = ThreadId::new("  0199abcd_thread.id  ").expect("id");
+        assert_eq!(id.as_str(), "0199abcd_thread.id");
+    }
+
+    #[test]
+    fn rejects_a_token_without_echoing_it() {
+        let secret = "secret/../token";
+        let err = ThreadId::new(secret).expect_err("bad");
+        assert!(!err.to_string().contains(secret), "{err}");
+        assert!(err.to_string().contains("disallowed"), "{err}");
+        let long = "a".repeat(201);
+        let err = ThreadId::new(&long).expect_err("long");
+        assert!(!err.to_string().contains(&long), "{err}");
+        assert!(err.to_string().contains("too long"), "{err}");
+        let err = ThreadId::new("   ").expect_err("empty");
+        assert!(err.to_string().contains("empty"), "{err}");
+        assert!(ThreadId::new(&"a".repeat(200)).is_ok());
     }
 }

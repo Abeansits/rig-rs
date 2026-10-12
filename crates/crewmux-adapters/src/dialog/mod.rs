@@ -11,4 +11,4 @@ mod policy;
 pub use driver::{DialogDriver, DriveResult, PaneIo};
 pub use known::{DialogChoice, KnownDialog};
 pub use options::{MenuOption, menu_options};
-pub use policy::{AnswerPolicy, planned_choice};
+pub use policy::{AnswerPolicy, TrustSeat, planned_choice, trust_folder};

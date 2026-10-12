@@ -3,9 +3,10 @@
 #[path = "common/mod.rs"]
 mod support;
 
+use std::fs;
 use std::sync::Arc;
 
-use crewmux_adapters::{AgentAdapter, SubmitMode};
+use crewmux_adapters::{AgentAdapter, ResumeToken, SubmitMode};
 use crewmux_mux::{Capture, FakeMux};
 use crewmux_types::ReadinessCode;
 
@@ -14,7 +15,7 @@ use support::{LOGGED_IN, READY, adapter, binding, calls_include, home_with, opts
 #[tokio::test]
 async fn submit_matches_the_rollout_byte_for_byte() {
     let body = "hello\nworld";
-    let (seat, binding, home) = ready_seat().await;
+    let (seat, binding, home, _mux) = ready_seat().await;
     write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some(body));
     let receipt = seat
         .submit(&binding, body, SubmitMode::Enter)
@@ -30,7 +31,7 @@ async fn submit_matches_the_rollout_byte_for_byte() {
 #[tokio::test]
 async fn submit_accepts_a_64kb_body() {
     let body = "x".repeat(64 * 1024);
-    let (seat, binding, home) = ready_seat().await;
+    let (seat, binding, home, _mux) = ready_seat().await;
     write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some(&body));
     let receipt = seat
         .submit(&binding, &body, SubmitMode::Enter)
@@ -41,7 +42,7 @@ async fn submit_accepts_a_64kb_body() {
 
 #[tokio::test]
 async fn missing_rollout_item_is_not_verified() {
-    let (seat, binding, _home) = ready_seat().await;
+    let (seat, binding, _home, _mux) = ready_seat().await;
     let err = seat
         .submit(&binding, "nothing landed", SubmitMode::Enter)
         .await
@@ -79,6 +80,95 @@ async fn submit_refuses_a_login_menu() {
     assert!(!calls_include(extra, "paste-buffer"));
 }
 
+#[tokio::test]
+async fn submit_refuses_enter_when_the_composer_stays_empty() {
+    let (seat, binding, _home, mux) = ready_seat().await;
+    mux.set_capture_after_paste(Capture::new(READY.to_owned(), (0, 1)))
+        .await;
+    let before = mux.recorded().await.len();
+    let err = seat
+        .submit(&binding, "hello", SubmitMode::Enter)
+        .await
+        .expect_err("empty");
+    assert!(err.to_string().contains("composer"));
+    let extra = &mux.recorded().await[before..];
+    assert!(!calls_include(extra, "send-keys"));
+}
+
+#[tokio::test]
+async fn submit_refuses_enter_when_the_draft_is_not_the_body() {
+    let (seat, binding, _home, mux) = ready_seat().await;
+    mux.set_capture_after_paste(Capture::new(
+        "╭──╮\n│ › nope │\n╰──╯\n  ? for shortcuts\n".to_owned(),
+        (0, 1),
+    ))
+    .await;
+    let before = mux.recorded().await.len();
+    let err = seat
+        .submit(&binding, "hello", SubmitMode::Enter)
+        .await
+        .expect_err("mismatch");
+    assert!(err.to_string().contains("paste"));
+    let extra = &mux.recorded().await[before..];
+    assert!(!calls_include(extra, "send-keys"));
+}
+
+#[tokio::test]
+async fn partial_last_line_is_skipped_until_it_completes() {
+    let body = "hello\nworld";
+    let (seat, binding, home, mux) = ready_seat().await;
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let mut partial = fs::read_to_string(&path).expect("rollout");
+    partial.push_str("{\"payload\":{\"text\":\"hel\"");
+    fs::write(&path, &partial).expect("partial");
+    let codex = home.codex_dir.clone();
+    let cwd = home.cwd.clone();
+    let finished = body.to_owned();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        write_rollout(&codex, "thread-a", &cwd, Some(&finished));
+    });
+    let receipt = seat
+        .submit(&binding, body, SubmitMode::Enter)
+        .await
+        .expect("submit");
+    assert_eq!(receipt.bytes, body.len());
+    assert!(calls_include(&mux.recorded().await, "send-keys"));
+}
+
+#[tokio::test]
+async fn partial_last_line_is_not_malformed_after_enter() {
+    let (seat, binding, home, _mux) = ready_seat().await;
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, None);
+    let mut partial = fs::read_to_string(&path).expect("rollout");
+    partial.push_str("{\"payload\":{\"text\":\"hel\"");
+    fs::write(&path, partial).expect("partial");
+    let err = seat
+        .submit(&binding, "hello", SubmitMode::Enter)
+        .await
+        .expect_err("waiting");
+    assert!(!err.to_string().contains("malformed"), "{}", err);
+    assert!(err.to_string().contains("rollout"));
+}
+
+#[tokio::test]
+async fn resume_rejects_a_bad_token_without_echoing_it() {
+    let home = home_with(LOGGED_IN);
+    let mux = Arc::new(FakeMux::new());
+    let seat = adapter(&mux, &home.bin);
+    let binding = binding(&home.cwd, "seat");
+    let mut launch = opts(&home, "seat");
+    let secret = "/tmp/secret-token";
+    launch.resume = Some(ResumeToken {
+        kind: "codex".to_owned(),
+        value: secret.to_owned(),
+    });
+    let err = seat.launch(&binding, launch).await.expect_err("token");
+    assert!(!err.to_string().contains(secret), "{err}");
+    assert!(err.to_string().contains("disallowed"), "{err}");
+    assert!(!calls_include(&mux.recorded().await, "new-session"));
+}
+
 #[expect(
     clippy::expect_used,
     reason = "a failed launch in the submit fixture fails the test"
@@ -87,6 +177,7 @@ async fn ready_seat() -> (
     crewmux_adapters::CodexAdapter,
     crewmux_adapters::NodeBinding,
     support::Home,
+    Arc<FakeMux>,
 ) {
     let home = home_with(LOGGED_IN);
     let mux = Arc::new(FakeMux::new());
@@ -97,5 +188,5 @@ async fn ready_seat() -> (
         .expect("launch");
     mux.set_capture(Capture::new(READY.to_owned(), (0, 1)))
         .await;
-    (seat, binding, home)
+    (seat, binding, home, mux)
 }

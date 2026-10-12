@@ -19,8 +19,11 @@ pub enum KnownDialog {
     },
     /// "Cannot use the background server". Never answered.
     CodexBackgroundServer,
-    /// Claude "Accessing workspace". Answered only when the spec opts in.
-    ClaudeTrust,
+    /// Claude "Accessing workspace". Answered only when the folder is the seat cwd.
+    ClaudeTrust {
+        /// Absolute folder from the dialog. Missing means fail closed.
+        folder: Option<std::path::PathBuf>,
+    },
     /// Claude bypass consent. Always escalated.
     ClaudeBypass,
 }

@@ -17,7 +17,7 @@ use crate::codex::lock::CodexLaunchLock;
 use crate::codex::preflight::{Preflight, codex_preflight_bin};
 use crate::codex::rollout::{RolloutLocator, RolloutSet, ThreadIdError};
 use crate::codex::screen::{CodexScreen, apply_preflight, classify};
-use crate::dialog::{AnswerPolicy, DialogDriver, DriveResult, PaneIo, planned_choice};
+use crate::dialog::{AnswerPolicy, DialogDriver, DriveResult, PaneIo, TrustSeat, planned_choice};
 use crate::error::Error;
 use crate::types::{
     AppliedLaunch, Capabilities, InstalledResource, LaunchOpts, LaunchOutcome, NodeBinding,
@@ -38,6 +38,7 @@ pub struct CodexAdapter {
 
 struct Track {
     preflight: Preflight,
+    home: PathBuf,
     codex_home: PathBuf,
     cwd: PathBuf,
     launched_at: SystemTime,
@@ -256,7 +257,9 @@ impl CodexAdapter {
             return Ok(screen);
         };
         let policy = self.policy_for(binding.seat).await;
-        let Some(choice) = planned_choice(dialog, policy) else {
+        let paths = self.trust_paths(binding.seat).await;
+        let trust = paths.as_ref().map(|(cwd, home)| TrustSeat { cwd, home });
+        let Some(choice) = planned_choice(dialog, policy, trust) else {
             return Ok(screen);
         };
         let io = MuxPane {
@@ -279,6 +282,12 @@ impl CodexAdapter {
             .get(&seat)
             .map(|track| track.policy)
             .unwrap_or_default()
+    }
+
+    async fn trust_paths(&self, seat: SeatId) -> Option<(PathBuf, PathBuf)> {
+        let guard = self.seats.lock().await;
+        let track = guard.get(&seat)?;
+        Some((track.cwd.clone(), track.home.clone()))
     }
 
     async fn prepare_fresh(
@@ -320,6 +329,7 @@ impl CodexAdapter {
         let id = opened.resume.map_or(IdState::Pending, IdState::Resolved);
         let track = Track {
             preflight: opened.preflight,
+            home: opened.paths.home,
             codex_home: opened.paths.codex_home,
             cwd: opened.paths.cwd,
             launched_at: SystemTime::now(),
@@ -345,6 +355,7 @@ impl CodexAdapter {
     ) {
         let track = Track {
             preflight,
+            home: paths.home.clone(),
             codex_home: paths.codex_home.clone(),
             cwd: paths.cwd.clone(),
             launched_at: SystemTime::UNIX_EPOCH,
@@ -611,8 +622,8 @@ fn failed_cwd(cwd: &Path) -> LaunchOutcome {
 fn to_readiness(screen: CodexScreen) -> Readiness {
     match screen {
         CodexScreen::Ready(_) => Readiness::Ready,
+        CodexScreen::Draft { .. } | CodexScreen::Inconclusive => Readiness::Inconclusive,
         CodexScreen::Busy => Readiness::Booting,
-        CodexScreen::Inconclusive => Readiness::Inconclusive,
         CodexScreen::Login(kind) => Readiness::Login {
             kind,
             evidence: LOGIN_REMEDY.to_owned(),
@@ -631,7 +642,7 @@ fn dialog_code(dialog: &crate::dialog::KnownDialog) -> ReadinessCode {
         KnownDialog::CodexUpdate { .. } => ReadinessCode::UpdateGate,
         KnownDialog::CodexMcpToolApproval { .. } => ReadinessCode::McpToolApproval,
         KnownDialog::CodexBackgroundServer => ReadinessCode::CodexBackgroundServer,
-        KnownDialog::ClaudeTrust => ReadinessCode::TrustGate,
+        KnownDialog::ClaudeTrust { .. } => ReadinessCode::TrustGate,
         KnownDialog::ClaudeBypass => ReadinessCode::BypassConsentGate,
     }
 }

@@ -32,3 +32,15 @@ fn quit_and_escape_fail_even_in_the_driver() {
     let err = lint_blind_enter(root.path()).expect_err("ctrl-c");
     assert!(err.to_string().contains("forbidden key"));
 }
+
+#[test]
+fn carriage_return_literal_fails_inside_submit() {
+    let root = tempfile::tempdir().expect("temp");
+    let file = root
+        .path()
+        .join("crates/crewmux-adapters/src/codex/submit.rs");
+    fs::create_dir_all(file.parent().expect("parent")).expect("dir");
+    fs::write(&file, "fn bad() { let _ = Key::Literal(\"\\r\"); }\n").expect("write");
+    let err = lint_blind_enter(root.path()).expect_err("cr");
+    assert!(err.to_string().contains("carriage return"), "{err}");
+}

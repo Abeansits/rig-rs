@@ -28,7 +28,14 @@ async fn background_server_menu_is_attention() {
         classify(&text),
         CodexScreen::Dialog(KnownDialog::CodexBackgroundServer)
     ));
-    assert!(planned_choice(&KnownDialog::CodexBackgroundServer, AnswerPolicy::default()).is_none());
+    assert!(
+        planned_choice(
+            &KnownDialog::CodexBackgroundServer,
+            AnswerPolicy::default(),
+            None
+        )
+        .is_none()
+    );
     let verdict = show(&text).await;
     assert_eq!(
         verdict.0,
@@ -62,19 +69,19 @@ fn agent_send_is_allow_for_this_session() {
         tool: "agent_send".to_owned(),
     };
     assert_eq!(
-        planned_choice(&dialog, AnswerPolicy::default()),
+        planned_choice(&dialog, AnswerPolicy::default(), None),
         Some(DialogChoice::AllowForSession)
     );
     let spike = KnownDialog::CodexMcpToolApproval {
         server: "rig".to_owned(),
         tool: "seat_send".to_owned(),
     };
-    assert!(planned_choice(&spike, AnswerPolicy::default()).is_none());
+    assert!(planned_choice(&spike, AnswerPolicy::default(), None).is_none());
     let off = AnswerPolicy {
         auto_trust: false,
         auto_approve_rig_tools: false,
     };
-    assert!(planned_choice(&dialog, off).is_none());
+    assert!(planned_choice(&dialog, off, None).is_none());
 }
 
 #[tokio::test]

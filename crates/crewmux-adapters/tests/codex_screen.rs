@@ -57,6 +57,88 @@ fn midturn_is_busy_not_ready() {
     assert!(text.contains("? for shortcuts"));
 }
 
+#[test]
+fn shell_prompt_is_not_ready() {
+    assert!(matches!(
+        classify("codex exited\n$"),
+        CodexScreen::ReturnedToShell
+    ));
+}
+
+#[test]
+fn draft_composer_is_not_ready() {
+    let text = "╭──╮\n│ › hello │\n╰──╯\n  ? for shortcuts\n";
+    match classify(text) {
+        CodexScreen::Draft { visible } => assert_eq!(visible, "hello"),
+        other => panic!("draft was {other:?}"),
+    }
+}
+
+#[test]
+fn unparsed_composer_is_not_ready() {
+    let text = "╭──╮\n│ working │\n╰──╯\n  ? for shortcuts\n";
+    assert!(matches!(classify(text), CodexScreen::Inconclusive));
+}
+
+#[test]
+fn ready_composer_ignores_scrollback_update_banner() {
+    let text = "\
+Update available! 0.162.0 → 0.162.1
+› 1. Update now (runs brew upgrade --cask codex)
+  2. Skip
+  3. Skip until next version
+╭──╮
+│ ›  │
+╰──╯
+  ? for shortcuts
+";
+    assert!(matches!(classify(text), CodexScreen::Ready(_)));
+}
+
+#[test]
+fn update_title_inside_prose_is_not_a_dialog() {
+    let text = "\
+The notes mention Update available in the changelog.
+› 1. Update now (runs brew upgrade --cask codex)
+  2. Skip
+  3. Skip until next version
+";
+    assert!(matches!(classify(text), CodexScreen::UnknownMenu { .. }));
+}
+
+#[test]
+fn dialog_title_after_the_composer_stays_a_dialog() {
+    let text = "\
+╭──╮
+│ ›  │
+╰──╯
+  ? for shortcuts
+Update available! 0.162.0 → 0.162.1
+› 1. Update now (runs brew upgrade --cask codex)
+  2. Skip
+  3. Skip until next version
+";
+    assert!(matches!(
+        classify(text),
+        CodexScreen::Dialog(KnownDialog::CodexUpdate { .. })
+    ));
+}
+
+#[test]
+fn numbered_menu_is_not_ready() {
+    let text = "Select a model\n› 1. gpt-5.1\n  2. gpt-5.1-codex\n";
+    assert!(matches!(classify(text), CodexScreen::UnknownMenu { .. }));
+}
+
+#[test]
+fn trust_prompt_is_not_ready() {
+    let text = "Accessing workspace\n/tmp/work\n› 1. Yes, I trust this folder\n  2. No, exit\n";
+    assert!(matches!(
+        classify(text),
+        CodexScreen::Dialog(KnownDialog::ClaudeTrust { .. })
+    ));
+}
+
 proptest::proptest! {
     #[test]
     fn interrupt_marker_is_never_ready(tail in "[a-z ]{0,24}") {

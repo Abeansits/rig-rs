@@ -88,11 +88,17 @@ These are deliberate behavioural differences from OpenRig v0.6.9, where matching
 - **Rust behaviour:** without a cursor the page is the newest `limit` rows, oldest first. A cursor pages forward (`id` greater than the cursor, ascending). An unknown topic is `UnknownTopic` after `has_topic` returns false, including when `limit` is 0.
 - **Required test:** `history_without_cursor_returns_the_newest_limit` and `unknown_topic_is_an_error`.
 
-## PE-013: Never send a blind Enter to a provider dialog
+## PE-014: Never send a blind Enter to a provider dialog
 
-- **TS behaviour:** `claude-code-adapter.ts` sends `Enter` on a trust gate without moving the cursor or checking which option is selected. A blind Enter on the current Codex update gate runs the update. On the Codex sign-in menu, `q` and Ctrl-C quit and digits pick a login method.
-- **Rust behaviour:** Enter is sent only from `DialogDriver::answer` after a re-capture shows `›` or `❯` on the chosen label, or from Codex `submit` after the classifier returns `Ready`. The driver sends Up and Down, then Enter. It does not send `q`, Ctrl-C, Escape, or digits. Codex update is answered "Skip", never "Update now". Login screens and the background-server menu are not answered. Stop uses the tmux kill path.
-- **Required tests:** `dialog_driver.rs::never_enter_on_default_no_exit`, `trust_not_answered_without_opt_in`, `codex_update_answers_skip_never_update`, `bypass_always_escalates`, `unknown_menu_escalates`, `cursor_verification_failure_escalates`, `no_quit_keys_on_login_menu`, and `xtask` `lint blind-enter`.
+- **TS behaviour:** `claude-code-adapter.ts` sends `Enter` on a trust gate without moving the cursor or checking which option is selected. A blind Enter on the current Codex update gate runs the update. On the Codex sign-in menu, `q` and Ctrl-C quit and digits pick a login method. The pinned Codex update tests send Enter and then the digit `3`.
+- **Rust behaviour:** Enter is sent only from `DialogDriver::answer` after a re-capture shows `›` or `❯` on the chosen label, or from Codex `submit` after the classifier returns an empty `Ready` composer, the paste is re-captured, and the visible draft is a non-empty prefix of the sent body. The driver sends Up and Down, then Enter. It does not send `q`, Ctrl-C, Escape, digits, or `Key::Literal("\r")`. Codex update is answered "Skip", never "Update now". Login screens and the background-server menu are not answered. Stop uses the tmux kill path. A composer that already holds a draft is not Ready.
+- **Required tests:** `dialog_driver.rs::never_enter_on_default_no_exit`, `trust_not_answered_without_opt_in`, `trust_accepts_only_the_seat_cwd`, `codex_update_answers_skip_never_update`, `bypass_always_escalates`, `unknown_menu_escalates`, `cursor_verification_failure_escalates`, `no_quit_keys_on_login_menu`, `draft_composer_is_not_ready`, `submit_refuses_enter_when_the_composer_stays_empty`, and `xtask` `lint blind-enter` (`carriage_return_literal_fails_inside_submit`).
+
+## PE-015: Codex thread id comes from the rollout file
+
+- **TS behaviour:** `codex-thread-id.ts` and `launchHarness` scrape the live child process, a nested wrapper, the process home, or the versioned logs database, and pick a thread while title generation is the newest log activity.
+- **Rust behaviour:** the id is `session_meta.payload.id` in `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Candidates are the before-snapshot difference, the per-cwd launch lock, and first-message correlation. A tie is `ThreadIdError::Ambiguous`. The id is never guessed from a process or a log row.
+- **Required tests:** `back_to_back_launches_get_distinct_ids`, `outside_rollout_is_correlated_by_the_first_message`, `unresolvable_tie_is_ambiguous`, and `snapshot_excludes_rollouts_from_before_launch`.
 
 ## Status of real-login testing
 All tests against **real logged-in Claude Code and Codex** (S1a composer delivery, S13 trust/MCP/bypass/update/ready screens, launch-to-ready end to end) are **pending**. The spike box has no logged-in CLIs, and none were logged in. This needs a box or account designated by Sebastian.

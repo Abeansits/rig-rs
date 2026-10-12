@@ -3,11 +3,12 @@
 #[path = "common/mod.rs"]
 mod support;
 
+use std::fs;
 use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crewmux_adapters::codex::{RolloutLocator, ThreadIdError};
+use crewmux_adapters::codex::{RolloutLocator, ThreadIdError, user_turn_texts};
 use crewmux_adapters::{AgentAdapter, LaunchOutcome};
 use crewmux_mux::FakeMux;
 use crewmux_types::ThreadId;
@@ -112,6 +113,22 @@ fn two_files_without_user_text_stay_not_yet() {
         .resolve(&before, &home.cwd, SystemTime::UNIX_EPOCH, Some("later"))
         .expect_err("waiting");
     assert!(matches!(err, ThreadIdError::NotYet));
+}
+
+#[test]
+fn partial_last_line_is_skipped_while_polling() {
+    let home = home_with(LOGGED_IN);
+    let path = write_rollout(&home.codex_dir, "thread-a", &home.cwd, Some("kept"));
+    let mut partial = fs::read_to_string(&path).expect("rollout");
+    partial.push_str("{\"payload\":{\"text\":\"hel\"");
+    fs::write(&path, &partial).expect("partial");
+    let turns = user_turn_texts(&path).expect("skip");
+    assert_eq!(turns, ["kept"]);
+    let mut finished_bad = partial;
+    finished_bad.push_str("\n{bad}\n");
+    fs::write(&path, finished_bad).expect("bad");
+    let err = user_turn_texts(&path).expect_err("malformed");
+    assert!(matches!(err, ThreadIdError::Malformed(_)));
 }
 
 #[test]
