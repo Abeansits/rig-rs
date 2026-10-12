@@ -129,6 +129,7 @@ mod tests {
         let listener = UnixListener::bind(&path).expect("bind");
         let cancel = CancellationToken::new();
         let task = tokio::spawn(serve(listener, fixture, cancel.clone()));
+        tokio::task::yield_now().await;
 
         let got = until_ready(path.clone(), hydrate_at)
             .await

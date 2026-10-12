@@ -376,14 +376,11 @@ fn exchange(
     head: &str,
     payload: &[u8],
 ) -> Result<Response, Error> {
+    let mut message = Vec::with_capacity(head.len().saturating_add(payload.len()));
+    message.extend_from_slice(head.as_bytes());
+    message.extend_from_slice(payload);
     stream
-        .write_all(head.as_bytes())
-        .map_err(|source| Error::Exchange {
-            target: target.to_owned(),
-            source,
-        })?;
-    stream
-        .write_all(payload)
+        .write_all(&message)
         .map_err(|source| Error::Exchange {
             target: target.to_owned(),
             source,

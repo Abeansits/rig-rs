@@ -95,6 +95,9 @@ async fn boot(label: &str, wait: Duration) -> Boot {
     std::fs::create_dir_all(&seat_dir).expect("seat dir");
     std::fs::write(seat_dir.join("claude-session-id"), session).expect("id");
     seed(&store, rig, seat, cwd.clone()).await;
+    super::remember_launched_claude(&app, &mux, session)
+        .await
+        .expect("lineage");
     let transcript = crewmux_transcript::transcript_path(&home, &cwd, session).expect("path");
     Boot {
         app,

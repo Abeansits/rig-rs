@@ -37,6 +37,10 @@ pub enum StreamKind {
     DeliveryRecorded,
     /// Contamination or another attention signal.
     AttentionRaised,
+    /// A stream item was stored. `/api/stream/watch` follows this kind.
+    StreamEmitted,
+    /// A classifier lease changed.
+    Classifier,
     /// A kind this build does not name. Never emitted.
     #[serde(other)]
     Other,
@@ -54,6 +58,8 @@ impl StreamKind {
             Self::QueueChanged => "queue_changed",
             Self::DeliveryRecorded => "delivery_recorded",
             Self::AttentionRaised => "attention_raised",
+            Self::StreamEmitted => "stream_emitted",
+            Self::Classifier => "classifier",
             Self::Other => "other",
         }
     }
@@ -80,6 +86,12 @@ pub struct StreamPayload {
     /// Attention or defer reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Stream item id for [`StreamKind::StreamEmitted`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_id: Option<String>,
+    /// Stream sequence, when the event names one item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
 }
 
 /// `GET /api/events`.

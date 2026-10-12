@@ -50,6 +50,9 @@ async fn unverified_compact_counts_as_sent() {
     std::fs::create_dir_all(&seat_dir).expect("seat dir");
     std::fs::write(seat_dir.join("claude-session-id"), session).expect("id");
     seed(&store, rig, seat, cwd).await;
+    super::remember_launched_claude(&app, &mux, session)
+        .await
+        .expect("lineage");
     {
         let mut guard = app.compaction.lock().await;
         guard.set_prep(
@@ -83,6 +86,56 @@ async fn unverified_compact_counts_as_sent() {
         .filter(|arg| arg.as_str() == "Enter")
         .count();
     assert_eq!(enters, 1, "only /compact is submitted");
+    drop(std::fs::remove_dir_all(&root));
+}
+
+#[tokio::test]
+async fn compact_refuses_before_paste_without_lineage() {
+    let root = std::env::temp_dir().join(format!("rig-skip-lineage-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+    std::fs::create_dir_all(root.join("work")).expect("work");
+    let seats = root.join("seats");
+    let mux = Arc::new(FakeMux::new());
+    let rule = "─".repeat(40);
+    mux.set_capture(Capture::new(
+        format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"),
+        (0, 0),
+    ))
+    .await;
+    let shared = share(&mux);
+    let adapter = ClaudeAdapter::new(Arc::clone(&shared), seats.clone(), root.join("home"))
+        .with_submit_wait(Duration::from_millis(40));
+    let mut registry = AdapterRegistry::new();
+    registry.register(Arc::new(adapter));
+    let store = Arc::new(crewmux_store::Store::open(std::path::Path::new(":memory:")).expect("db"));
+    let app = App::assemble(
+        Arc::clone(&store),
+        shared,
+        Arc::new(registry),
+        None,
+        CancellationToken::new(),
+        root.clone(),
+    );
+    let seat = SeatId::new();
+    let rig = RigId::new();
+    let cwd = root.join("work");
+    let session = "11111111-1111-4111-8111-111111111111";
+    let seat_dir = seats.join(seat.to_string());
+    std::fs::create_dir_all(&seat_dir).expect("seat dir");
+    std::fs::write(seat_dir.join("claude-session-id"), session).expect("id");
+    seed(&store, rig, seat, cwd).await;
+    let err = trigger(&app, br#"{"seat":"claude","skip_map":true}"#)
+        .await
+        .expect_err("missing lineage");
+    assert!(err.to_string().contains("lineage:"), "{err}");
+    let enters = mux
+        .recorded()
+        .await
+        .iter()
+        .flatten()
+        .filter(|arg| arg.as_str() == "Enter")
+        .count();
+    assert_eq!(enters, 0, "refused before paste");
     drop(std::fs::remove_dir_all(&root));
 }
 

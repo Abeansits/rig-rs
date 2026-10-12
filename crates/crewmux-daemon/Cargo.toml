@@ -37,11 +37,15 @@ tokio-stream.workspace = true
 [dev-dependencies]
 crewmux-transcript.workspace = true
 rusqlite.workspace = true
+# Hash the Claude Code 2.1.286 fd capture. Already in the workspace lockfile.
+sha2.workspace = true
 
 [features]
 # In-memory multiplexer for debug test builds. Release binaries leave this off
 # together with `debug_assertions`, so `RIG_FAKE_MUX` is not a production switch.
 fake-mux = []
+# Real tmux submit/lineage tests. Off unless `--features tmux-it` or `--all-features`.
+tmux-it = []
 
 [lints]
 workspace = true

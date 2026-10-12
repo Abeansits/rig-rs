@@ -1,0 +1,20 @@
+package @anthropic-ai/claude-code@2.1.286
+binary ELF claude.exe
+argv claude.exe -p ping --session-id 33333333-3333-4333-8333-333333333333
+pid 249250
+exit 1
+elapsed_s 0.4183
+stdout Not logged in · Please run /login
+stderr 
+jsonl_after_exit /tmp/claude-fix-print2/home/.claude/projects/-tmp-claude-fix-print2-work/33333333-3333-4333-8333-333333333333.jsonl
+fd_held_at_exit false
+open_fd_hits 1
+hit t=0.3170 fd=14 -> /tmp/claude-fix-print2/home/.claude/projects/-tmp-claude-fix-print2-work/33333333-3333-4333-8333-333333333333.jsonl
+jsonl_bytes 31895
+jsonl_lines 18
+first_type queue-operation
+first_sessionId 33333333-3333-4333-8333-333333333333
+transcript_version 2.1.286
+transcript_cwd /tmp/claude-fix-print2/work
+project_dir_encoding cwd non-alphanumerics become '-'
+encoded -tmp-claude-fix-print2-work

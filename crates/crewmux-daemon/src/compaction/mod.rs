@@ -1,6 +1,7 @@
 //! Claude compaction: hook intake, manual trigger, and restore delivery.
 //!
-//! Sends go through [`crate::submit::submit_text`], which requires `Ready`.
+//! Every paste goes through [`crate::submit::submit_text`], which requires
+//! `Ready` and waits on [`crate::lineage::ensure`].
 
 mod apply;
 mod http;
@@ -24,6 +25,43 @@ use crate::state::App;
 pub(crate) use http::routes;
 pub(crate) use persist::{load, save};
 pub(crate) use spool::drain_spools;
+
+/// Record a Claude pane so a later compaction paste passes `lineage::ensure`.
+///
+/// # Errors
+///
+/// Returns a display string when the seat, pane, or lineage row cannot be stored.
+#[cfg(test)]
+async fn remember_launched_claude(
+    app: &App,
+    mux: &crewmux_mux::FakeMux,
+    session_id: &str,
+) -> Result<(), String> {
+    use crewmux_mux::Multiplexer;
+    let seat = crate::query::find_seat(app, "claude")
+        .await
+        .map_err(|err| err.to_string())?;
+    let cwd = seat.cwd.clone().unwrap_or_default();
+    let name = seat
+        .tmux_session
+        .clone()
+        .unwrap_or_else(|| "seat__rig".to_owned());
+    let spec = crewmux_mux::SessionSpec::new(name, cwd);
+    let pane = mux
+        .create_session(&spec)
+        .await
+        .map_err(|err| err.to_string())?;
+    mux.set_pane_process(
+        &pane.session,
+        Some(1),
+        "claude",
+        Some(&format!("claude --session-id {session_id}")),
+    )
+    .await;
+    crate::lineage::record(app, &seat, &pane)
+        .await
+        .map_err(|err| err.to_string())
+}
 
 #[derive(Clone)]
 pub(crate) struct CompactPlan {

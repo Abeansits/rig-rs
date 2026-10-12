@@ -13,6 +13,7 @@ mod doctor_facts;
 mod doctor_fixture;
 mod doctor_live;
 mod error;
+mod health_cmd;
 mod herdr_probe;
 mod hook;
 pub mod output;
@@ -153,6 +154,12 @@ enum Commands {
         /// Hook event name, such as `PreCompact`.
         event: String,
     },
+    /// Health findings.
+    Health(health_cmd::HealthArgs),
+    /// Operator stream and the classifier lease.
+    Stream(health_cmd::StreamArgs),
+    /// Context usage samples.
+    Usage(health_cmd::UsageArgs),
     /// Capture or inspect a rig snapshot.
     Snapshot(slice8::SnapshotArgs),
     /// Relaunch a rig and reconcile in-flight deliveries.
@@ -207,6 +214,9 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Chatroom(args) => chatroom::run(&args),
         Commands::Compact(args) => compact::run(&args),
         Commands::Hook { event } => Ok(hook::run(&event)),
+        Commands::Health(args) => health_cmd::health(&args),
+        Commands::Stream(args) => health_cmd::stream(&args),
+        Commands::Usage(args) => health_cmd::usage(&args),
         Commands::Snapshot(args) => slice8::snapshot(&args),
         Commands::Restore(args) => slice8::restore(&args),
         Commands::RestoreCheck(args) => slice8::restore_check(&args),

@@ -1,0 +1,17 @@
+0 -> /dev/null
+1 -> pipe:[614869]
+2 -> pipe:[614870]
+3 -> anon_inode:[eventpoll]
+4 -> anon_inode:[eventfd]
+5 -> /dev/urandom
+6 -> /proc/249250/statm
+7 -> pipe:[614870]
+8 -> pipe:[614869]
+9 -> anon_inode:[eventpoll]
+10 -> anon_inode:[eventfd]
+11 -> socket:[616080]
+12 -> anon_inode:[eventpoll]
+13 -> anon_inode:[eventfd]
+14 -> /tmp/claude-fix-print2/home/.claude/projects/-tmp-claude-fix-print2-work/33333333-3333-4333-8333-333333333333.jsonl
+15 -> anon_inode:inotify
+16 -> socket:[614351]

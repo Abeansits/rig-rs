@@ -1,7 +1,5 @@
 //! In-memory stand-in for `rig-stub-agent`. The grammar matches `crewmux-adapters`.
 
-use crate::types::{Capture, CaptureRange};
-
 /// Parsed `RIG_STUB_SCRIPT`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StubPlan {
@@ -110,62 +108,6 @@ pub(crate) fn restore_stub_prompt(text: &str) -> Option<String> {
     }
     next.push_str("stub> \n");
     Some(next)
-}
-
-/// Insert `pasted` after the last `›`, keeping a closing box bar on the last line.
-pub(crate) fn spliced_composer(capture: &str, pasted: &str) -> String {
-    let Some(cursor) = capture.rfind('›') else {
-        return capture.to_owned();
-    };
-    let Some(mark) = capture.get(cursor..).and_then(|rest| rest.chars().next()) else {
-        return capture.to_owned();
-    };
-    let prefix_end = cursor.saturating_add(mark.len_utf8());
-    let line_start = capture
-        .get(..cursor)
-        .and_then(|head| head.rfind('\n'))
-        .map_or(0, |index| index.saturating_add(1));
-    let line_end = capture
-        .get(cursor..)
-        .and_then(|rest| rest.find('\n'))
-        .map_or(capture.len(), |index| cursor.saturating_add(index));
-    let Some(prefix) = capture.get(line_start..prefix_end) else {
-        return capture.to_owned();
-    };
-    let trailing = capture
-        .get(prefix_end..line_end)
-        .is_some_and(|tail| tail.trim_end().ends_with(['│', '┃']));
-    let suffix = if trailing { " │" } else { "" };
-    let mut rebuilt = String::new();
-    rebuilt.push_str(capture.get(..line_start).unwrap_or(""));
-    rebuilt.push_str(prefix);
-    rebuilt.push(' ');
-    rebuilt.push_str(pasted);
-    rebuilt.push_str(suffix);
-    rebuilt.push_str(capture.get(line_end..).unwrap_or(""));
-    rebuilt
-}
-
-/// Keep the requested tail of a capture, including a trailing newline.
-pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
-    let lines = match range {
-        CaptureRange::Visible | CaptureRange::Joined => return capture,
-        CaptureRange::LastLines(n) => usize::from(n),
-        CaptureRange::History(n) | CaptureRange::JoinedHistory(n) => {
-            usize::try_from(n).unwrap_or(usize::MAX)
-        }
-    };
-    let trailing = capture.text.ends_with('\n');
-    let kept: Vec<&str> = capture.text.lines().collect();
-    let count = kept.len();
-    let skip = count.saturating_sub(lines);
-    let mut text = kept.into_iter().skip(skip).collect::<Vec<_>>().join("\n");
-    // `lines` drops the terminator. An exact append is `before + payload`, so a
-    // prompt that ended with a newline has to keep it or every paste looks partial.
-    if trailing && skip < count {
-        text.push('\n');
-    }
-    Capture::new(text, capture.cursor)
 }
 
 fn debug_capture_override() -> Option<String> {

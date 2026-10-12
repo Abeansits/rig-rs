@@ -53,7 +53,7 @@ jobs:
       - name: Install tmux
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -qq && sudo apt-get install -y -qq tmux; else brew install tmux; fi
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -qq && sudo apt-get install -y -qq tmux nodejs; else brew install tmux; fi
           tmux -V
       - name: nextest (ci profile; per-crate features; differential filtered out)
         env:
@@ -259,6 +259,8 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-nextest
+      - name: Install node for process.title tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nodejs
       - name: Real-tmux tests (workspace, all-features, ci profile)
         shell: bash
         env:
