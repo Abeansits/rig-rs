@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 
 use crewmux_messaging::{PasteDisplay, claude_visible, expand_tabs};
 use crewmux_mux::{CaptureRange, PaneRef};
+use crewmux_types::RuntimeKind;
 
-use crate::composer::{ComposerParser, anchored_region, composer_empty};
+use crate::composer::{ComposerParser, anchored_region, composer_empty, recovery_keys};
 use crate::error::Error;
 use crate::state::App;
 
@@ -171,15 +172,17 @@ fn settled(
 ///
 /// The stub's clear is `C-u`, once per pasted line and at least 8 times.
 /// A tall buffer paste can still fill the pane after that budget: the prompt
-/// scrolls off and the seat looks like `unrecognised_screen`. One `C-g` drops
-/// the rest of the draft and redraws the prompt. Returns whether a recapture
-/// shows an empty composer. A composer that stays dirty is reported by the
-/// caller; this does not submit.
+/// scrolls off and the seat looks like `unrecognised_screen`. For the stub,
+/// one `C-g` drops the rest of the draft and redraws the prompt. Real
+/// runtimes do not get that key: Claude Code may open `$EDITOR`. Returns
+/// whether a recapture shows an empty composer. A composer that stays dirty
+/// is reported by the caller; this does not submit.
 pub(crate) async fn clear_composer(
     app: &App,
     pane: &PaneRef,
     range: CaptureRange,
     lines: usize,
+    runtime: RuntimeKind,
 ) -> Result<bool, Error> {
     let parser = ComposerParser::Stub;
     let budget = clear_passes(lines);
@@ -193,7 +196,7 @@ pub(crate) async fn clear_composer(
             }
         }
         if sent >= budget || (sent > 0 && Instant::now() >= deadline) {
-            return reset_composer(app, pane, range, parser).await;
+            return reset_composer(app, pane, range, parser, runtime).await;
         }
         app.mux.send_keys(pane, parser.clear_keys()).await?;
         sent = sent.saturating_add(1);
@@ -206,9 +209,13 @@ async fn reset_composer(
     pane: &PaneRef,
     range: CaptureRange,
     parser: ComposerParser,
+    runtime: RuntimeKind,
 ) -> Result<bool, Error> {
-    app.mux.send_keys(pane, parser.reset_keys()).await?;
-    tokio::time::sleep(Duration::from_millis(25)).await;
+    let keys = recovery_keys(runtime);
+    if !keys.is_empty() {
+        app.mux.send_keys(pane, keys).await?;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
     let text = app.mux.capture(pane, range).await?.text;
     Ok(composer_empty(parser, &text))
 }

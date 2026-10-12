@@ -149,6 +149,11 @@ impl HermeticHome {
         );
         env.insert("TMUX_ARGV_LOG".to_owned(), tmux_log.display().to_string());
         env.insert("TMUX_HARNESS_SOCKET".to_owned(), tmux_socket.clone());
+        // Same name the shim forces with `-L`. The daemon's Drop kills and
+        // unlinks `RIG_TMUX_SOCKET`. Leaving this unset makes that name the
+        // shared `rig-rs`, so a shim-rewritten kill-server and the unlink hit
+        // two different sockets and the developer's server disappears.
+        env.insert("RIG_TMUX_SOCKET".to_owned(), tmux_socket.clone());
         if let Some(real) = &real_tmux {
             env.insert("TMUX_REAL".to_owned(), real.display().to_string());
         }
@@ -251,7 +256,9 @@ impl Drop for HermeticHome {
         if let Some(real) = &self.real_tmux {
             let mut command = Command::new(real);
             command
-                .args(["-L", &self.tmux_socket, "kill-server"])
+                .args(["-L", &self.tmux_socket, "-f", "/dev/null", "kill-server"])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
@@ -259,7 +266,35 @@ impl Drop for HermeticHome {
                 drop(child.wait());
             }
         }
+        // kill-server can leave the socket file. The daemon clears
+        // `TMUX_TMPDIR`, so the file is under `/tmp/tmux-<uid>/`.
+        if let Some(uid) = current_uid() {
+            drop(fs::remove_file(format!(
+                "/tmp/tmux-{uid}/{}",
+                self.tmux_socket
+            )));
+        }
     }
+}
+
+fn current_uid() -> Option<u32> {
+    if let Ok(text) = fs::read_to_string("/proc/self/status") {
+        for line in text.lines() {
+            let Some(rest) = line.strip_prefix("Uid:") else {
+                continue;
+            };
+            return rest.split_whitespace().next()?.parse().ok();
+        }
+    }
+    let mut command = Command::new("id");
+    command
+        .arg("-u")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let child = command.spawn().ok()?;
+    let output = child.wait_with_output().ok()?;
+    String::from_utf8(output.stdout).ok()?.trim().parse().ok()
 }
 
 fn first_set(vars: &[(String, String)], names: &[&str]) -> Option<(String, String)> {
@@ -298,6 +333,7 @@ fn is_scrubbed(key: &str) -> bool {
         || CREDENTIAL_ENV.contains(&key)
         || key == "TMUX_TMPDIR"
         || key == "OPENRIG_DIR"
+        || key == "RIG_TMUX_SOCKET"
 }
 
 fn find_on_path(path: &str, name: &str) -> Option<PathBuf> {
@@ -317,8 +353,9 @@ fn python3_on_path() -> bool {
 
 fn fresh_socket_name() -> String {
     // Short on purpose: macOS `sockaddr_un` is 104 bytes, and tmux puts this
-    // name under a long temp directory. The pid prefix keeps Drop from killing a
-    // socket this process did not create.
+    // name under a long temp directory. The pid prefix keeps this Drop from
+    // killing a socket this process did not create. The same string is
+    // `RIG_TMUX_SOCKET`, so the daemon never falls through to `rig-rs`.
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.subsec_nanos());

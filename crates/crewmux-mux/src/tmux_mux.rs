@@ -67,6 +67,11 @@ pub struct TmuxMux {
     child: Arc<ControlSlot>,
     tracker: TaskTracker,
     control: JoinHandle<()>,
+    /// True when no server was listening before `new-session -A`.
+    ///
+    /// Drop reaps only that case. A server that was already up was attached
+    /// to, and killing it would take the caller's sessions with it.
+    created_server: bool,
 }
 
 impl Drop for TmuxMux {
@@ -75,21 +80,27 @@ impl Drop for TmuxMux {
         let child = Arc::clone(&self.child);
         let binary = self.binary.clone();
         let socket = self.socket.clone();
+        let created = self.created_server;
         let reaper = std::thread::spawn(move || {
             child.kill_and_wait();
             // The server is forked from the control client and reparented to
-            // init, so killing the client leaves it running. This mux started
-            // that client, including when a parent chose the socket name
-            // (`rig-rs-<their pid>-…`) or the name is the shared `rig-rs`.
+            // init, so killing the client leaves it running.
             //
-            // Sweeps and test teardowns still refuse a socket they do not own.
-            // See [`socket_owned_by`]. The bare name `rig-rs` is never owned.
+            // Reap only a server this mux created. `new-session -A` attaches
+            // when one is already listening; that server stays up, including
+            // the shared `rig-rs` a developer already had open. A server this
+            // mux created is still reaped when a parent chose the name
+            // (`rig-rs-<their pid>-…`). [`socket_owned_by`] is the sweep rule
+            // and is not a license to kill a server we only attached to. The
+            // bare name `rig-rs` is never owned, so a sweep will not kill it.
             //
             // `kill -9` of the daemon skips this Drop. That server stays up
             // until the next daemon starts: `new-session -A` attaches to it
             // instead of leaving a second server, and the next graceful
             // shutdown is what finally kills it.
-            kill_server(&binary, &socket);
+            if created {
+                kill_server(&binary, &socket);
+            }
         });
         drop(reaper.join());
         self.control.abort();
@@ -171,34 +182,35 @@ impl TmuxMux {
         cancel: CancellationToken,
     ) -> Result<Self, MuxError> {
         ensure_version(exec.as_ref()).await?;
+        // Probe before the control client. `new-session -A` creates the server
+        // when this fails, and attaches when a server is already up.
+        let created_server = !server_already_running(exec.as_ref()).await?;
         let binary = config
             .binary
             .to_str()
             .ok_or_else(|| MuxError::Control("tmux path is not utf-8".into()))?;
         let binary = binary.to_owned();
-        let tracker = TaskTracker::new();
-        let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
-        let (events, _) = broadcast::channel(2048);
-        let (own_write, _) = watch::channel(None);
-        let (bell_tx, bell_rx) = watch::channel(None);
-        let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
-        let child = Arc::new(ControlSlot::new());
-        let ctx = ControlCtx {
-            binary: config.binary.clone(),
-            socket: config.socket.clone(),
-            pause_after: config.pause_after,
-            exec: Arc::clone(&exec),
-            hub: Arc::clone(&hub),
-            events: events.clone(),
-            cancel: cancel.clone(),
-            child: Arc::clone(&child),
-            boot_tx: Some(boot_tx),
-            bell: bell_rx,
+        let Started {
+            tracker,
+            boot_rx,
+            events,
+            own_write,
+            bell_tx,
+            hub,
+            child,
+            control,
+            nudge_rx,
+        } = start_control(&config, &exec, &cancel);
+        let live = LiveConnect {
+            cancel: &cancel,
+            child: &child,
+            control: &control,
+            binary: &binary,
+            socket: &config.socket,
+            created_server,
         };
-        let nudge_rx = events.subscribe();
-        let control = tracker.spawn(run_control(ctx));
         if let Err(err) = wait_ready(boot_rx).await {
-            fail_connect(&cancel, &child, &control, &binary, &config.socket).await;
+            stop(&live).await;
             return Err(err);
         }
         tracker.spawn(crate::reap::nudge(
@@ -210,7 +222,7 @@ impl TmuxMux {
         let bell = match open_bell(exec.as_ref()).await {
             Ok(bell) => bell,
             Err(err) => {
-                fail_connect(&cancel, &child, &control, &binary, &config.socket).await;
+                stop(&live).await;
                 return Err(err);
             }
         };
@@ -218,7 +230,7 @@ impl TmuxMux {
         let socket_path = match read_socket_path(exec.as_ref()).await {
             Ok(path) => path,
             Err(err) => {
-                fail_connect(&cancel, &child, &control, &binary, &config.socket).await;
+                stop(&live).await;
                 return Err(err);
             }
         };
@@ -235,6 +247,7 @@ impl TmuxMux {
             child,
             tracker,
             control,
+            created_server,
         })
     }
 
@@ -273,12 +286,100 @@ async fn ensure_version(exec: &dyn TmuxExec) -> Result<(), MuxError> {
     ensure_supported(&found)
 }
 
+struct LiveConnect<'a> {
+    cancel: &'a CancellationToken,
+    child: &'a Arc<ControlSlot>,
+    control: &'a JoinHandle<()>,
+    binary: &'a str,
+    socket: &'a str,
+    created_server: bool,
+}
+
+async fn stop(live: &LiveConnect<'_>) {
+    fail_connect(
+        live.cancel,
+        live.child,
+        live.control,
+        live.binary,
+        live.socket,
+        live.created_server,
+    )
+    .await;
+}
+
+struct Started {
+    tracker: TaskTracker,
+    boot_rx: tokio::sync::oneshot::Receiver<Result<(), MuxError>>,
+    events: broadcast::Sender<MuxEvent>,
+    own_write: watch::Sender<Option<Instant>>,
+    bell_tx: watch::Sender<Option<String>>,
+    hub: Arc<tokio::sync::Mutex<Hub>>,
+    child: Arc<ControlSlot>,
+    control: JoinHandle<()>,
+    nudge_rx: broadcast::Receiver<MuxEvent>,
+}
+
+fn start_control(
+    config: &TmuxConfig,
+    exec: &Arc<dyn TmuxExec>,
+    cancel: &CancellationToken,
+) -> Started {
+    let tracker = TaskTracker::new();
+    let (boot_tx, boot_rx) = tokio::sync::oneshot::channel();
+    let (events, _) = broadcast::channel(2048);
+    let (own_write, _) = watch::channel(None::<Instant>);
+    let (bell_tx, bell_rx) = watch::channel(None::<String>);
+    let hub = Arc::new(tokio::sync::Mutex::new(Hub::default()));
+    let child = Arc::new(ControlSlot::new());
+    let nudge_rx = events.subscribe();
+    let ctx = ControlCtx {
+        binary: config.binary.clone(),
+        socket: config.socket.clone(),
+        pause_after: config.pause_after,
+        exec: Arc::clone(exec),
+        hub: Arc::clone(&hub),
+        events: events.clone(),
+        cancel: cancel.clone(),
+        child: Arc::clone(&child),
+        boot_tx: Some(boot_tx),
+        bell: bell_rx,
+    };
+    let control = tracker.spawn(run_control(ctx));
+    Started {
+        tracker,
+        boot_rx,
+        events,
+        own_write,
+        bell_tx,
+        hub,
+        child,
+        control,
+        nudge_rx,
+    }
+}
+
+async fn server_already_running(exec: &dyn TmuxExec) -> Result<bool, MuxError> {
+    match exec.run(&["list-sessions".to_owned()]).await {
+        // `NotFound` is "can't find session": the server answered.
+        Ok(_) | Err(MuxError::NotFound(_)) => Ok(true),
+        Err(MuxError::Exec { stderr, .. }) if server_missing(&stderr) => Ok(false),
+        // A live server with nothing in it says "no sessions".
+        Err(MuxError::Exec { stderr, .. }) if stderr.contains("no sessions") => Ok(true),
+        Err(err) => Err(err),
+    }
+}
+
+fn server_missing(stderr: &str) -> bool {
+    stderr.contains("no server running") || stderr.contains("error connecting to")
+}
+
 async fn fail_connect(
     cancel: &CancellationToken,
     child: &Arc<ControlSlot>,
     control: &JoinHandle<()>,
     binary: &str,
     socket: &str,
+    created_server: bool,
 ) {
     cancel.cancel();
     let slot = Arc::clone(child);
@@ -287,7 +388,9 @@ async fn fail_connect(
     drop(
         tokio::task::spawn_blocking(move || {
             slot.kill_and_wait();
-            kill_server(&binary, &socket);
+            if created_server {
+                kill_server(&binary, &socket);
+            }
         })
         .await,
     );
@@ -527,5 +630,17 @@ mod tests {
         assert!(!super::socket_owned_by("rig-rs-420-1", 42));
         assert!(!super::socket_owned_by("rig-rs-7", 42));
         assert!(!super::socket_owned_by("other-42", 42));
+    }
+
+    #[test]
+    fn a_missing_server_is_not_an_attach() {
+        assert!(super::server_missing(
+            "error connecting to /tmp/tmux-1/rig-rs (No such file or directory)"
+        ));
+        assert!(super::server_missing(
+            "no server running on /tmp/tmux-1/rig-rs"
+        ));
+        assert!(!super::server_missing("no sessions"));
+        assert!(!super::server_missing("can't find session: decoy"));
     }
 }

@@ -13,7 +13,7 @@ use crewmux_messaging::{
 use crewmux_mux::{
     CaptureRange, ComposerState, GuardConfig, GuardVerdict, Key, PasteOpts, evaluate,
 };
-use crewmux_types::ReadinessCode;
+use crewmux_types::{ReadinessCode, RuntimeKind};
 use serde_json::{Value, json};
 
 use crate::composer::{ComposerParser, classify_stub, stub_drafting};
@@ -29,6 +29,14 @@ const REASON_REQUIRED: &str = "--dangerously-interact requires --reason explaini
 struct PasteRoute {
     bracketed: bool,
     display: PasteDisplay,
+    runtime: RuntimeKind,
+}
+
+/// How this seat shows a paste, and which reset keys are safe to send.
+#[derive(Clone, Copy)]
+struct Shown {
+    display: PasteDisplay,
+    runtime: RuntimeKind,
 }
 
 /// One `rig send` or `rig broadcast`.
@@ -119,13 +127,17 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
     let seat = crate::query::find_address(app, target).await?;
     let address = address_of(app, &seat).await?;
     let pane = pane_of(&seat)?;
-    let display = PasteDisplay::for_runtime(seat.runtime);
+    let runtime = seat.runtime;
+    let shown = Shown {
+        display: PasteDisplay::for_runtime(runtime),
+        runtime,
+    };
     let shot = app.mux.capture(&pane, CaptureRange::Visible).await?;
     let readiness = classify(&shot.text);
     if readiness != Readiness::Ready {
-        return not_ready(app, outbound, &address, &pane, &readiness, display).await;
+        return not_ready(app, outbound, &address, &pane, &readiness, shown).await;
     }
-    guarded(app, outbound, &address, &pane, true, display).await
+    guarded(app, outbound, &address, &pane, true, shown).await
 }
 
 async fn not_ready(
@@ -134,7 +146,7 @@ async fn not_ready(
     address: &str,
     pane: &crewmux_mux::PaneRef,
     readiness: &Readiness,
-    display: PasteDisplay,
+    shown: Shown,
 ) -> Result<Value, Error> {
     if !outbound.interact {
         return Err(Error::Message(refusal(address, &reason_text(readiness))));
@@ -154,7 +166,8 @@ async fn not_ready(
         reason,
         PasteRoute {
             bracketed: false,
-            display,
+            display: shown.display,
+            runtime: shown.runtime,
         },
     )
     .await
@@ -166,7 +179,7 @@ async fn guarded(
     address: &str,
     pane: &crewmux_mux::PaneRef,
     bracketed: bool,
-    display: PasteDisplay,
+    shown: Shown,
 ) -> Result<Value, Error> {
     let now = Instant::now();
     let first = verdict(app, address, pane, now).await?;
@@ -183,7 +196,11 @@ async fn guarded(
         address,
         pane,
         "",
-        PasteRoute { bracketed, display },
+        PasteRoute {
+            bracketed,
+            display: shown.display,
+            runtime: shown.runtime,
+        },
     )
     .await
 }
@@ -241,14 +258,14 @@ async fn paste_and_check(
             DeliveryOutcome::Delivered
         }
         PasteHit::Contaminated => {
-            if !clear_composer(app, pane, range, lines).await? {
+            if !clear_composer(app, pane, range, lines, route.runtime).await? {
                 degraded = true;
             }
             raise(app, address, "contaminated").await;
             DeliveryOutcome::Contaminated
         }
         PasteHit::Missing => {
-            if !clear_composer(app, pane, range, lines).await? {
+            if !clear_composer(app, pane, range, lines, route.runtime).await? {
                 degraded = true;
             }
             raise(app, address, "did not render").await;

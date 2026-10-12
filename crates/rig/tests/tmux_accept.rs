@@ -112,6 +112,8 @@ mod live {
             if let Ok(mut child) = kill.spawn() {
                 drop(child.wait());
             }
+            // A server that has already exited leaves the socket file.
+            drop(std::fs::remove_file(crewmux_mux::socket_path(&self.socket)));
         }
     }
 

@@ -45,6 +45,9 @@ impl ComposerParser {
     }
 
     /// Drop whatever `C-u` left and redraw an empty prompt.
+    ///
+    /// `C-g` is the stub's reset. Claude Code may open `$EDITOR` for that
+    /// key, so callers must use [`recovery_keys`] for a real runtime.
     #[must_use]
     pub(crate) fn reset_keys(self) -> &'static [Key] {
         match self {
@@ -53,6 +56,21 @@ impl ComposerParser {
                 &KEYS
             }
         }
+    }
+}
+
+/// Keys that recover a failed paste for `runtime`.
+///
+/// Only the stub gets `C-g`. Claude Code can treat that byte as "open
+/// `$EDITOR`". Codex and the other runtimes have no reset key here.
+#[must_use]
+pub(crate) fn recovery_keys(runtime: crewmux_types::RuntimeKind) -> &'static [Key] {
+    match runtime {
+        crewmux_types::RuntimeKind::Stub => ComposerParser::Stub.reset_keys(),
+        crewmux_types::RuntimeKind::ClaudeCode
+        | crewmux_types::RuntimeKind::Codex
+        | crewmux_types::RuntimeKind::OpenCode
+        | crewmux_types::RuntimeKind::Terminal => &[],
     }
 }
 
@@ -128,4 +146,28 @@ pub(crate) fn composer_empty(parser: ComposerParser, screen: &str) -> bool {
     parser
         .region(screen)
         .is_some_and(|text| text.trim().is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use crewmux_mux::Key;
+    use crewmux_types::RuntimeKind;
+
+    use super::recovery_keys;
+
+    #[test]
+    fn failed_paste_reset_is_stub_only() {
+        assert_eq!(recovery_keys(RuntimeKind::Stub), &[Key::CtrlG]);
+        for runtime in [
+            RuntimeKind::ClaudeCode,
+            RuntimeKind::Codex,
+            RuntimeKind::OpenCode,
+            RuntimeKind::Terminal,
+        ] {
+            assert!(
+                recovery_keys(runtime).is_empty(),
+                "{runtime:?} must not be sent C-g"
+            );
+        }
+    }
 }

@@ -242,23 +242,24 @@ pub(crate) fn daemon_run_pids(rig_home: &Path) -> Vec<u32> {
 }
 
 fn is_daemon_run(cmdline: &[u8]) -> bool {
-    let mut args = cmdline
+    let args: Vec<&[u8]> = cmdline
         .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty());
-    let Some(bin) = args.next() else {
-        return false;
-    };
-    if bin != b"rig" && !bin.ends_with(b"/rig") {
-        return false;
-    }
-    let mut prev_daemon = false;
-    for arg in args {
-        if prev_daemon && arg == b"run" {
-            return true;
+        .filter(|arg| !arg.is_empty())
+        .collect();
+    args.iter().enumerate().any(|(index, arg)| {
+        if *arg != b"daemon" {
+            return false;
         }
-        prev_daemon = arg == b"daemon";
-    }
-    false
+        if args.get(index.saturating_add(1)).copied() != Some(b"run".as_slice()) {
+            return false;
+        }
+        // A real binary is `rig` or `…/rig`. A `#!/usr/bin/env python3` script
+        // at that path shows up as `python3`, then the script, then `daemon`.
+        let Some(program) = index.checked_sub(1).and_then(|prev| args.get(prev)) else {
+            return false;
+        };
+        *program == b"rig" || program.ends_with(b"/rig")
+    })
 }
 
 fn env_eq(env: &[u8], key: &str, value: &str) -> bool {
@@ -291,8 +292,13 @@ mod tests {
     fn daemon_match_is_the_exact_home_and_argv() {
         let cmd = b"/usr/bin/rig\0daemon\0run\0";
         assert!(is_daemon_run(cmd));
+        assert!(is_daemon_run(b"python3\0/tmp/rigrs-bin/rig\0daemon\0run\0"));
+        assert!(is_daemon_run(
+            b"/usr/bin/env\0python3\0/tmp/rig\0daemon\0run\0"
+        ));
         assert!(!is_daemon_run(b"/usr/bin/rig\0daemon\0status\0"));
         assert!(!is_daemon_run(b"/usr/bin/not-rig\0daemon\0run\0"));
+        assert!(!is_daemon_run(b"python3\0/tmp/not-rig\0daemon\0run\0"));
         let env = b"PATH=/bin\0RIG_HOME=/tmp/scratch\0HOME=/tmp/scratch\0";
         assert!(env_eq(env, "RIG_HOME", "/tmp/scratch"));
         assert!(!env_eq(env, "RIG_HOME", "/tmp"));

@@ -100,6 +100,95 @@ fn stub_seat_against_product_cli() {
     assert_eq!(left.canonical, right.canonical);
 }
 
+#[cfg(feature = "tmux-it")]
+mod tmux_it {
+    use std::process::{Command, Stdio};
+
+    use super::{exceptions, execute_rs, load_suite};
+
+    #[test]
+    fn preexisting_rig_rs_server_survives_the_harness() {
+        let bin = std::path::PathBuf::from(env!("CARGO_BIN_EXE_rig"));
+        let already = rig_rs_reachable();
+        let _decoy = (!already).then(Decoy::start);
+        let cases = load_suite(&exceptions()).unwrap();
+        let case = cases
+            .into_iter()
+            .find(|case| case.case.id == "daemon-health")
+            .unwrap();
+        execute_rs(&case, &bin).unwrap();
+        assert!(
+            rig_rs_reachable(),
+            "diff harness removed the shared rig-rs tmux server"
+        );
+    }
+
+    struct Decoy;
+
+    impl Decoy {
+        fn start() -> Self {
+            let mut command = Command::new("tmux");
+            command
+                .args([
+                    "-L",
+                    "rig-rs",
+                    "-f",
+                    "/dev/null",
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "rig-qa-decoy",
+                    "sleep",
+                    "3600",
+                ])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+            let child = command.spawn().unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Self
+        }
+    }
+
+    impl Drop for Decoy {
+        fn drop(&mut self) {
+            let mut command = Command::new("tmux");
+            command
+                .args(["-L", "rig-rs", "-f", "/dev/null", "kill-server"])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            if let Ok(mut child) = command.spawn() {
+                drop(child.wait());
+            }
+        }
+    }
+
+    fn rig_rs_reachable() -> bool {
+        let mut command = Command::new("tmux");
+        command
+            .args(["-L", "rig-rs", "-f", "/dev/null", "has-session"])
+            .env_remove("TMUX")
+            .env_remove("TMUX_TMPDIR")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+            .spawn()
+            .and_then(|mut child| child.wait())
+            .is_ok_and(|status| status.success())
+    }
+}
+
 fn exceptions() -> PathBuf {
     workspace_root().join("design/parity-exceptions.md")
 }
