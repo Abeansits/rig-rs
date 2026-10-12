@@ -98,10 +98,10 @@ pub(crate) async fn record(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
 /// `exec` keeps the pid and the start time, so those two do not prove which
 /// session is running. A session or resume token in argv must be the one stored
 /// at launch (a token the record lacks is a refusal). With no token, an open
-/// transcript fd or the newest `~/.claude/projects/<cwd>/<sid>.jsonl` has to
-/// name that id. Claude Code 2.1.286 writes that file and closes it, so a held
-/// fd is not required. A same-image exec that leaves no newer transcript is
-/// not distinguished.
+/// file has to name that id, or the send is refused. Claude Code 2.1.286 keeps
+/// `--session-id` in argv, so the native binary is covered by the token check.
+/// A version title that erases the token is refused. An in-app resume that
+/// leaves argv and open files unchanged is only caught after the send.
 ///
 /// # Errors
 ///
@@ -138,13 +138,7 @@ pub(crate) async fn ensure(app: &App, seat: &Seat, pane: &PaneRef) -> Result<(),
         }
         None => (None, None),
     };
-    let holds_session = held_session(
-        recorded.as_ref(),
-        argv.as_deref(),
-        live,
-        seat.cwd.as_deref(),
-    )
-    .await;
+    let holds_session = held_session(recorded.as_ref(), argv.as_deref(), live).await;
     if let Some(fault) = judge(
         recorded.as_ref(),
         live,
@@ -161,7 +155,6 @@ async fn held_session(
     recorded: Option<&PaneLineage>,
     argv: Option<&str>,
     live: Option<&PaneInfo>,
-    cwd: Option<&std::path::Path>,
 ) -> bool {
     let Some(expected) = recorded.and_then(|row| row.session_id.as_deref()) else {
         return false;
@@ -172,7 +165,7 @@ async fn held_session(
     let Some(pid) = live.and_then(|info| info.pid) else {
         return false;
     };
-    crate::lineage_held::session_is_proven(pid, expected, cwd).await
+    crate::lineage_held::process_holds_session(pid, expected).await
 }
 
 fn judge(
