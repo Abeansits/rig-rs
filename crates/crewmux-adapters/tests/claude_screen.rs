@@ -1,4 +1,4 @@
-//! Claude Code 2.1.286 screen corpus. Fixtures are reconstructed, not spike bytes.
+//! Claude screen corpus. Files are byte copies of the spike and `OpenRig` captures.
 #![expect(
     clippy::expect_used,
     clippy::panic,
@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crewmux_adapters::claude::{ClaudeScreen, LoginKind, classify_text};
-use crewmux_types::KnownDialog;
+use crewmux_adapters::claude::{ClassifiedDialog, ClaudeScreen, LoginKind, classify_text};
+use crewmux_types::DialogId;
 use proptest::prelude::*;
 use serde_json::Value;
 
@@ -18,10 +18,15 @@ mod support;
 
 #[test]
 fn every_corpus_file_is_labelled() {
-    let dir = support::fixtures().join("2.1.286");
-    let labels = load_labels(&dir);
+    for version in ["2.1.286", "2.1.289"] {
+        check_corpus(&support::fixtures().join(version));
+    }
+}
+
+fn check_corpus(dir: &Path) {
+    let labels = load_labels(dir);
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("corpus") {
+    for entry in std::fs::read_dir(dir).expect("corpus") {
         let path = entry.expect("entry").path();
         if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
             files.push(path);
@@ -36,7 +41,14 @@ fn every_corpus_file_is_labelled() {
         let label = labels
             .get(name)
             .unwrap_or_else(|| panic!("unlabelled {name}"));
-        let screen = classify_text(&support::read(&path));
+        let text = support::read(&path);
+        let sha = crewmux_transcript::fingerprint_raw(&text);
+        assert_eq!(
+            label.get("sha256").and_then(Value::as_str),
+            Some(sha.as_str()),
+            "{name} sha"
+        );
+        let screen = classify_text(&text);
         assert_label(&screen, label, name);
     }
 }
@@ -56,23 +68,21 @@ fn ac2_trust_dialog_defaults_to_no_exit() {
         "claude-018-trust.txt",
         "claude-030-trust.txt",
         "claude-039-trust.txt",
-        "claude-014-startup.txt",
-        "claude-015-startup.txt",
     ] {
-        expect_dialog(name, &KnownDialog::ClaudeTrust, "No, exit");
+        expect_dialog(name, DialogId::ClaudeTrust, "No, exit");
     }
 }
 
 #[test]
 fn ac3_bypass_dialog_defaults_to_no_exit() {
     expect_dialog(
-        "claude-050-bypass.txt",
-        &KnownDialog::ClaudeBypassConsent,
+        "claude-050-bypass-after-trust.txt",
+        DialogId::ClaudeBypassConsent,
         "No, exit",
     );
     expect_dialog(
-        "claude-051-bypass.txt",
-        &KnownDialog::ClaudeBypassConsent,
+        "claude-051-bypass-after-trust.txt",
+        DialogId::ClaudeBypassConsent,
         "No, exit",
     );
 }
@@ -83,35 +93,33 @@ fn ac4_mcp_dialog_names_the_server() {
         "claude-055-mcpgate-after-trust.txt",
         "claude-056-mcpgate-after-trust.txt",
     ] {
-        expect_dialog(
-            name,
-            &KnownDialog::ClaudeNewMcpServer {
-                name: "dummy".to_owned(),
-            },
+        let ClaudeScreen::Dialog(dialog) = classify_named(name) else {
+            panic!("{name} is not a dialog");
+        };
+        assert_eq!(dialog.id, DialogId::ClaudeNewMcpServer, "{name}");
+        assert_eq!(dialog.server.as_deref(), Some("dummy"), "{name}");
+        let at = dialog.cursor.expect("cursor");
+        assert_eq!(
+            dialog.options.get(at).expect("option").label,
             "Continue without using this MCP server",
+            "{name}"
         );
     }
-    expect_dialog(
-        "claude-054-mcpgate-before-trust.txt",
-        &KnownDialog::ClaudeTrust,
-        "No, exit",
-    );
+    expect_dialog("claude-054-mcpgate.txt", DialogId::ClaudeTrust, "No, exit");
 }
 
 #[test]
 fn ac5_fullscreen_renderer_dialog() {
     for name in [
-        "claude-007-fullscreen.txt",
-        "claude-008-fullscreen.txt",
-        "claude-009-fullscreen.txt",
-        "claude-010-fullscreen.txt",
-        "claude-011-fullscreen.txt",
+        "claude-007-startup.txt",
+        "claude-008-stable-unclassified.txt",
+        "claude-009-resize80x24.txt",
+        "claude-010-resize200x50.txt",
+        "claude-011-resize60x20.txt",
+        "claude-012-resize120x40.txt",
+        "claude-013-midturn.txt",
     ] {
-        expect_dialog(
-            name,
-            &KnownDialog::ClaudeFullscreenRenderer,
-            "1. Yes, try it",
-        );
+        expect_dialog(name, DialogId::ClaudeFullscreenRenderer, "Yes, try it");
     }
 }
 
@@ -119,24 +127,26 @@ fn ac5_fullscreen_renderer_dialog() {
 fn ac6_ready_and_midturn() {
     for name in [
         "claude-020-ready.txt",
-        "claude-021-ready-80x24.txt",
-        "claude-022-ready-200x50.txt",
-        "claude-023-ready-60x20.txt",
-        "claude-024-ready-120x40.txt",
-        "claude-025-after-turn.txt",
-        "claude-026-seat-ready.txt",
+        "claude-021-resize80x24.txt",
+        "claude-022-resize200x50.txt",
+        "claude-023-resize60x20.txt",
+        "claude-024-resize120x40.txt",
+        "claude-026-midturn.txt",
+        "claude-032-ready.txt",
+        "claude-041-ready.txt",
     ] {
         let screen = classify_named(name);
         assert!(screen.is_ready(), "{name} {screen:?}");
     }
-    for name in ["claude-040-midturn.txt", "claude-041-midturn.txt"] {
-        assert!(matches!(classify_named(name), ClaudeScreen::Busy), "{name}");
-    }
+    assert!(
+        matches!(classify_named("claude-025-midturn.txt"), ClaudeScreen::Busy),
+        "midturn"
+    );
 }
 
 #[test]
-fn ac7_reworded_trust_is_an_unknown_menu() {
-    let screen = classify_named("claude-synth-reworded-trust.txt");
+fn ac7_mcp_list_is_an_unknown_menu() {
+    let screen = classify_named("claude-064-s6-mcp-list.txt");
     assert!(
         matches!(screen, ClaudeScreen::UnknownMenu { .. }),
         "{screen:?}"
@@ -162,14 +172,14 @@ fn expect_login(name: &str, kind: LoginKind) {
     assert_eq!(classify_named(name), ClaudeScreen::Login(kind), "{name}");
 }
 
-fn expect_dialog(name: &str, known: &KnownDialog, cursor: &str) {
+fn expect_dialog(name: &str, id: DialogId, cursor: &str) {
     let ClaudeScreen::Dialog(dialog) = classify_named(name) else {
         panic!("{name} is not a dialog");
     };
-    assert_eq!(&dialog.known, known, "{name}");
+    assert_eq!(dialog.id, id, "{name}");
     let at = dialog.cursor.expect("cursor");
     let line = dialog.options.get(at).expect("option");
-    assert_eq!(line.text, cursor, "{name}");
+    assert_eq!(line.label, cursor, "{name}");
 }
 
 fn load_labels(dir: &Path) -> BTreeMap<String, Value> {
@@ -189,7 +199,11 @@ fn load_labels(dir: &Path) -> BTreeMap<String, Value> {
 
 fn assert_label(screen: &ClaudeScreen, label: &Value, name: &str) {
     match label.get("screen").and_then(Value::as_str) {
-        Some("ready") => assert!(screen.is_ready(), "{name}"),
+        Some("ready") => assert!(screen.is_ready(), "{name} {screen:?}"),
+        Some("draft") => {
+            assert!(matches!(screen, ClaudeScreen::Draft), "{name} {screen:?}");
+            assert!(!screen.is_ready(), "{name}");
+        }
         Some("busy") => assert!(matches!(screen, ClaudeScreen::Busy), "{name}"),
         Some("inconclusive") => {
             assert!(matches!(screen, ClaudeScreen::Inconclusive), "{name}");
@@ -210,27 +224,25 @@ fn assert_label(screen: &ClaudeScreen, label: &Value, name: &str) {
             let ClaudeScreen::Dialog(dialog) = screen else {
                 panic!("{name} {screen:?}");
             };
-            let cursor = label.get("cursor").and_then(Value::as_str).expect("cursor");
-            let at = dialog.cursor.expect("cursor index");
-            assert_eq!(dialog.options.get(at).expect("line").text, cursor);
-            match label.get("dialog").and_then(Value::as_str) {
-                Some("trust") => assert_eq!(dialog.known, KnownDialog::ClaudeTrust),
-                Some("bypass") => assert_eq!(dialog.known, KnownDialog::ClaudeBypassConsent),
-                Some("fullscreen") => {
-                    assert_eq!(dialog.known, KnownDialog::ClaudeFullscreenRenderer);
-                }
-                Some("mcp") => {
-                    let mcp = label.get("mcp").and_then(Value::as_str).unwrap_or("dummy");
-                    assert_eq!(
-                        dialog.known,
-                        KnownDialog::ClaudeNewMcpServer {
-                            name: mcp.to_owned()
-                        }
-                    );
-                }
-                other => panic!("{name} dialog {other:?}"),
-            }
+            assert_dialog(dialog, label, name);
         }
         other => panic!("{name} screen {other:?}"),
+    }
+}
+
+fn assert_dialog(dialog: &ClassifiedDialog, label: &Value, name: &str) {
+    let cursor = label.get("cursor").and_then(Value::as_str).expect("cursor");
+    let at = dialog.cursor.expect("cursor index");
+    assert_eq!(dialog.options.get(at).expect("line").label, cursor);
+    match label.get("dialog").and_then(Value::as_str) {
+        Some("trust") => assert_eq!(dialog.id, DialogId::ClaudeTrust),
+        Some("bypass") => assert_eq!(dialog.id, DialogId::ClaudeBypassConsent),
+        Some("fullscreen") => assert_eq!(dialog.id, DialogId::ClaudeFullscreenRenderer),
+        Some("mcp") => {
+            let mcp = label.get("mcp").and_then(Value::as_str).unwrap_or("dummy");
+            assert_eq!(dialog.id, DialogId::ClaudeNewMcpServer);
+            assert_eq!(dialog.server.as_deref(), Some(mcp));
+        }
+        other => panic!("{name} dialog {other:?}"),
     }
 }

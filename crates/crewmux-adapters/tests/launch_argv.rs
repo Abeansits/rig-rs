@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crewmux_adapters::{
-    AgentAdapter, BudgetOverrides, ClaudeAdapter, DeliveryCheck, Error, LaunchBudget, LaunchOpts,
-    ProbeQuery, ResumeToken, SeatIo, SubmitMode, TurnVerdict,
+    AgentAdapter, BudgetOverrides, ClaudeAdapter, Error, LaunchBudget, LaunchOpts, ResumeToken,
+    SeatIo, SubmitMode,
 };
 use crewmux_mux::FakeMux;
 use crewmux_types::SeatId;
@@ -28,12 +28,7 @@ async fn uses_flags_not_global_config() {
     let mux = Arc::new(FakeMux::new());
     let ready = support::read(&support::fixtures().join("2.1.286/claude-020-ready.txt"));
     mux.set_capture(support::capture(&ready)).await;
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     let mut binding = binding;
     binding.model = Some("haiku".to_owned());
@@ -71,12 +66,7 @@ async fn resume_uses_stored_id_flag() {
     let mux = Arc::new(FakeMux::new());
     let ready = support::read(&support::fixtures().join("2.1.286/claude-020-ready.txt"));
     mux.set_capture(support::capture(&ready)).await;
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     drop(
         adapter
@@ -109,16 +99,11 @@ async fn submit_matches_one_turn_and_rejects_a_composite() {
     let ready = support::read(&support::fixtures().join("2.1.286/claude-020-ready.txt"));
     let mux = Arc::new(FakeMux::new());
     mux.set_capture(support::capture(&ready)).await;
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        Arc::new(ScriptCheck {
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"))
+        .with_source(Arc::new(MemorySource {
             turns: vec!["hello\nworld".to_owned()],
-            verdict: TurnVerdict::Equal,
-        }),
-        root.join("seats"),
-        root.join("home"),
-    )
-    .with_submit_wait(Duration::from_millis(200));
+        }))
+        .with_submit_wait(Duration::from_millis(200));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     std::fs::create_dir_all(adapter.seat_dir(&binding.seat)).expect("dir");
     std::fs::write(
@@ -139,7 +124,6 @@ async fn submit_matches_one_turn_and_rejects_a_composite() {
         .await;
     let adapter = ClaudeAdapter::new(
         support::shared(&busy),
-        support::null_check(),
         root.join("seats"),
         root.join("home"),
     );
@@ -150,16 +134,21 @@ async fn submit_matches_one_turn_and_rejects_a_composite() {
 
     let mux = Arc::new(FakeMux::new());
     mux.set_capture(support::capture(&ready)).await;
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        Arc::new(ScriptCheck {
-            turns: vec!["wrapped twice".to_owned()],
-            verdict: TurnVerdict::Composite,
-        }),
-        root.join("seats"),
-        root.join("home"),
-    )
-    .with_submit_wait(Duration::from_secs(30));
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"))
+        .with_source(Arc::new(MemorySource {
+            turns: vec![
+                "\
+<pasted_content>
+wrapped twice
+</pasted_content>
+<pasted_content>
+other
+</pasted_content>
+"
+                .to_owned(),
+            ],
+        }))
+        .with_submit_wait(Duration::from_secs(30));
     let io = adapter.io_for(&binding).await.expect("io");
     let started = std::time::Instant::now();
     let err = io
@@ -175,12 +164,7 @@ async fn submit_matches_one_turn_and_rejects_a_composite() {
 async fn missing_cwd_does_not_launch() {
     let root = scratch("missing");
     let mux = Arc::new(FakeMux::new());
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let missing = root.join("nope");
     let binding = crewmux_adapters::binding_for(SeatId::new(), missing, "seat__rig");
     let outcome = adapter.launch(&binding, opts(None)).await.expect("outcome");
@@ -198,12 +182,7 @@ async fn interrupt_sends_no_key() {
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let mux = Arc::new(FakeMux::new());
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     std::fs::create_dir_all(adapter.seat_dir(&binding.seat)).expect("dir");
     std::fs::write(
@@ -218,22 +197,32 @@ async fn interrupt_sends_no_key() {
     drop(std::fs::remove_dir_all(&root));
 }
 
-struct ScriptCheck {
+struct MemorySource {
     turns: Vec<String>,
-    verdict: TurnVerdict,
 }
 
-impl DeliveryCheck for ScriptCheck {
-    fn cursor(&self, _query: &ProbeQuery) -> Result<u64, Error> {
-        Ok(0)
+impl crewmux_transcript::TranscriptSource for MemorySource {
+    fn runtime(&self) -> crewmux_types::RuntimeKind {
+        crewmux_types::RuntimeKind::ClaudeCode
     }
 
-    fn turns(&self, _query: &ProbeQuery) -> Result<Vec<String>, Error> {
-        Ok(self.turns.clone())
+    fn cursor(&self) -> Result<crewmux_transcript::TranscriptCursor, crewmux_transcript::Error> {
+        Ok(crewmux_transcript::TranscriptCursor(0))
     }
 
-    fn verdict(&self, _sent: &str, _stored: &str) -> TurnVerdict {
-        self.verdict
+    fn user_turns_after(
+        &self,
+        _after: crewmux_transcript::TranscriptCursor,
+    ) -> Result<Vec<crewmux_transcript::UserTurn>, crewmux_transcript::Error> {
+        Ok(self
+            .turns
+            .iter()
+            .cloned()
+            .map(|text| crewmux_transcript::UserTurn {
+                text,
+                at: crewmux_transcript::TranscriptCursor(0),
+            })
+            .collect())
     }
 }
 
@@ -274,11 +263,11 @@ mod tmux_it {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
-    use crewmux_adapters::{AgentAdapter, ClaudeAdapter, LaunchOpts, Readiness};
+    use crewmux_adapters::{
+        AgentAdapter, ClaudeAdapter, LaunchOpts, Readiness, SeatIo, SubmitMode,
+    };
     use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
     use crewmux_types::SeatId;
-
-    use super::support;
 
     static SOCKETS: AtomicU64 = AtomicU64::new(0);
 
@@ -314,12 +303,7 @@ mod tmux_it {
         }
         std::fs::set_permissions(&script, perms).expect("chmod");
         let mux: std::sync::Arc<dyn Multiplexer> = std::sync::Arc::new(mux);
-        let adapter = ClaudeAdapter::new(
-            mux,
-            support::null_check(),
-            root.join("seats"),
-            root.join("home"),
-        );
+        let adapter = ClaudeAdapter::new(mux, root.join("seats"), root.join("home"));
         let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
         let mut opts = super::opts(None);
         opts.budget = Some(crewmux_adapters::LaunchBudget::with_overrides(
@@ -366,7 +350,7 @@ mod tmux_it {
         let home = root.join("home");
         std::fs::create_dir_all(&home).expect("home");
         let mux: std::sync::Arc<dyn Multiplexer> = std::sync::Arc::new(mux);
-        let adapter = ClaudeAdapter::new(mux, support::null_check(), root.join("seats"), home);
+        let adapter = ClaudeAdapter::new(mux, root.join("seats"), home);
         let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "live__rig");
         let mut opts = LaunchOpts {
             session_name: "live__rig".to_owned(),
@@ -396,4 +380,103 @@ mod tmux_it {
         );
         drop(std::fs::remove_dir_all(&root));
     }
+
+    #[tokio::test]
+    async fn five_submits_on_a_real_tmux_pane() {
+        let n = SOCKETS.fetch_add(1, Ordering::Relaxed);
+        let socket = format!("rig-rs-{}-five{n}", std::process::id());
+        let mux = TmuxMux::connect(TmuxConfig {
+            binary: PathBuf::from("tmux"),
+            socket,
+            pause_after: false,
+        })
+        .await
+        .expect("tmux");
+        let root = super::scratch("five");
+        let cwd = root.join("work");
+        let home = root.join("home");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        std::fs::create_dir_all(&home).expect("home");
+        let script = root.join("claude");
+        std::fs::write(&script, super::FAKE_CLAUDE).expect("script");
+        let mut perms = std::fs::metadata(&script).expect("meta").permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o755);
+        }
+        std::fs::set_permissions(&script, perms).expect("chmod");
+        let shared: std::sync::Arc<dyn Multiplexer> = std::sync::Arc::new(mux);
+        let adapter = ClaudeAdapter::new(
+            std::sync::Arc::clone(&shared),
+            root.join("seats"),
+            home.clone(),
+        )
+        .with_submit_wait(Duration::from_secs(3));
+        let session = format!("five__{}", std::process::id());
+        let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, &session);
+        let mut opts = super::opts(None);
+        opts.session_name = session.clone();
+        opts.claude_bin = Some(script);
+        opts.env
+            .insert("HOME".to_owned(), home.display().to_string());
+        opts.env
+            .insert("PYTHONUNBUFFERED".to_owned(), "1".to_owned());
+        opts.budget = Some(crewmux_adapters::LaunchBudget::with_overrides(
+            crewmux_adapters::BudgetOverrides {
+                first_screen: Some(Duration::from_secs(3)),
+                ready_after_last_gate: Some(Duration::from_secs(3)),
+                inconclusive_stable: Some(Duration::from_secs(3)),
+                overall: Some(Duration::from_secs(8)),
+                poll: Some(Duration::from_millis(50)),
+            },
+        ));
+        drop(adapter.launch(&binding, opts).await.expect("launch"));
+        assert_eq!(
+            adapter.check_ready(&binding).await.expect("ready"),
+            Readiness::Ready
+        );
+        let io = adapter.io_for(&binding).await.expect("io");
+        for text in ["one", "two", "three", "four", "five"] {
+            let receipt = io.submit(text, SubmitMode::Enter).await.expect(text);
+            assert_eq!(receipt.bytes, text.len());
+        }
+        drop(shared.kill_session(&session).await);
+        drop(std::fs::remove_dir_all(&root));
+    }
 }
+
+#[cfg(feature = "tmux-it")]
+const FAKE_CLAUDE: &str = r#"#!/usr/bin/env python3
+import json, os, sys, time
+args = sys.argv[1:]
+sid = args[args.index("--session-id") + 1]
+home = os.environ["HOME"]
+slug = "".join(ch if ch.isascii() and ch.isalnum() else "-" for ch in os.getcwd())
+path = os.path.join(home, ".claude", "projects", slug, sid + ".jsonl")
+os.makedirs(os.path.dirname(path), exist_ok=True)
+
+def draw():
+    rule = "─" * 80
+    sys.stdout.write("\x1b[2J\x1b[H")
+    sys.stdout.write(rule + "\n")
+    sys.stdout.write("❯ \n")
+    sys.stdout.write(rule + "\n")
+    sys.stdout.write("  ? for shortcuts\n")
+    sys.stdout.write("\x1b[2;3H")
+    sys.stdout.flush()
+
+draw()
+while True:
+    line = sys.stdin.readline()
+    if line == "":
+        break
+    text = line.rstrip("\r\n")
+    if text == "":
+        draw()
+        continue
+    draw()
+    time.sleep(0.05)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n")
+"#;

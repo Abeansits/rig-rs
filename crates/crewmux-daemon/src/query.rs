@@ -152,7 +152,7 @@ async fn attached(app: &App, seat: &Seat) -> Result<bool, Error> {
     Ok(!clients.is_empty())
 }
 
-async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
+pub(crate) async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
     if name.len() > MAX_NAME_LEN || SeatName::new(name).is_err() {
         return Err(Error::Message("invalid seat name".to_owned()));
     }

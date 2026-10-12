@@ -1,27 +1,27 @@
-//! Dialogs and the Claude composer, shared by the screen classifier.
+//! Dialog identifiers and the Claude composer flag.
 
 use serde::{Deserialize, Serialize};
 
-/// A provider dialog identified by its title and its full option list.
+/// A provider dialog the driver can recognise.
 ///
-/// Codex variants besides the update prompt are slice 3. The update prompt is
-/// here because a blind Enter on it would run a package upgrade.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Parameters (folder, server, tool, versions) stay in the adapter tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum KnownDialog {
+pub enum DialogId {
     /// "Accessing workspace" / "Do you trust the files in this folder?".
     ClaudeTrust,
     /// Bypass-permissions consent. Never auto-answered.
     ClaudeBypassConsent,
     /// "New MCP server found". Never auto-answered.
-    ClaudeNewMcpServer {
-        /// Server name taken from the title line.
-        name: String,
-    },
+    ClaudeNewMcpServer,
     /// "Try the new fullscreen renderer?".
     ClaudeFullscreenRenderer,
-    /// "Update available". The safe answer is Skip, never Update now.
+    /// Codex "Update available". The safe answer is Skip, never Update now.
     CodexUpdate,
+    /// Codex MCP tool approval. Auto-approve is still pending (D1).
+    CodexMcpToolApproval,
+    /// Codex background server prompt. Never auto-answered.
+    CodexBackgroundServer,
 }
 
 /// Positive composer match. Ready screens carry this; menus do not.

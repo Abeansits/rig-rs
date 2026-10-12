@@ -38,6 +38,7 @@ crewmux-adapters = { path = "crates/crewmux-adapters" }
 crewmux-provider = { path = "crates/crewmux-provider" }
 crewmux-messaging = { path = "crates/crewmux-messaging" }
 crewmux-durability = { path = "crates/crewmux-durability" }
+crewmux-transcript = { path = "crates/crewmux-transcript" }
 crewmux-orchestration = { path = "crates/crewmux-orchestration" }
 crewmux-health = { path = "crates/crewmux-health" }
 crewmux-integrations = { path = "crates/crewmux-integrations" }

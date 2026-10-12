@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crewmux_adapters::{
-    BudgetOverrides, DeliveryCheck, Error, LaunchBudget, ProbeQuery, TurnVerdict,
-};
+use crewmux_adapters::{BudgetOverrides, LaunchBudget};
 use crewmux_mux::{Capture, FakeMux, Multiplexer};
 
 pub(crate) fn fixtures() -> PathBuf {
@@ -45,26 +43,6 @@ pub(crate) fn sent_paste(calls: &[Vec<String>]) -> bool {
         .any(|arg| arg == "paste-buffer" || arg == "load-buffer")
 }
 
-pub(crate) struct NullCheck;
-
-impl DeliveryCheck for NullCheck {
-    fn cursor(&self, _query: &ProbeQuery) -> Result<u64, Error> {
-        Ok(0)
-    }
-
-    fn turns(&self, _query: &ProbeQuery) -> Result<Vec<String>, Error> {
-        Ok(Vec::new())
-    }
-
-    fn verdict(&self, _sent: &str, _stored: &str) -> TurnVerdict {
-        TurnVerdict::Different
-    }
-}
-
-pub(crate) fn null_check() -> Arc<dyn DeliveryCheck> {
-    Arc::new(NullCheck)
-}
-
 pub(crate) fn shared(mux: &Arc<FakeMux>) -> Arc<dyn Multiplexer> {
     let cloned: Arc<FakeMux> = Arc::clone(mux);
     cloned
@@ -77,7 +55,6 @@ fn helpers_link() {
     let _budget = fast_budget();
     assert!(!sent_enter(&[]));
     assert!(!sent_paste(&[]));
-    drop(null_check());
     drop(capture("x"));
     drop(shared(&Arc::new(FakeMux::new())));
 }

@@ -1,8 +1,16 @@
-//! Cursor-verified answers for known provider dialogs.
+//! One dialog driver. Each adapter supplies a recognised-dialog table.
 //!
-//! Enter is sent only after a fresh capture shows the cursor on the requested
-//! choice. Bypass consent and the MCP dialog have no automatic choice.
+//! Enter is sent only from [`driver::DialogDriver::drive`], and only with a
+//! [`driver::VerifiedCursor`] built in that module.
 
-mod drive;
+mod driver;
+mod menu;
+mod policy;
+mod recognise;
+mod table;
 
-pub use drive::{Answered, DialogDriver, DialogOption, Escalate, MuxDialogDriver, auto_choice};
+pub use driver::{DialogDriver, DriveOutcome, MuxPane, NavKey, PaneIo, VerifiedCursor};
+pub use menu::{MenuOption, is_option_menu, parse_menu};
+pub use policy::{AnswerPolicy, EscalateReason, Plan, SeatContext, plan, same_dir};
+pub use recognise::{Recognised, recognise};
+pub use table::{Answer, DialogParams, DialogSpec, DialogTable, Gate, TitleMatch};

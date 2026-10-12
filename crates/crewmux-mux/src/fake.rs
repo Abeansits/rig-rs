@@ -337,6 +337,13 @@ impl Multiplexer for FakeMux {
         for batch in &batches {
             record(&mut guard, batch);
         }
+        if keys.iter().any(|key| matches!(key, Key::CtrlU)) && guard.replay.is_empty() {
+            guard.capture = clear_prompt(&guard.capture);
+            let session = canonical_session_name(&pane.session);
+            if let Some(screen) = guard.screens.get_mut(&session) {
+                *screen = clear_prompt(screen);
+            }
+        }
         if guard.replay.len() > 1 {
             guard.replay.pop_front();
         }
@@ -469,13 +476,46 @@ fn land_paste(capture: &Capture, payload: &str) -> Capture {
 
 fn empty_prompt_line(line: &str) -> bool {
     let inner = bar_inner(line).unwrap_or(line.trim());
-    matches!(inner, ">" | "❯" | "›" | "")
-        && (line.contains('>') || line.contains('❯') || line.contains('›'))
+    let Some(body) = strip_prompt_marker(inner) else {
+        return false;
+    };
+    let body = body.trim().trim_matches('\u{a0}');
+    body.is_empty() || is_idle_hint(body)
+}
+
+fn is_idle_hint(body: &str) -> bool {
+    let Some(rest) = body.strip_prefix("Try \"") else {
+        return false;
+    };
+    rest.ends_with('"') && !rest.chars().rev().skip(1).any(|ch| ch == '"')
+}
+
+fn strip_prompt_marker(text: &str) -> Option<&str> {
+    text.trim()
+        .strip_prefix('❯')
+        .or_else(|| text.trim().strip_prefix('>'))
+        .or_else(|| text.trim().strip_prefix('›'))
+}
+
+fn clear_prompt(capture: &Capture) -> Capture {
+    let mut lines: Vec<String> = capture.text.lines().map(str::to_owned).collect();
+    if let Some(index) = lines.iter().rposition(|line| {
+        empty_prompt_line(line) || strip_prompt_marker(line).is_some() || line.contains('│')
+    }) && let Some(line) = lines.get_mut(index)
+        && (line.contains('❯') || line.contains('>') || line.contains('›'))
+    {
+        *line = fill_prompt(line, "");
+    }
+    let mut text = lines.join("\n");
+    if capture.text.ends_with('\n') {
+        text.push('\n');
+    }
+    Capture::new(text, capture.cursor)
 }
 
 fn fill_prompt(line: &str, flat: &str) -> String {
     let Some(start) = line.find('│') else {
-        return format!("> {flat}");
+        return rewrite_marker(line, flat);
     };
     let Some(end) = line.rfind('│') else {
         return format!("> {flat}");
@@ -485,7 +525,29 @@ fn fill_prompt(line: &str, flat: &str) -> String {
     }
     let pre = line.get(..start).unwrap_or("");
     let post = line.get(end..).unwrap_or("");
-    format!("{pre}│ > {flat} {post}")
+    if flat.is_empty() {
+        format!("{pre}│ > {post}")
+    } else {
+        format!("{pre}│ > {flat} {post}")
+    }
+}
+
+fn rewrite_marker(line: &str, flat: &str) -> String {
+    let trimmed = line.trim_start();
+    let indent_len = line.len().saturating_sub(trimmed.len());
+    let indent = line.get(..indent_len).unwrap_or("");
+    let marker = if trimmed.starts_with('❯') {
+        "❯"
+    } else if trimmed.starts_with('›') {
+        "›"
+    } else {
+        ">"
+    };
+    if flat.is_empty() {
+        format!("{indent}{marker}")
+    } else {
+        format!("{indent}{marker} {flat}")
+    }
 }
 
 fn bar_inner(line: &str) -> Option<&str> {

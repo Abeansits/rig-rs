@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.286
+▝▜██████▀  Haiku 4.5 · Claude Pro
+ ▝▝   ▝▝   ~/openrig-spikes-scratch/proj/claude-f1
+
+  ✔ Using flicker-free rendering · if you want to go back, use /tui default
+    · Click to move your cursor in the text input
+    · Click to expand collapsed tool results
+    · By default, text auto-copies when you select it (/config to change)
+    · Hold Shift (Option in iTerm2, Fn in Terminal.app) while selecting to use your terminal's native copy instead
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+  1 more notice hidden
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                       Update available! Run: brew upgrade claude-code
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "refactor <filepath>"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

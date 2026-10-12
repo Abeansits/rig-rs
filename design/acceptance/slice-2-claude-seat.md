@@ -1,5 +1,7 @@
 # Slice 2: Claude Code seat
-Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), PE-001, PE-004, PE-005, PE-006. Spikes S1a, S9, S4, S13 (Mac rerun 2026-10-11; evidence `spikes/scratch/mac-rerun/`). PLAN 1.4, 2.5. TS sources: `daemon/src/adapters/claude-code-adapter.ts` (launch, `assessNativeResumeProbe`, trust auto-drive at lines 463–470), `claude-resume.ts`, `claude-managed-launch.ts`, `claude-activity-hooks.ts`.
+Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), ADR-0010, PE-001, PE-004, PE-013. Spikes S1a, S9, S4, S13 (Mac rerun 2026-10-11; evidence `spikes/scratch/mac-rerun/`). PLAN 1.4, 2.5. TS sources: `daemon/src/adapters/claude-code-adapter.ts` (launch, `assessNativeResumeProbe`, trust auto-drive at lines 463–470), `claude-resume.ts`, `claude-managed-launch.ts`, `claude-activity-hooks.ts`.
+
+The architect copies of this file and of ADR-0009 were not in the 2026-10-12 upload. This copy was updated in place to the ADR-0010 module paths. ADR-0009 in `design/adr/` is still the local amendment, not a replacement from that upload.
 
 ## Scope
 - `ClaudeAdapter: AgentAdapter`. Lifecycle:
@@ -9,8 +11,8 @@ Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), PE-001, PE
   - deliver with `SeatIo::submit` (paste sequence from slice 1b);
   - resume with `--resume <session-id>`.
 - **Gate classifier v2 (`rig-adapters::claude::screen`)**: a pure function `classify(&Capture) -> ClaudeScreen`, built from positive matches only. It is **not** a port of `assessNativeResumeProbe`.
-- **`DialogDriver`** (shared with slice 3, lives in `rig-adapters::dialog`): explicit, cursor-verified option selection (PE-006).
-- **Transcript probe**: locates `~/.claude/projects/<cwd-slug>/<session-id>.jsonl` and extracts user turns. Feeds ADR-0009 `normalize_for(Claude, …)`.
+- **`DialogDriver`** (shared with slice 3, lives in `crewmux-adapters::dialog`): explicit, cursor-verified option selection (PE-013). Claude supplies `CLAUDE_DIALOGS`.
+- **Transcript probe**: `crewmux-transcript::ClaudeTranscript` locates `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`. Feeds ADR-0009 `normalize_for(RuntimeKind::ClaudeCode, …)`.
 - Launch timeouts derived from the Mac timings (below).
 
 ## Non-goals
@@ -20,22 +22,20 @@ Source of truth: design README. ADR-0005, ADR-0008, ADR-0009 (Am. 2), PE-001, PE
 - Writing `~/.claude.json` while Claude runs (PE-004: never).
 
 ## Crates touched
-`rig-adapters` (`claude`, `dialog`, `screen_common`), `rig-provider::claude` (per-seat files from slice 7; the write path is reused), `rig-durability` (`TranscriptProbe` impl, normaliser), `rig-types` (`ReadinessCode`, `ComposerState`, `KnownDialog`), fixtures under `rig-adapters/tests/fixtures/screens/claude/2.1.286/`.
+`crewmux-adapters` (`claude`, `dialog`), `crewmux-transcript` (normaliser, fingerprints, `ClaudeTranscript`), `crewmux-provider::claude` (per-seat files from slice 7; the write path is reused), `crewmux-types` (`ReadinessCode`, `ComposerState`, `DialogId`). Fixtures under `crewmux-adapters/tests/fixtures/screens/claude/2.1.286/` and `2.1.289/` are byte copies plus a sha256 list in `labels.jsonl`. `crewmux-durability` has no slice 2 code.
 
 ## Public types / traits
 ```rust
 pub enum ClaudeScreen {
     Ready(ComposerState),            // composer + footer "? for shortcuts", no "esc to interrupt", no option menu
     Busy,                            // "esc to interrupt" present
-    Dialog(KnownDialog),             // positively identified title + full option list
+    Dialog(ClassifiedDialog),        // title + full option list from CLAUDE_DIALOGS
     Login(LoginKind),                // theme picker / login method / OAuth paste (PE-001)
     UnknownMenu { evidence: String },// any ❯/› cursor line or numbered list not matched above
     Inconclusive,                    // nothing matched (startup splash, blank)
 }
-pub enum KnownDialog { ClaudeTrust, ClaudeBypassConsent, ClaudeNewMcpServer { name: String },
-                       ClaudeFullscreenRenderer, /* Codex variants in slice 3 */ }
-pub struct DialogOption { pub text: &'static str, pub index: Option<u8> }
-pub trait DialogDriver { fn answer(&self, seat: &SeatId, d: &KnownDialog, choose: &DialogOption) -> Result<Answered, Escalate>; }
+pub enum DialogId { ClaudeTrust, ClaudeBypassConsent, ClaudeNewMcpServer, ClaudeFullscreenRenderer, /* Codex ids share the enum */ }
+pub struct VerifiedCursor { /* private; only DialogDriver::drive constructs it */ }
 pub struct LaunchBudget { pub first_screen: Duration, pub ready_after_last_gate: Duration,
                           pub inconclusive_stable: Duration, pub overall: Duration, pub poll: Duration }
 ```
@@ -65,14 +65,14 @@ The submit-to-transcript wait for delivery verification is 30 s.
 4. `claude-055/056` → `Dialog(ClaudeNewMcpServer{name:"dummy"})`. The "mcpgate" captures taken before trust → `Dialog(ClaudeTrust)`.
 5. The fullscreen-renderer captures (`claude-007…010` and the others matching "Try the new fullscreen renderer?") → `Dialog(ClaudeFullscreenRenderer)`.
 6. Ready, after-turn, resize (80x24, 200x50, 60x20, 120x40) and seat-ready captures → `Ready`. Midturn captures containing `esc to interrupt` → `Busy`.
-7. Any capture with a `❯`/`›` cursor line or a numbered list that matches no `KnownDialog` → `UnknownMenu`. This is proven with a synthetic variant (a trust dialog with a reworded title).
+7. Any capture with a `❯`/`›` cursor line or a numbered list that matches no `DialogId` → `UnknownMenu`. `claude-064-s6-mcp-list.txt` is that menu. A synthetic reworded trust title is not a corpus file.
 
-**Dialog handling (PE-006)**
+**Dialog handling (PE-013)**
 8. Given the trust dialog and `auto_trust: false` (the default), when the launch loop sees it, then the seat goes to `AttentionRequired(ClaudeTrust)` and **no key is sent**.
 9. Given `auto_trust: true`, when it is answered, then the keys are `Down` → re-capture showing `❯ Yes, I trust this folder` → `Enter`. If the re-capture shows the cursor elsewhere, it escalates without Enter.
 10. Bypass consent and New MCP server are always escalated. With `--strict-mcp-config` the MCP dialog is expected not to appear; if it does, doctor reports drift.
 11. Fullscreen renderer is answered "2. Not now", with cursor verification. If a per-seat `settings.json` key that suppresses it is found for the pinned version, it is written instead, and the test asserts that the dialog doesn't appear (live, gated).
-12. A lint (`xtask lint-blind-enter`) fails if `rig-adapters` sends `Enter` outside `SeatIo::submit` / `DialogDriver`.
+12. A lint (`xtask lint-blind-enter`) fails if `crewmux-adapters` sends `Enter` outside `claude/submit.rs` and `dialog/driver.rs`.
 
 **Launch, delivery, resume**
 13. Launch argv contains `--session-id <uuid>` (minted, stored before exec), `--mcp-config`, `--strict-mcp-config` and `--settings`. No file under `~/.claude*` is modified during or after the launch (checksum test against a fake HOME).
@@ -82,7 +82,7 @@ The submit-to-transcript wait for delivery verification is 30 s.
 ## Required tests
 - `claude_screen.rs`: one test per AC1–7, iterating over `tests/fixtures/screens/claude/2.1.286/*.txt` with the expected label from a checked-in `labels.jsonl` (built from `captures/index.jsonl` with the Rust label added). It also checks that **every** corpus file is labelled, so a new capture without a label fails.
 - PE-001: `theme_picker_is_not_ready`, `mcp_server_found_is_attention`, `fullscreen_renderer_popup_is_attention`, `ready_requires_footer_and_no_menu`.
-- PE-006: the `dialog_driver.rs` set listed in parity-exceptions, run against FakeMux replaying real captures.
+- PE-013: the `dialog_driver.rs` set listed in parity-exceptions, run against FakeMux replaying real captures.
 - ADR-0009: `normalize_real.rs` (Claude rows of `s1-claude.json`).
 - `launch_argv.rs`, `no_claude_json_writes.rs` (PE-004).
 - **Live (gated, `RIG_LIVE_CLAUDE=1`, needs Sebastian's login):**
@@ -97,7 +97,7 @@ The submit-to-transcript wait for delivery verification is 30 s.
 - Gated: the live set. **Status: the evidence it re-checks already exists from the Mac rerun** (S1a, S9, S13, S4). The live test is a regression guard, not an open blocker.
 
 ## Definition of done
-- All CI tests are green, and the ledger rows for `claude-code-adapter*.test.ts` are `ported`, or `diverged` with PE-001/PE-006.
+- All CI tests are green, and the ledger rows for `claude-code-adapter*.test.ts` are `ported`, `waived` with a target slice, or `diverged` with PE-001/PE-013.
 - The live set has passed once on Sebastian's Mac, with the version recorded.
 
 ## Dependencies
@@ -115,7 +115,7 @@ The design index calls the blind-Enter rule PE-006. In this repo that id is the 
 | 4 | MCP dialog names the server; pre-trust stays trust | `ac4_mcp_dialog_names_the_server`, `mcp_checkbox_is_a_gate` |
 | 5 | Fullscreen renderer dialog | `ac5_fullscreen_renderer_dialog` |
 | 6 | Ready captures and mid-turn busy | `ac6_ready_and_midturn` |
-| 7 | Reworded menu is unknown, not ready | `ac7_reworded_trust_is_an_unknown_menu`, `prose_does_not_open_a_dialog` |
+| 7 | Unrecognised menu is unknown, not ready | `ac7_mcp_list_is_an_unknown_menu`, `prose_does_not_open_a_dialog` |
 | 8 | No keys when auto-trust is off | `never_enter_on_default_no_exit`, `trust_not_answered_without_opt_in` |
 | 9 | Cursor verified before Enter; folder must be the seat cwd | `cursor_verification_failure_escalates`, `trust_folder_must_match_the_seat_cwd` |
 | 10 | Bypass and new MCP are not auto-answered | `bypass_always_escalates`, `mcp_server_found_is_attention` |

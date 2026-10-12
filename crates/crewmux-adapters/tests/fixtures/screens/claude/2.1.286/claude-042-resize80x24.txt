@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.286
+▝▜██████▀  Haiku 4.5 · Claude Pro
+ ▝▝   ▝▝   ~/openrig-spikes-scratch/proj/claude-f4
+
+▎ [✻] [✻] [✻] · Share Claude Code and earn $10 in usage credits · /passes
+
+
+
+
+
+
+
+
+
+
+
+
+
+  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and re…
+────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix typecheck errors"
+────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

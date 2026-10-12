@@ -445,6 +445,7 @@ fn key_name(key: &Key) -> Option<&str> {
         Key::Enter => Some("Enter"),
         Key::Escape => Some("Escape"),
         Key::CtrlC => Some("C-c"),
+        Key::CtrlU => Some("C-u"),
         Key::Up => Some("Up"),
         Key::Down => Some("Down"),
         Key::Tab => Some("Tab"),
@@ -477,7 +478,7 @@ pub(crate) fn send_keys_args(target: &str, keys: &[Key]) -> Result<Vec<Vec<Strin
                     text.clone(),
                 ]);
             }
-            Key::Enter | Key::Escape | Key::CtrlC | Key::Up | Key::Down | Key::Tab => {
+            Key::Enter | Key::Escape | Key::CtrlC | Key::CtrlU | Key::Up | Key::Down | Key::Tab => {
                 if let Some(name) = key_name(key) {
                     named.push(name);
                 }

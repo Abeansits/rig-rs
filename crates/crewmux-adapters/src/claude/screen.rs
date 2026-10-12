@@ -1,23 +1,29 @@
 //! Positive-match Claude screen classifier.
 //!
-//! This is not a port of `assessNativeResumeProbe`. Ready requires the composer
-//! border and a `? for shortcuts` footer, with no interrupt hint and no option menu.
+//! Ready is the last `❯` between box-drawing rules when that line is empty or
+//! an idle `Try "…"` hint, and the pane is not busy. A dialog is recognised
+//! from the view that starts at that prompt, so a trust screen in the
+//! scrollback is not the current dialog.
 
 use crewmux_mux::Capture;
-use crewmux_types::{ComposerState, KnownDialog, ReadinessCode};
+use crewmux_types::{ComposerState, DialogId, ReadinessCode};
 
-use crate::screen_common::{MenuLine, is_option_menu, menu_lines};
+use crate::claude::composer::{boxed_body, composer_anchor, composer_view, is_idle_body};
+use crate::claude::dialogs::CLAUDE_DIALOGS;
+use crate::dialog::{MenuOption, is_option_menu, parse_menu, recognise};
 use crate::types::Readiness;
 
 /// A classified known dialog, including the choice list and the cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassifiedDialog {
     /// Which dialog matched.
-    pub known: KnownDialog,
+    pub id: DialogId,
     /// Choices in screen order.
-    pub options: Vec<MenuLine>,
+    pub options: Vec<MenuOption>,
     /// Index of the cursor choice.
     pub cursor: Option<usize>,
+    /// MCP server name, when the title printed one.
+    pub server: Option<String>,
 }
 
 /// Why a Claude login screen is blocking.
@@ -25,7 +31,7 @@ pub struct ClassifiedDialog {
 pub enum LoginKind {
     /// First-run theme picker.
     ThemePicker,
-    /// "Select login method:".
+    /// "Select login method:" or the in-session login footer.
     LoginMethod,
     /// OAuth code paste.
     OAuthPaste,
@@ -34,9 +40,9 @@ pub enum LoginKind {
 /// One classification of a Claude pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClaudeScreen {
-    /// Composer and shortcuts footer, and nothing that would eat a key.
+    /// Empty composer, or an idle ghost hint, and nothing that would eat a key.
     Ready(ComposerState),
-    /// `esc to interrupt` is on screen, or a spinner with no interrupt hint.
+    /// `esc to interrupt`, or a leading spinner.
     Busy,
     /// The composer already holds text. Do not paste and do not send Enter.
     Draft,
@@ -73,7 +79,7 @@ impl ClaudeScreen {
     #[must_use]
     pub fn code(&self) -> Option<ReadinessCode> {
         Some(match self {
-            Self::Dialog(dialog) => dialog_code(&dialog.known),
+            Self::Dialog(dialog) => dialog_code(dialog.id),
             Self::Login(LoginKind::ThemePicker) => ReadinessCode::OnboardingTheme,
             Self::Login(LoginKind::LoginMethod | LoginKind::OAuthPaste) => {
                 ReadinessCode::LoginRequired
@@ -94,33 +100,47 @@ pub fn classify(capture: &Capture) -> ClaudeScreen {
 /// Classify captured text.
 #[must_use]
 pub fn classify_text(text: &str) -> ClaudeScreen {
-    let options = menu_lines(text);
-    if let Some(dialog) = identify_dialog(text, &options)
-        && is_claude(&dialog.known)
-    {
-        return ClaudeScreen::Dialog(dialog);
+    let anchor = composer_anchor(text);
+    let view = anchor
+        .as_ref()
+        .map_or(text, |anchor| composer_view(text, anchor));
+    if let Some(found) = recognise(CLAUDE_DIALOGS, view) {
+        return ClaudeScreen::Dialog(ClassifiedDialog {
+            id: found.spec.id,
+            server: found.params.server,
+            cursor: found.menu.iter().position(|option| option.selected),
+            options: found.menu,
+        });
     }
-    if no_conversation(text) {
+    if no_conversation(view) {
         return ClaudeScreen::UnknownMenu {
             evidence: clip(text),
         };
     }
-    if let Some(kind) = login_kind(text) {
+    if let Some(kind) = login_kind(view) {
         return ClaudeScreen::Login(kind);
     }
     if has_interrupt(text) || spinning(text) {
         return ClaudeScreen::Busy;
     }
-    if is_option_menu(&options) {
+    if is_option_menu(&parse_menu(view)) {
         return ClaudeScreen::UnknownMenu {
             evidence: clip(text),
         };
     }
-    if crate::claude::composer::is_draft(text) {
+    if let Some(anchor) = anchor {
+        if is_idle_body(&anchor.body) {
+            return ClaudeScreen::Ready(ComposerState { bordered: true });
+        }
         return ClaudeScreen::Draft;
     }
-    if crate::claude::composer::is_empty_composer(text) {
-        return ClaudeScreen::Ready(ComposerState { bordered: true });
+    if let Some(body) = boxed_body(text) {
+        if squash_empty(&body) && text.contains("? for shortcuts") && has_box_border(text) {
+            return ClaudeScreen::Ready(ComposerState { bordered: true });
+        }
+        if !squash_empty(&body) {
+            return ClaudeScreen::Draft;
+        }
     }
     ClaudeScreen::Inconclusive
 }
@@ -140,9 +160,7 @@ pub fn readiness(screen: &ClaudeScreen) -> Readiness {
 #[must_use]
 pub fn strict_mcp_drift(screen: &ClaudeScreen) -> Option<&'static str> {
     match screen {
-        ClaudeScreen::Dialog(dialog)
-            if matches!(dialog.known, KnownDialog::ClaudeNewMcpServer { .. }) =>
-        {
+        ClaudeScreen::Dialog(dialog) if dialog.id == DialogId::ClaudeNewMcpServer => {
             Some("mcp dialog appeared despite --strict-mcp-config")
         }
         ClaudeScreen::Ready(_)
@@ -155,166 +173,13 @@ pub fn strict_mcp_drift(screen: &ClaudeScreen) -> Option<&'static str> {
     }
 }
 
-/// Title plus the full option list. `None` when either side is missing.
-#[must_use]
-pub fn identify_dialog(text: &str, options: &[MenuLine]) -> Option<ClassifiedDialog> {
-    let known = dialog_kind(text, options)?;
-    Some(ClassifiedDialog {
-        known,
-        options: options.to_vec(),
-        cursor: crate::screen_common::cursor_index(options),
-    })
+fn squash_empty(body: &str) -> bool {
+    body.split_whitespace().next().is_none()
 }
 
-fn dialog_kind(text: &str, options: &[MenuLine]) -> Option<KnownDialog> {
-    if let Some(name) = mcp_name(text, options) {
-        return Some(KnownDialog::ClaudeNewMcpServer { name });
-    }
-    if line_has_title(text, "Try the new fullscreen renderer?")
-        && has_option(options, "1. Yes, try it")
-        && has_option(options, "2. Not now")
-    {
-        return Some(KnownDialog::ClaudeFullscreenRenderer);
-    }
-    if line_has_title(text, "Bypass Permissions")
-        && has_option(options, "No, exit")
-        && has_option(options, "Yes, I accept")
-    {
-        return Some(KnownDialog::ClaudeBypassConsent);
-    }
-    if trust_title(text) && has_option(options, "No, exit") && has_option(options, TRUST_YES) {
-        return Some(KnownDialog::ClaudeTrust);
-    }
-    if line_has_title(text, "Update available")
-        && options.iter().any(|line| line.text.contains("Update now"))
-        && options.iter().any(|line| line.text.contains("Skip"))
-    {
-        return Some(KnownDialog::CodexUpdate);
-    }
-    None
-}
-
-const TRUST_YES: &str = "Yes, I trust this folder";
-
-fn trust_title(text: &str) -> bool {
-    line_has_title(text, "Do you trust the files in this folder")
-        || line_has_title(text, "Quick safety check:")
-        || line_has_title(text, "Is this a project you created or one you trust?")
-        || line_has_title(text, "Accessing workspace")
-}
-
-/// Folder path on a trust screen. `None` when the title has no path.
-#[must_use]
-pub(crate) fn trust_folder(text: &str) -> Option<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    for (index, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("Accessing workspace") else {
-            continue;
-        };
-        let rest = rest.trim().trim_start_matches(':').trim();
-        if rest.starts_with('/') {
-            return Some(rest.to_owned());
-        }
-        let later = lines.get(index.saturating_add(1)..).unwrap_or(&[]);
-        for next in later {
-            let next = next.trim();
-            if next.is_empty() {
-                continue;
-            }
-            if next.starts_with('/') {
-                return Some(next.to_owned());
-            }
-            break;
-        }
-    }
-    None
-}
-
-/// The screen path and the seat cwd name the same directory.
-#[must_use]
-pub(crate) fn same_dir(screen_path: &str, cwd: &std::path::Path) -> bool {
-    trim_dir(screen_path) == trim_dir(&cwd.display().to_string())
-}
-
-fn trim_dir(path: &str) -> String {
-    let trimmed = path.trim().trim_end_matches('/');
-    if trimmed.is_empty() { "/" } else { trimmed }.to_owned()
-}
-
-fn mcp_name(text: &str, options: &[MenuLine]) -> Option<String> {
-    for line in text.lines() {
-        let Some(rest) = line
-            .trim()
-            .strip_prefix("New MCP server found in this project:")
-        else {
-            continue;
-        };
-        let name = rest.trim().trim_end_matches('.');
-        if !name.is_empty() && has_option(options, "Continue without using this MCP server") {
-            return Some(name.to_owned());
-        }
-    }
-    if !mcp_banner(text) || options.is_empty() {
-        return None;
-    }
-    let name = options
-        .first()
-        .map(|line| {
-            line.text
-                .trim()
-                .trim_start_matches("[✔]")
-                .trim()
-                .trim_start_matches("[ ]")
-                .trim()
-                .to_owned()
-        })
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "project".to_owned());
-    Some(name)
-}
-
-fn mcp_banner(text: &str) -> bool {
-    text.lines().any(|line| {
-        let trimmed = line.trim();
-        if trimmed.starts_with("New MCP server found") {
-            return true;
-        }
-        let digit = trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit());
-        trimmed.contains("MCP servers found in .mcp.json") && (digit || trimmed.starts_with("MCP"))
-    })
-}
-
-fn has_option(options: &[MenuLine], text: &str) -> bool {
-    options
-        .iter()
-        .any(|line| line.text == text || option_label(&line.text) == text)
-}
-
-fn option_label(text: &str) -> &str {
-    let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
-    if digits.is_empty() {
-        return text;
-    }
-    text.get(digits.len()..)
-        .and_then(|rest| rest.strip_prefix(". "))
-        .unwrap_or(text)
-}
-
-/// A title is the start of a line, after an optional `WARNING:` prefix.
-fn line_has_title(text: &str, title: &str) -> bool {
-    text.lines().any(|line| {
-        let trimmed = line.trim();
-        let trimmed = trimmed.strip_prefix("WARNING:").map_or(trimmed, str::trim);
-        let Some(rest) = trimmed.strip_prefix(title) else {
-            return false;
-        };
-        rest.is_empty() || rest.starts_with([' ', '?', ':', '.'])
-    })
-}
-
-fn is_claude(kind: &KnownDialog) -> bool {
-    !matches!(kind, KnownDialog::CodexUpdate)
+fn has_box_border(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.contains('╭') || line.contains('╰'))
 }
 
 fn login_kind(text: &str) -> Option<LoginKind> {
@@ -340,6 +205,17 @@ fn no_conversation(text: &str) -> bool {
     line_has_title(text, "No conversation found with session ID")
 }
 
+fn line_has_title(text: &str, title: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim();
+        let trimmed = trimmed.strip_prefix("WARNING:").map_or(trimmed, str::trim);
+        let Some(rest) = trimmed.strip_prefix(title) else {
+            return false;
+        };
+        rest.is_empty() || rest.starts_with([' ', '?', ':', '.'])
+    })
+}
+
 fn has_interrupt(text: &str) -> bool {
     text.to_ascii_lowercase().contains("esc to interrupt")
 }
@@ -347,30 +223,44 @@ fn has_interrupt(text: &str) -> bool {
 fn spinning(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim();
-        if trimmed.contains("Crunched") {
+        if trimmed.contains("Crunched") || trimmed.contains("· done") {
             return false;
         }
-        trimmed.chars().any(is_spinner)
-            || (trimmed.contains('…')
-                && (trimmed.starts_with("Working")
-                    || trimmed.contains("Thinking")
-                    || trimmed.contains("Onioning")
-                    || trimmed.contains("Sketching")
-                    || trimmed.contains("Processing")))
+        if trimmed
+            .chars()
+            .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+        {
+            return true;
+        }
+        if starts_with_spinner(trimmed) {
+            return true;
+        }
+        trimmed.contains('…')
+            && (trimmed.starts_with("Working")
+                || trimmed.contains("Thinking")
+                || trimmed.contains("Onioning")
+                || trimmed.contains("Sketching")
+                || trimmed.contains("Processing"))
     })
 }
 
-fn is_spinner(ch: char) -> bool {
-    ('\u{2800}'..='\u{28ff}').contains(&ch) || matches!(ch, '✶' | '✽')
+fn starts_with_spinner(trimmed: &str) -> bool {
+    const GLYPHS: &[char] = &['✶', '✽', '✢', '✻', '✳'];
+    if GLYPHS.iter().any(|glyph| trimmed.starts_with(*glyph)) {
+        return true;
+    }
+    trimmed.starts_with("· ") && trimmed.contains('…')
 }
 
-fn dialog_code(kind: &KnownDialog) -> ReadinessCode {
-    match kind {
-        KnownDialog::ClaudeTrust => ReadinessCode::TrustGate,
-        KnownDialog::ClaudeBypassConsent => ReadinessCode::BypassConsentGate,
-        KnownDialog::ClaudeNewMcpServer { .. } => ReadinessCode::McpGate,
-        KnownDialog::ClaudeFullscreenRenderer => ReadinessCode::FullscreenRenderer,
-        KnownDialog::CodexUpdate => ReadinessCode::UpdateGate,
+fn dialog_code(id: DialogId) -> ReadinessCode {
+    match id {
+        DialogId::ClaudeTrust => ReadinessCode::TrustGate,
+        DialogId::ClaudeBypassConsent => ReadinessCode::BypassConsentGate,
+        DialogId::ClaudeNewMcpServer => ReadinessCode::McpGate,
+        DialogId::ClaudeFullscreenRenderer => ReadinessCode::FullscreenRenderer,
+        DialogId::CodexUpdate
+        | DialogId::CodexMcpToolApproval
+        | DialogId::CodexBackgroundServer => ReadinessCode::UpdateGate,
     }
 }
 

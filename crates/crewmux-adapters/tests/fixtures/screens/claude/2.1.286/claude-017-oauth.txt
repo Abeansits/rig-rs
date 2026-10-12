@@ -1,3 +1,0 @@
-Paste the authorization code
-
-Waiting for the browser redirect.

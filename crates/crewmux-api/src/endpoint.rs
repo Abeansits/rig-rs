@@ -55,6 +55,24 @@ impl Endpoint for AttachInfo {
     const PATH: &'static str = "/api/seats/attach";
 }
 
+/// `POST /api/seats/submit`.
+#[derive(Debug)]
+pub struct SubmitSeat;
+
+impl Endpoint for SubmitSeat {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/seats/submit";
+}
+
+/// Body of [`SubmitSeat`].
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SubmitRequest {
+    /// Seat name.
+    pub seat: String,
+    /// Turn text. The daemon pastes it and sends Enter.
+    pub text: String,
+}
+
 /// `POST /api/rigs/down`.
 #[derive(Debug)]
 pub struct RigDown;

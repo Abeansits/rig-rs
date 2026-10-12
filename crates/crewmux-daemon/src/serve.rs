@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, ClaudeAdapter, StubAdapter};
-use crewmux_durability::ClaudeDelivery;
 use crewmux_mux::{Multiplexer, TmuxConfig, TmuxMux};
 use crewmux_store::Store;
 use tokio_util::sync::CancellationToken;
@@ -46,7 +45,6 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     )));
     registry.register(Arc::new(ClaudeAdapter::new(
         Arc::clone(&mux),
-        Arc::new(ClaudeDelivery),
         home.join("seats"),
         user_home(&home),
     )));

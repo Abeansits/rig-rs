@@ -25,12 +25,8 @@ pub(crate) async fn prepare(
         .await
         .map_err(|err| Error::Message(err.to_string()))??;
     let session_id = match &opts.resume {
-        Some(token) => {
-            if uuid::Uuid::parse_str(&token.value).is_err() {
-                return Err(Error::Message("resume token is not a UUID".to_owned()));
-            }
-            token.value.clone()
-        }
+        Some(token) => crewmux_transcript::canonical_session_id(&token.value)
+            .map_err(|_| Error::Message("resume token is not a UUID".to_owned()))?,
         None => mint_session_id(),
     };
     write_id(&seat_dir.join("claude-session-id"), &session_id).await?;

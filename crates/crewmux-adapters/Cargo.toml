@@ -12,6 +12,7 @@ crewmux-mux.workspace = true
 crewmux-provider.workspace = true
 crewmux-core.workspace = true
 crewmux-types.workspace = true
+crewmux-transcript.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

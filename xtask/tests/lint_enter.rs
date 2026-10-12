@@ -64,6 +64,51 @@ fn carriage_return_inside_submit_fails() {
 }
 
 #[test]
+fn planted_newline_into_and_const_fail() {
+    for (label, body) in [
+        ("nl", "fn sneak() { send(Key::Literal(\"\\n\")); }\n"),
+        ("hex", "fn sneak() { send(Key::Literal(\"\\x0d\")); }\n"),
+        ("uni", "fn sneak() { send(Key::Literal(\"\\u{d}\")); }\n"),
+        ("into", "fn sneak() { send(\"\\r\".into()); }\n"),
+        (
+            "concat",
+            "fn sneak() { send(Key::Literal(concat!(\"\\r\", \"\"))); }\n",
+        ),
+        (
+            "const",
+            "const CR: &str = \"\\r\";\nfn sneak() { send(Key::Literal(CR)); }\n",
+        ),
+        ("split", "fn sneak() { send(Key::\nEnter); }\n"),
+        (
+            "glob",
+            "use crewmux_types::Key::*;\nfn sneak() { send(Enter); }\n",
+        ),
+        ("cm", "fn sneak() { args.push(\"C-m\"); }\n"),
+        ("word", "fn sneak() { args.push(\"Enter\"); }\n"),
+    ] {
+        let root = scratch(label);
+        let path = root.join("crates/crewmux-adapters/src/claude/sneak.rs");
+        write(&path, body).expect("write");
+        let err = lint_blind_enter(&root).expect_err(label);
+        assert!(err.to_string().contains("Enter"), "{label} {err}");
+        drop(fs::remove_dir_all(&root));
+    }
+}
+
+#[test]
+fn submit_mode_enter_is_not_a_key() {
+    let root = scratch("mode");
+    let path = root.join("crates/crewmux-adapters/src/claude/screen.rs");
+    write(
+        &path,
+        "fn go(mode: SubmitMode) { let _ = mode == SubmitMode::Enter; }\n",
+    )
+    .expect("write");
+    lint_blind_enter(&root).expect("mode");
+    drop(fs::remove_dir_all(&root));
+}
+
+#[test]
 fn planted_digit_literal_fails() {
     let root = scratch("digit");
     let path = root.join("crates/crewmux-adapters/src/dialog/drive.rs");

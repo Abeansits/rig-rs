@@ -1,0 +1,225 @@
+//! On-screen paste check.
+//!
+//! Derived from openrig packages/daemon/src/domain/session-transport.ts
+//! `hasExpectedStagedText` (v0.6.9, Apache-2.0); ported to Rust and modified.
+//! A single `[Pasted text #N +X lines]` token is accepted when X is within one
+//! of the payload's line count. Several tokens still need the residual suffix
+//! to land on an exact source-line boundary.
+
+/// The composer shows `payload`, or Claude's collapsed paste of it.
+#[must_use]
+pub(crate) fn staged_matches(screen: &str, payload: &str) -> bool {
+    let Some(region) = input_region(screen) else {
+        return false;
+    };
+    if payload.is_empty() {
+        return false;
+    }
+    let flat = collapse_ws(&region);
+    let counts = placeholder_counts(&flat);
+    if counts.is_empty() {
+        let head: String = squash_ws(payload).chars().take(24).collect();
+        return !head.is_empty() && squash_ws(&region).contains(&head);
+    }
+    if counts.len() == 1
+        && let Some(count) = counts.first().copied()
+        && count > 0
+        && count.abs_diff(line_count(payload)) <= 1
+    {
+        return true;
+    }
+    let residual = residual_text(&flat);
+    let piece = squash_ws(payload);
+    if residual.chars().count() < 48 || !piece.ends_with(&residual) {
+        return false;
+    }
+    let Some(boundary) = source_boundary(payload, residual.chars().count()) else {
+        return false;
+    };
+    let sum: usize = counts.iter().copied().sum();
+    sum == boundary
+}
+
+fn input_region(screen: &str) -> Option<String> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let mut current = None;
+    for (index, line) in lines.iter().enumerate() {
+        if line.trim_start().starts_with('❯') {
+            current = Some(index);
+        }
+    }
+    let start = current?;
+    let input = lines.get(start)?.trim_start();
+    if numbered_choice(input) {
+        return None;
+    }
+    let mut end = lines.len();
+    for (index, line) in lines.iter().enumerate().skip(start.saturating_add(1)) {
+        if is_rule(line) {
+            end = index;
+            break;
+        }
+    }
+    Some(lines.get(start..end)?.join("\n"))
+}
+
+fn numbered_choice(input: &str) -> bool {
+    let rest = input.trim_start_matches('❯').trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return false;
+    }
+    rest.get(digits.len()..)
+        .is_some_and(|after| after.starts_with('.') || after.starts_with(". "))
+}
+
+fn is_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.chars().count() >= 10
+        && trimmed
+            .chars()
+            .all(|ch| ch == '─' || ch == '═' || ch == '-')
+}
+
+fn line_count(payload: &str) -> usize {
+    if payload.is_empty() {
+        0
+    } else {
+        payload.split('\n').count()
+    }
+}
+
+fn collapse_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn squash_ws(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+fn placeholder_counts(flat: &str) -> Vec<usize> {
+    let mut counts = Vec::new();
+    let mut rest = flat;
+    while let Some(start) = rest.find("[Pasted text #") {
+        let Some(after) = rest.get(start.saturating_add("[Pasted text #".len())..) else {
+            break;
+        };
+        let Some(plus) = after.find(" +") else {
+            break;
+        };
+        let Some(tail) = after.get(plus.saturating_add(2)..) else {
+            break;
+        };
+        let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+        if digits.is_empty() {
+            rest = tail;
+            continue;
+        }
+        let Some(suffix) = tail.get(digits.len()..) else {
+            break;
+        };
+        if !suffix.starts_with(" lines]") {
+            rest = suffix;
+            continue;
+        }
+        if let Ok(count) = digits.parse() {
+            counts.push(count);
+        }
+        rest = suffix.get(" lines]".len()..).unwrap_or("");
+    }
+    counts
+}
+
+fn residual_text(flat: &str) -> String {
+    let mut kept = String::new();
+    let mut rest = flat;
+    while !rest.is_empty() {
+        if let Some(stripped) = strip_prefix_ci(rest, "[Pasted text #")
+            && let Some(end) = stripped.find(" lines]")
+        {
+            rest = stripped
+                .get(end.saturating_add(" lines]".len())..)
+                .unwrap_or("");
+            continue;
+        }
+        if let Some(stripped) = strip_prefix_ci(rest, "paste again to expand") {
+            rest = stripped;
+            continue;
+        }
+        if let Some(stripped) = strip_prefix_ci(rest, "ctrl+g to edit in vim") {
+            rest = stripped;
+            continue;
+        }
+        if let Some(stripped) = strip_prefix_ci(rest, "ctrl+g to edit") {
+            rest = stripped;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        kept.push(ch);
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+    }
+    let squashed = squash_ws(&kept);
+    squashed.strip_prefix('❯').unwrap_or(&squashed).to_owned()
+}
+
+fn strip_prefix_ci<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut chars = text.chars();
+    for expected in prefix.chars() {
+        let found = chars.next()?;
+        if !found.eq_ignore_ascii_case(&expected) {
+            return None;
+        }
+    }
+    Some(chars.as_str())
+}
+
+fn source_boundary(payload: &str, residual_chars: usize) -> Option<usize> {
+    let lines: Vec<&str> = payload.split('\n').collect();
+    let mut acc = 0usize;
+    for index in (0..lines.len()).rev() {
+        let line = lines.get(index)?;
+        acc = acc.saturating_add(squash_ws(line).chars().count());
+        if acc >= residual_chars {
+            return Some(index);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::staged_matches;
+
+    #[test]
+    fn single_placeholder_accepts_a_nearby_line_count() {
+        let screen = "\
+────────────────────────────────────────────────────────────────────────────────
+❯ [Pasted text #2 +29 lines]
+────────────────────────────────────────────────────────────────────────────────
+  paste again to expand
+";
+        let payload = "alpha line of pasted text\n".repeat(28) + "alpha line of pasted text";
+        assert_eq!(payload.split('\n').count(), 29);
+        assert!(staged_matches(screen, &payload), "29 lines");
+        let nearby = format!("{payload}\nextra");
+        assert_eq!(nearby.split('\n').count(), 30);
+        assert!(staged_matches(screen, &nearby), "30 lines is within one");
+        assert!(
+            !staged_matches(screen, "hello"),
+            "an unrelated placeholder is not a match"
+        );
+    }
+
+    #[test]
+    fn collapsed_capture_matches_a_29_line_payload() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/screens/claude/2.1.289/collapsed-paste-hint.txt");
+        let screen = std::fs::read_to_string(&path).expect("fixture");
+        let payload = "line of pasted text\n".repeat(28) + "line of pasted text";
+        assert_eq!(payload.split('\n').count(), 29);
+        assert!(staged_matches(&screen, &payload), "{screen}");
+        assert!(!staged_matches(&screen, "not the paste"));
+    }
+}

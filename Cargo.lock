@@ -493,6 +493,7 @@ dependencies = [
  "crewmux-core",
  "crewmux-mux",
  "crewmux-provider",
+ "crewmux-transcript",
  "crewmux-types",
  "proptest",
  "serde_json",
@@ -553,7 +554,6 @@ dependencies = [
  "crewmux-adapters",
  "crewmux-api",
  "crewmux-core",
- "crewmux-durability",
  "crewmux-health",
  "crewmux-integrations",
  "crewmux-messaging",
@@ -561,6 +561,7 @@ dependencies = [
  "crewmux-orchestration",
  "crewmux-spec",
  "crewmux-store",
+ "crewmux-transcript",
  "crewmux-types",
  "futures-util",
  "rusqlite",
@@ -578,16 +579,7 @@ dependencies = [
 name = "crewmux-durability"
 version = "0.0.0"
 dependencies = [
- "crewmux-adapters",
  "crewmux-core",
- "crewmux-mux",
- "crewmux-types",
- "serde_json",
- "sha2 0.11.0",
- "thiserror 2.0.21",
- "tokio",
- "unicode-normalization",
- "uuid",
 ]
 
 [[package]]
@@ -686,6 +678,18 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "crewmux-transcript"
+version = "0.0.0"
+dependencies = [
+ "crewmux-types",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+ "uuid",
 ]
 
 [[package]]

@@ -16,7 +16,7 @@ use crewmux_adapters::{
     Readiness, ResumeToken, SeatIo, SubmitMode,
 };
 use crewmux_mux::FakeMux;
-use crewmux_types::{KnownDialog, ReadinessCode, SeatId};
+use crewmux_types::{DialogId, ReadinessCode, SeatId};
 
 #[path = "common/mod.rs"]
 mod support;
@@ -75,16 +75,14 @@ fn multiline_draft_is_not_ready() {
 
 #[test]
 fn history_prompt_is_not_the_current_draft() {
-    let screen = "\
-❯ previous user request
-● Completed response.
-
-╭────────────────────────────────────────╮
-│ >                                      │
-╰────────────────────────────────────────╯
-  ? for shortcuts
-";
-    assert!(classify_text(screen).is_ready(), "{screen}");
+    let border = "─".repeat(80);
+    let bar = "⏵⏵ accept edits on (shift+tab to cycle) · ← for agents";
+    let update = "✘ Auto-update failed: no write permission to npm prefix · Run claude doctor";
+    let focus = "tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and re…";
+    let screen = format!(
+        "❯ previous user request\n● Completed response.\n\n{border}\n❯\u{a0}\n{border}\n  {bar}\n  {update}\n  {focus}\n"
+    );
+    assert!(classify_text(&screen).is_ready(), "{screen}");
 }
 
 #[test]
@@ -141,7 +139,7 @@ Claude Code v2.1.89
 }
 
 #[test]
-fn edit_approval_footer_is_not_ready() {
+fn edit_approval_footer_is_ready() {
     let screen = "\
 Loading startup skills and recovering identity.
 
@@ -151,8 +149,7 @@ Loading startup skills and recovering identity.
   ⏵⏵ accept edits on (shift+tab to cycle)                     ● high · /effort
 ";
     let class = classify_text(screen);
-    assert!(!class.is_ready(), "{class:?}");
-    assert!(matches!(class, ClaudeScreen::Inconclusive), "{class:?}");
+    assert!(class.is_ready(), "{class:?}");
 }
 
 #[test]
@@ -194,8 +191,8 @@ Accessing workspace:
 /some/workspace
 
 Quick safety check: Is this a project you created or one you trust?
-1. Yes, I trust this folder
-2. No, exit
+  ❯ No, exit
+    Yes, I trust this folder
 ";
     let class = classify_text(screen);
     assert_eq!(class.code(), Some(ReadinessCode::TrustGate));
@@ -203,7 +200,7 @@ Quick safety check: Is this a project you created or one you trust?
     let ClaudeScreen::Dialog(dialog) = classify_text(screen) else {
         panic!("trust");
     };
-    assert!(matches!(dialog.known, KnownDialog::ClaudeTrust));
+    assert!(matches!(dialog.id, DialogId::ClaudeTrust));
 }
 
 #[test]
@@ -218,7 +215,8 @@ fn mcp_checkbox_is_a_gate() {
  Space to select · Enter to confirm · Esc to reject all
 ";
     let class = classify_text(screen);
-    assert_eq!(class.code(), Some(ReadinessCode::McpGate), "{class:?}");
+    assert_eq!(class.code(), Some(ReadinessCode::UnknownMenu), "{class:?}");
+    assert!(class.requires_attention());
     assert!(!class.is_ready());
 }
 
@@ -320,7 +318,7 @@ Remember: never pick Bypass Permissions by habit.
     );
     assert!(!matches!(
         class,
-        ClaudeScreen::Dialog(ref dialog) if matches!(dialog.known, KnownDialog::ClaudeBypassConsent)
+        ClaudeScreen::Dialog(ref dialog) if dialog.id == DialogId::ClaudeBypassConsent
     ));
 }
 
@@ -404,12 +402,7 @@ async fn paste_mismatch_sends_no_enter() {
     let root = scratch("mismatch");
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     std::fs::create_dir_all(adapter.seat_dir(&binding.seat)).expect("seat");
     std::fs::write(
@@ -425,6 +418,7 @@ async fn paste_mismatch_sends_no_enter() {
     assert!(matches!(err, Error::PasteMismatch), "{err}");
     let calls = mux.recorded().await;
     assert!(support::sent_paste(&calls), "{calls:?}");
+    assert!(calls.iter().flatten().any(|arg| arg == "C-u"), "{calls:?}");
     assert!(!support::sent_enter(&calls), "{calls:?}");
     drop(std::fs::remove_dir_all(&root));
 }
@@ -435,12 +429,7 @@ async fn resume_rejects_a_non_uuid_token() {
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let mux = Arc::new(FakeMux::new());
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     let err = adapter
         .launch(
@@ -458,18 +447,50 @@ async fn resume_rejects_a_non_uuid_token() {
 }
 
 #[tokio::test]
+async fn resume_stores_the_canonical_uuid() {
+    let canonical = "11111111-1111-4111-8111-111111111111";
+    let forms = [
+        "{11111111-1111-4111-8111-111111111111}",
+        "urn:uuid:11111111-1111-4111-8111-111111111111",
+        "11111111111141118111111111111111",
+    ];
+    for (index, form) in forms.iter().enumerate() {
+        let root = scratch(&format!("uuid-form-{index}"));
+        let cwd = root.join("work");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        let mux = Arc::new(FakeMux::new());
+        mux.set_capture(support::capture(READY)).await;
+        let adapter =
+            ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
+        let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
+        drop(
+            adapter
+                .launch(
+                    &binding,
+                    opts(Some(ResumeToken {
+                        kind: "claude".to_owned(),
+                        value: (*form).to_owned(),
+                    })),
+                )
+                .await
+                .expect("launch"),
+        );
+        let stored =
+            std::fs::read_to_string(adapter.seat_dir(&binding.seat).join("claude-session-id"))
+                .expect("id");
+        assert_eq!(stored, canonical, "{form}");
+        drop(std::fs::remove_dir_all(&root));
+    }
+}
+
+#[tokio::test]
 async fn resume_emits_model() {
     let root = scratch("model");
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let mux = Arc::new(FakeMux::new());
     mux.set_capture(support::capture(READY)).await;
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let mut binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     binding.model = Some("haiku".to_owned());
     drop(
@@ -497,12 +518,7 @@ async fn home_cwd_does_not_launch() {
     let home = root.join("home");
     std::fs::create_dir_all(&home).expect("home");
     let mux = Arc::new(FakeMux::new());
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        home.clone(),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), home.clone());
     let binding = crewmux_adapters::binding_for(SeatId::new(), home, "seat__rig");
     let outcome = adapter.launch(&binding, opts(None)).await.expect("outcome");
     assert!(
@@ -527,12 +543,7 @@ async fn ready_adapter(
     let root = scratch(label);
     let cwd = root.join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let adapter = ClaudeAdapter::new(
-        support::shared(&mux),
-        support::null_check(),
-        root.join("seats"),
-        root.join("home"),
-    );
+    let adapter = ClaudeAdapter::new(support::shared(&mux), root.join("seats"), root.join("home"));
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     std::fs::create_dir_all(adapter.seat_dir(&binding.seat)).expect("seat");
     std::fs::write(

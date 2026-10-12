@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crewmux_adapters::{
-    AgentAdapter, ClaudeAdapter, DialogDriver, DialogOption, LaunchOpts, MuxDialogDriver, Readiness,
+    AgentAdapter, AnswerPolicy, CODEX_DIALOGS, ClaudeAdapter, DialogDriver, DriveOutcome,
+    LaunchOpts, MuxPane, Readiness, SeatContext,
 };
 use crewmux_mux::{FakeMux, Multiplexer, PaneRef};
-use crewmux_types::{KnownDialog, ReadinessCode, SeatId};
+use crewmux_types::{ReadinessCode, SeatId};
 
 #[path = "common/mod.rs"]
 mod support;
@@ -60,16 +61,21 @@ async fn codex_update_answers_skip_never_update() {
         support::capture(&ready),
     ])
     .await;
-    let driver = MuxDialogDriver::new(support::shared(&mux), PaneRef::session("codex"));
-    let choice = DialogOption {
-        text: "2. Skip",
-        index: Some(2),
+    let cwd = std::env::temp_dir();
+    let seat = SeatContext {
+        cwd: &cwd,
+        home: &cwd,
     };
+    let driver = DialogDriver::default();
+    let io = MuxPane::new(support::shared(&mux), PaneRef::session("codex"));
     let answered = driver
-        .answer(&SeatId::new(), &KnownDialog::CodexUpdate, &choice)
+        .drive(&io, CODEX_DIALOGS, policy(true), &seat)
         .await
         .expect("skip");
-    assert_eq!(answered.choice, "2. Skip");
+    let DriveOutcome::Answered { label, .. } = answered else {
+        panic!("skip {answered:?}");
+    };
+    assert_eq!(label, "Skip");
     let calls = mux.recorded().await;
     assert!(calls.iter().flatten().any(|arg| arg == "Down"));
     assert!(support::sent_enter(&calls));
@@ -82,18 +88,35 @@ async fn codex_update_answers_skip_never_update() {
             support::capture(UPDATE_NOW),
         ])
         .await;
-    let driver = MuxDialogDriver::new(support::shared(&stuck), PaneRef::session("codex"));
+    let cwd = std::env::temp_dir();
+    let seat = SeatContext {
+        cwd: &cwd,
+        home: &cwd,
+    };
+    let driver = DialogDriver::default();
+    let io = MuxPane::new(support::shared(&stuck), PaneRef::session("codex"));
     let err = driver
-        .answer(&SeatId::new(), &KnownDialog::CodexUpdate, &choice)
+        .drive(&io, CODEX_DIALOGS, policy(true), &seat)
         .await
-        .expect_err("cursor");
-    assert!(err.reason.contains("cursor"));
+        .expect("drive");
+    let DriveOutcome::Escalated { reason, .. } = err else {
+        panic!("cursor {err:?}");
+    };
+    assert!(reason.as_str().contains("cursor"), "{reason:?}");
     assert!(!support::sent_enter(&stuck.recorded().await));
+}
+
+fn policy(auto_trust: bool) -> AnswerPolicy {
+    AnswerPolicy {
+        auto_trust,
+        auto_approve_rig_tools: false,
+    }
 }
 
 #[tokio::test]
 async fn bypass_always_escalates() {
-    let text = support::read(&support::fixtures().join("2.1.286/claude-050-bypass.txt"));
+    let text =
+        support::read(&support::fixtures().join("2.1.286/claude-050-bypass-after-trust.txt"));
     let mux = replay(&text).await;
     let adapter = adapter_with(Arc::clone(&mux));
     drop(
@@ -111,7 +134,7 @@ async fn bypass_always_escalates() {
 
 #[tokio::test]
 async fn unknown_menu_escalates() {
-    let text = support::read(&support::fixtures().join("2.1.286/claude-synth-reworded-trust.txt"));
+    let text = support::read(&support::fixtures().join("2.1.286/claude-064-s6-mcp-list.txt"));
     let mux = replay(&text).await;
     let adapter = adapter_with(Arc::clone(&mux));
     drop(
@@ -130,8 +153,10 @@ async fn unknown_menu_escalates() {
 #[tokio::test]
 async fn cursor_verification_failure_escalates() {
     let cwd = std::env::temp_dir();
-    let trust = support::read(&support::fixtures().join("2.1.286/claude-006-trust.txt"))
-        .replace("/tmp/fresh", &cwd.display().to_string());
+    let trust = support::read(&support::fixtures().join("2.1.286/claude-006-trust.txt")).replace(
+        "/Users/sebas/openrig-spikes-scratch/proj/claude-f1",
+        &cwd.display().to_string(),
+    );
     let mux = Arc::new(FakeMux::new());
     mux.replay_screens(vec![support::capture(&trust), support::capture(&trust)])
         .await;
@@ -172,7 +197,7 @@ async fn trust_folder_must_match_the_seat_cwd() {
 
 #[tokio::test]
 async fn no_quit_keys_on_login_menu() {
-    let text = support::read(&support::fixtures().join("cl-0-theme.txt"));
+    let text = support::read(&support::fixtures().join("2.1.286/claude-000-firstrun.txt"));
     let mux = replay(&text).await;
     let adapter = adapter_with(Arc::clone(&mux));
     drop(
@@ -192,11 +217,12 @@ async fn no_quit_keys_on_login_menu() {
 
 #[tokio::test]
 async fn fullscreen_answers_not_now() {
-    let first = support::read(&support::fixtures().join("2.1.286/claude-007-fullscreen.txt"));
+    let first = support::read(&support::fixtures().join("2.1.286/claude-007-startup.txt"));
     let second = first.replace(
-        "❯ 1. Yes, try it\n  2. Not now",
-        "  1. Yes, try it\n❯ 2. Not now",
+        "❯ 1. Yes, try it\n    2. Not now",
+        "  1. Yes, try it\n  ❯ 2. Not now",
     );
+    assert_ne!(first, second, "cursor did not move in the replay frame");
     let ready = support::read(&support::fixtures().join("2.1.286/claude-020-ready.txt"));
     let mux = Arc::new(FakeMux::new());
     mux.replay_screens(vec![
@@ -238,7 +264,7 @@ fn adapter_with(mux: Arc<FakeMux>) -> ClaudeAdapter {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/claude-dialog");
     let seats = root.join(format!("seats-{}", std::process::id()));
     let mux: Arc<dyn Multiplexer> = mux;
-    ClaudeAdapter::new(mux, support::null_check(), seats, root.join("home"))
+    ClaudeAdapter::new(mux, seats, root.join("home"))
 }
 
 fn binding() -> crewmux_adapters::NodeBinding {

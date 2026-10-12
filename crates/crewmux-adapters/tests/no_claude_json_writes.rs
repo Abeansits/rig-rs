@@ -35,7 +35,7 @@ async fn launch_leaves_the_user_config_tree_unchanged() {
     let ready = support::read(&support::fixtures().join("2.1.286/claude-020-ready.txt"));
     mux.set_capture(support::capture(&ready)).await;
     let mux: Arc<dyn Multiplexer> = mux;
-    let adapter = ClaudeAdapter::new(mux, support::null_check(), root.join("seats"), home.clone());
+    let adapter = ClaudeAdapter::new(mux, root.join("seats"), home.clone());
     let binding = crewmux_adapters::binding_for(SeatId::new(), cwd, "seat__rig");
     drop(
         adapter

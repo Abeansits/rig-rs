@@ -5,11 +5,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crewmux_mux::{Capture, CaptureRange, Multiplexer, PaneRef};
-use crewmux_types::{ReadinessCode, SeatId};
+use crewmux_types::ReadinessCode;
 
 use crate::budget::LaunchBudget;
-use crate::claude::screen::{ClaudeScreen, classify, same_dir, trust_folder};
-use crate::dialog::{DialogDriver, DialogOption, MuxDialogDriver, auto_choice};
+use crate::claude::dialogs::CLAUDE_DIALOGS;
+use crate::claude::screen::{ClaudeScreen, classify};
+use crate::dialog::{
+    AnswerPolicy, DialogDriver, DriveOutcome as DialogDrive, MuxPane, SeatContext,
+};
 
 pub(crate) struct DriveOutcome {
     pub(crate) force: Option<ReadinessCode>,
@@ -18,8 +21,8 @@ pub(crate) struct DriveOutcome {
 pub(crate) async fn drive(
     mux: Arc<dyn Multiplexer>,
     pane: &PaneRef,
-    seat: &SeatId,
     cwd: &Path,
+    home: &Path,
     auto_trust: bool,
     budget: LaunchBudget,
 ) -> DriveOutcome {
@@ -31,7 +34,7 @@ pub(crate) async fn drive(
         let Ok(capture) = mux.capture(pane, CaptureRange::Visible).await else {
             return blocked();
         };
-        match act(&mux, pane, seat, cwd, auto_trust, &capture).await {
+        match act(&mux, pane, cwd, home, auto_trust, &capture).await {
             Act::Ready | Act::Stop => return DriveOutcome { force: None },
             Act::Answered => watch.gate_at = Some(Instant::now()),
             Act::Poll { inconclusive } => {
@@ -57,8 +60,8 @@ enum Act {
 async fn act(
     mux: &Arc<dyn Multiplexer>,
     pane: &PaneRef,
-    seat: &SeatId,
     cwd: &Path,
+    home: &Path,
     auto_trust: bool,
     capture: &Capture,
 ) -> Act {
@@ -71,31 +74,29 @@ async fn act(
         ClaudeScreen::Login(_) | ClaudeScreen::UnknownMenu { .. } | ClaudeScreen::Draft => {
             Act::Stop
         }
-        ClaudeScreen::Dialog(dialog) => {
-            if matches!(dialog.known, crewmux_types::KnownDialog::ClaudeTrust)
-                && !trust_folder(&capture.text).is_some_and(|folder| same_dir(&folder, cwd))
-            {
-                return Act::Stop;
-            }
-            let Some(choice) = auto_choice(&dialog.known, auto_trust) else {
-                return Act::Stop;
-            };
-            answer(mux, pane, seat, &dialog.known, &choice).await
-        }
+        ClaudeScreen::Dialog(_) => answer(mux, pane, cwd, home, auto_trust).await,
     }
 }
 
 async fn answer(
     mux: &Arc<dyn Multiplexer>,
     pane: &PaneRef,
-    seat: &SeatId,
-    dialog: &crewmux_types::KnownDialog,
-    choice: &DialogOption,
+    cwd: &Path,
+    home: &Path,
+    auto_trust: bool,
 ) -> Act {
-    let driver = MuxDialogDriver::new(Arc::clone(mux), pane.clone());
-    match driver.answer(seat, dialog, choice).await {
-        Ok(_) => Act::Answered,
-        Err(_) => Act::Stop,
+    let io = MuxPane::new(Arc::clone(mux), pane.clone());
+    let policy = AnswerPolicy {
+        auto_trust,
+        auto_approve_rig_tools: false,
+    };
+    let seat = SeatContext { cwd, home };
+    match DialogDriver::default()
+        .drive(&io, CLAUDE_DIALOGS, policy, &seat)
+        .await
+    {
+        Ok(DialogDrive::Answered { .. }) => Act::Answered,
+        Ok(DialogDrive::Escalated { .. } | DialogDrive::NotADialog) | Err(_) => Act::Stop,
     }
 }
 

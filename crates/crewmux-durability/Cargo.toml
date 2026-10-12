@@ -9,17 +9,6 @@ publish.workspace = true
 
 [dependencies]
 crewmux-core.workspace = true
-crewmux-adapters.workspace = true
-sha2.workspace = true
-unicode-normalization.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-uuid.workspace = true
-
-[dev-dependencies]
-crewmux-mux.workspace = true
-crewmux-types.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true

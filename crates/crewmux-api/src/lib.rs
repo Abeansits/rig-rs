@@ -28,7 +28,7 @@ pub use crewmux_types::{
 pub use dirs::{create_private, open_private};
 pub use endpoint::{
     AttachInfo, AttachRequest, CaptureRequest, CaptureSeat, CreateRigUp, DownRequest, Endpoint,
-    Healthz, ListSeats, RigDown,
+    Healthz, ListSeats, RigDown, SubmitRequest, SubmitSeat,
 };
 pub use error::Error;
 pub use model::{

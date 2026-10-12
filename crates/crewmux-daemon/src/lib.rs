@@ -13,6 +13,7 @@ mod runtime;
 mod serve;
 mod settle;
 mod state;
+mod submit;
 mod view;
 
 pub use error::Error;

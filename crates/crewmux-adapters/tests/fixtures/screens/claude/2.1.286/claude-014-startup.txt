@@ -1,6 +1,0 @@
-Accessing workspace:
-
-Do you trust the files in this folder?
-
-❯ No, exit
-  Yes, I trust this folder

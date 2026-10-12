@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use crewmux_mux::{CaptureRange, Multiplexer};
+use crewmux_transcript::TranscriptSource;
 use crewmux_types::{ReadinessCode, RuntimeKind, SeatId};
 use tokio::sync::Mutex;
 
@@ -16,7 +17,6 @@ use crate::claude::drive::drive;
 use crate::claude::launch::{self, token};
 use crate::claude::screen::{classify, readiness};
 use crate::claude::submit::ClaudeIo;
-use crate::delivery::DeliveryCheck;
 use crate::error::Error;
 use crate::types::{
     AppliedLaunch, Capabilities, InstalledResource, LaunchOpts, LaunchOutcome, NodeBinding,
@@ -27,7 +27,7 @@ use crate::types::{
 /// Launches Claude with a minted session id and per-seat config flags.
 pub struct ClaudeAdapter {
     mux: Arc<dyn Multiplexer>,
-    check: Arc<dyn DeliveryCheck>,
+    source: Option<Arc<dyn TranscriptSource>>,
     seats_root: PathBuf,
     home: PathBuf,
     submit_wait: Duration,
@@ -37,20 +37,22 @@ pub struct ClaudeAdapter {
 impl ClaudeAdapter {
     /// `seats_root` is `$RIG_HOME/seats`. `home` is the directory that holds `.claude`.
     #[must_use]
-    pub fn new(
-        mux: Arc<dyn Multiplexer>,
-        check: Arc<dyn DeliveryCheck>,
-        seats_root: PathBuf,
-        home: PathBuf,
-    ) -> Self {
+    pub fn new(mux: Arc<dyn Multiplexer>, seats_root: PathBuf, home: PathBuf) -> Self {
         Self {
             mux,
-            check,
+            source: None,
             seats_root,
             home,
             submit_wait: LaunchBudget::submit_wait(),
             forced: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Confirm submits against `source` instead of the Claude jsonl file.
+    #[must_use]
+    pub fn with_source(mut self, source: Arc<dyn TranscriptSource>) -> Self {
+        self.source = Some(source);
+        self
     }
 
     /// Shorten the transcript wait. Tests use this so a missing turn fails quickly.
@@ -79,7 +81,7 @@ impl ClaudeAdapter {
     fn io(&self, binding: &NodeBinding, session_id: String) -> ClaudeIo {
         ClaudeIo::new(
             Arc::clone(&self.mux),
-            Arc::clone(&self.check),
+            self.source.clone(),
             crate::claude::submit::IoTarget {
                 pane: binding.pane.clone(),
                 home: self.home.clone(),
@@ -139,7 +141,7 @@ impl AgentAdapter for ClaudeAdapter {
         if let Some(failed) = missing_cwd(binding).await? {
             return Ok(failed);
         }
-        if crate::claude::screen::same_dir(&self.home.display().to_string(), &binding.cwd) {
+        if crate::dialog::same_dir(&self.home, &binding.cwd) {
             return Ok(LaunchOutcome::Failed {
                 error: "refusing to launch Claude with cwd set to $HOME".to_owned(),
                 recovery: Some(crate::types::Recovery::AttentionRequired),
@@ -154,8 +156,8 @@ impl AgentAdapter for ClaudeAdapter {
         let outcome = drive(
             Arc::clone(&self.mux),
             &pane,
-            &binding.seat,
             &binding.cwd,
+            &self.home,
             opts.auto_trust,
             budget,
         )
@@ -184,6 +186,15 @@ impl AgentAdapter for ClaudeAdapter {
             .get(&binding.seat)
             .cloned()
             .map_or(live, Readiness::Gate))
+    }
+
+    async fn submit(
+        &self,
+        binding: &NodeBinding,
+        text: &str,
+    ) -> Result<crate::types::DeliveryReceipt, Error> {
+        let io = self.io_for(binding).await?;
+        io.submit(text, crate::types::SubmitMode::Enter).await
     }
 
     async fn discover_resume_token(
