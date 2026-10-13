@@ -1,0 +1,90 @@
+{
+  "id": "workflow-linear-build",
+  "project": "full",
+  "normalize": [
+    "jsoncanon",
+    "qitem",
+    "ulid",
+    "timestamp",
+    "abspath",
+    "socketpath"
+  ],
+  "steps": [
+    {
+      "op": "http",
+      "method": "GET",
+      "path": "/healthz",
+      "record": false
+    },
+    {
+      "op": "ensure_rig",
+      "name": "acme-flow"
+    },
+    {
+      "op": "write_file",
+      "path": "linear-build.yaml",
+      "body": "# OpenRig 0.4.6 spec-language example \u2014 the LINEAR PIPELINE shape.\n# Zero WF-2 features: declaration-order routing, byte-identical to the\n# WF-1 engine's behavior (the zero-regression reference shape).\nworkflow:\n  id: linear-build\n  version: 1\n  objective: Move one packet through plan, build, prove in declaration order.\n  roles:\n    planner:\n      preferred_targets: [flow-planner@acme-flow]\n    builder:\n      preferred_targets: [flow-builder@acme-flow]\n    prover:\n      preferred_targets: [flow-prover@acme-flow]\n  steps:\n    - id: plan\n      actor_role: planner\n    - id: build\n      actor_role: builder\n    - id: prove\n      actor_role: prover\n"
+    },
+    {
+      "op": "cli",
+      "argv": [
+        "workflow",
+        "instantiate",
+        "linear-build.yaml",
+        "--root-objective",
+        "ship",
+        "--created-by",
+        "orch@acme-flow",
+        "--json"
+      ]
+    },
+    {
+      "op": "cli",
+      "argv": [
+        "workflow",
+        "project",
+        "--instance",
+        "{{instance.instanceId}}",
+        "--current-packet",
+        "{{entryQitemId}}",
+        "--exit",
+        "handoff",
+        "--actor-session",
+        "flow-planner@acme-flow",
+        "--json"
+      ]
+    },
+    {
+      "op": "cli",
+      "argv": [
+        "workflow",
+        "project",
+        "--instance",
+        "{{instance.instanceId}}",
+        "--current-packet",
+        "{{nextQitemId}}",
+        "--exit",
+        "handoff",
+        "--actor-session",
+        "flow-builder@acme-flow",
+        "--json"
+      ]
+    },
+    {
+      "op": "cli",
+      "argv": [
+        "workflow",
+        "project",
+        "--instance",
+        "{{instance.instanceId}}",
+        "--current-packet",
+        "{{nextQitemId}}",
+        "--exit",
+        "done",
+        "--actor-session",
+        "flow-prover@acme-flow",
+        "--json"
+      ]
+    }
+  ]
+}

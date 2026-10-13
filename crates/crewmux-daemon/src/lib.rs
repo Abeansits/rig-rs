@@ -42,6 +42,8 @@ mod taps;
 mod transcripts;
 mod turns;
 mod view;
+mod workflow;
+mod workflow_http;
 
 pub use error::Error;
 pub use serve::run;
@@ -66,3 +68,5 @@ mod slice8_delivery_tests;
 mod slice8_harness;
 #[cfg(test)]
 mod slice8_restore_tests;
+#[cfg(test)]
+mod workflow_tests;

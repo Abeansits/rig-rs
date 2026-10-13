@@ -102,9 +102,7 @@ fn disqualifier(role: &str, harness: Option<&str>, candidate: &SeatCandidate) ->
     if candidate.coordinate.is_none() {
         return Some("coordinate_underivable".to_owned());
     }
-    if candidate.raw_session_name.is_some()
-        && candidate.raw_session_name != candidate.coordinate
-    {
+    if candidate.raw_session_name.is_some() && candidate.raw_session_name != candidate.coordinate {
         return Some("adopted_seat_not_role_resolvable_v1".to_owned());
     }
     if let Some(harness) = harness

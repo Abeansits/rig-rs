@@ -42,6 +42,9 @@ enum StepFile {
         path: String,
         #[serde(default)]
         body: Option<Value>,
+        /// False keeps the response out of the observation. Default true.
+        #[serde(default = "recorded")]
+        record: bool,
     },
     ReadFile {
         path: String,
@@ -52,6 +55,9 @@ enum StepFile {
     },
     TmuxCalls,
     McpTools,
+    EnsureRig {
+        name: String,
+    },
 }
 
 /// Load every `*.json` case in `tests/diff/cases`, sorted by id.
@@ -138,13 +144,23 @@ pub fn load_case(path: &Path, exceptions: &Path) -> Result<LoadedCase, Error> {
     })
 }
 
+const fn recorded() -> bool {
+    true
+}
+
 fn step_from(step: StepFile) -> Result<Step, Error> {
     match step {
         StepFile::Cli { argv } => Ok(Step::Cli { argv }),
-        StepFile::Http { method, path, body } => Ok(Step::Http {
+        StepFile::Http {
+            method,
+            path,
+            body,
+            record,
+        } => Ok(Step::Http {
             method: Method::parse(&method)?,
             path,
             body,
+            record,
         }),
         StepFile::ReadFile { path } => {
             if path.starts_with('/') {
@@ -159,6 +175,7 @@ fn step_from(step: StepFile) -> Result<Step, Error> {
         }
         StepFile::TmuxCalls => Ok(Step::TmuxCalls),
         StepFile::McpTools => Ok(Step::McpTools),
+        StepFile::EnsureRig { name } => Ok(Step::EnsureRig { name }),
     }
 }
 
@@ -179,6 +196,8 @@ fn rule_from(name: &str) -> Result<NormRule, Error> {
         "port" => Ok(NormRule::Port),
         "socketpath" => Ok(NormRule::SocketPath),
         "getcwd" => Ok(NormRule::Getcwd),
+        "jsoncanon" => Ok(NormRule::JsonCanon),
+        "qitem" => Ok(NormRule::Qitem),
         other => Err(Error::Message(format!(
             "unknown norm rule {other}; custom rules are constructed in code"
         ))),

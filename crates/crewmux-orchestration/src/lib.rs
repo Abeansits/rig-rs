@@ -33,13 +33,16 @@ pub use error::Error;
 pub use exit::Exit;
 pub use frontier::frontier_block;
 pub use model::{CachedSpec, Decision, Engine, Instance, Keepalive, Phase, Status, Trail};
+pub use project::ProjectRequest;
 pub use project::{ProjectCtx, Projection, project_step};
 pub use role::{Disqualified, RolePick, SeatCandidate, select_role_seat};
 pub use route::resolve_next_step;
-pub use project::ProjectRequest;
 pub use runtime::{
-    ContinueView, Instantiate, InstantiateRequest, Runtime, deadline_for, guidance_lines, parse_exit,
+    ContinueView, Instantiate, InstantiateRequest, Runtime, deadline_for, guidance_lines,
+    parse_exit,
+};
+pub use validate::{Issue, Severity, Validation, validate};
+pub use wire::{
+    instance_json, instantiate_spec_json, project_json, spec_row_json, trail_json, validation_json,
 };
 pub use world::World;
-pub use validate::{Issue, Severity, Validation, validate};
-pub use wire::{instance_json, project_json, spec_row_json, validation_json};

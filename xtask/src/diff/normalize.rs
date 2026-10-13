@@ -22,11 +22,13 @@ struct Patterns {
     socket: Regex,
     port: Regex,
     temp: Regex,
+    qitem: Regex,
 }
 
 #[derive(Default)]
 struct Masks {
     ulid: BTreeMap<String, String>,
+    qitem: BTreeMap<String, String>,
     timestamp: BTreeMap<String, String>,
     path: BTreeMap<String, String>,
     port: BTreeMap<String, String>,
@@ -191,6 +193,8 @@ fn apply_one(
         NormRule::SocketPath => replace_whole(&patterns.socket, text, &mut masks.socket, "SOCK"),
         NormRule::Port => replace_ports(&patterns.port, text, masks),
         NormRule::Getcwd => strip_dash_getcwd(text),
+        NormRule::JsonCanon => json_canon(text),
+        NormRule::Qitem => replace_whole(&patterns.qitem, text, &mut masks.qitem, "QITEM"),
         NormRule::AbsPath => {
             let with_roots = replace_roots(text, roots, masks);
             replace_whole(&patterns.temp, &with_roots, &mut masks.path, "PATH")
@@ -303,8 +307,28 @@ impl Patterns {
             socket: compile_re(SOCKET_RE)?,
             port: compile_re(PORT_RE)?,
             temp: compile_re(TEMP_RE)?,
+            qitem: compile_re(r"(?i)qitem-(?:[0-9A-HJKMNP-TV-Z]{26}|\d{14}-[0-9a-f]{8})")?,
         })
     }
+}
+
+fn json_canon(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        let newline = line.ends_with('\n');
+        let trimmed = line.trim_end_matches('\n');
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed)
+            && let Ok(encoded) = serde_json::to_string(&value)
+        {
+            out.push_str(&encoded);
+            if newline {
+                out.push('\n');
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 fn compile_re(pattern: &str) -> Result<Regex, Error> {

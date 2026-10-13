@@ -49,7 +49,7 @@ pub fn execute(case: &LoadedCase, side: &Side, ts_port: Option<u16>) -> Result<E
         .case
         .steps
         .iter()
-        .any(|step| matches!(step, Step::Http { .. }));
+        .any(|step| matches!(step, Step::Http { .. } | Step::EnsureRig { .. }));
     let port = match (side, ts_port, http) {
         (Side::Ts { .. }, Some(port), _) => Some(port),
         (Side::Ts { .. }, None, true) => Some(free_port()?),
@@ -98,14 +98,28 @@ fn apply_step(
     obs: &mut Observation,
 ) -> Result<(), Error> {
     match step {
-        Step::Cli { argv } => run_cli(side, argv, home, obs),
-        Step::Http { method, path, body } => {
-            run_http(transport, method.as_str(), path, body.as_ref(), obs)
+        Step::Cli { argv } => {
+            let argv = substitute(argv, obs.json.as_ref())?;
+            run_cli(side, &argv, home, obs)
         }
+        Step::Http {
+            method,
+            path,
+            body,
+            record,
+        } => run_http(
+            transport,
+            method.as_str(),
+            path,
+            body.as_ref(),
+            *record,
+            obs,
+        ),
         Step::ReadFile(path) => read_home_file(home, path, obs),
         Step::WriteFile { path, body } => write_home_file(home, path, body),
         Step::TmuxCalls => collect_tmux(home, obs),
         Step::McpTools => super::mcp_list::collect(side, home, obs),
+        Step::EnsureRig { name } => ensure_rig(side, transport, home, name),
     }
 }
 
@@ -132,10 +146,67 @@ fn run_cli(
     let output = child
         .wait_with_output()
         .map_err(|source| io_err("wait for rig", source))?;
-    push_text(&mut obs.stdout, &String::from_utf8_lossy(&output.stdout));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    push_text(&mut obs.stdout, &stdout);
     push_text(&mut obs.stderr, &String::from_utf8_lossy(&output.stderr));
     obs.exit = output.status.code().unwrap_or(1);
+    if let Some(value) = json_body(&stdout) {
+        obs.json = Some(value);
+    }
     Ok(())
+}
+
+fn substitute(argv: &[String], json: Option<&Value>) -> Result<Vec<String>, Error> {
+    let mut out = Vec::with_capacity(argv.len());
+    for arg in argv {
+        out.push(fill_arg(arg, json)?);
+    }
+    Ok(out)
+}
+
+fn fill_arg(arg: &str, json: Option<&Value>) -> Result<String, Error> {
+    let Some(start) = arg.find("{{") else {
+        return Ok(arg.to_owned());
+    };
+    let Some(end) = arg[start..].find("}}") else {
+        return Err(Error::Message(format!("unclosed placeholder in {arg}")));
+    };
+    let key = arg
+        .get(start.saturating_add(2)..start.saturating_add(end))
+        .unwrap_or("");
+    let value = json.ok_or_else(|| Error::Message(format!("no JSON yet for {arg}")))?;
+    let found = lookup(value, key)
+        .ok_or_else(|| Error::Message(format!("placeholder {key} is missing")))?;
+    let text = found
+        .as_str()
+        .map_or_else(|| found.to_string(), str::to_owned);
+    let mut rendered = String::new();
+    rendered.push_str(arg.get(..start).unwrap_or(""));
+    rendered.push_str(&text);
+    let rest = arg
+        .get(start.saturating_add(end).saturating_add(2)..)
+        .unwrap_or("");
+    rendered.push_str(&fill_arg(rest, Some(value))?);
+    Ok(rendered)
+}
+
+fn lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for part in key.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+fn json_body(stdout: &str) -> Option<Value> {
+    let trimmed = stdout.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Some(value);
+    }
+    trimmed
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())
 }
 
 fn program_for(side: &Side) -> Result<(PathBuf, Vec<String>), Error> {
@@ -158,6 +229,7 @@ fn run_http(
     method: &str,
     path: &str,
     body: Option<&Value>,
+    record: bool,
     obs: &mut Observation,
 ) -> Result<(), Error> {
     let payload = match body {
@@ -174,6 +246,15 @@ fn run_http(
     let response = client
         .request(method, path, payload.as_deref())
         .map_err(|err| Error::Message(format!("HTTP {method} {path} failed: {err}")))?;
+    if !record {
+        if response.status >= 400 {
+            return Err(Error::Message(format!(
+                "HTTP {method} {path} returned {}",
+                response.status
+            )));
+        }
+        return Ok(());
+    }
     push_text(&mut obs.stdout, &response.body);
     if let Ok(parsed) = serde_json::from_str::<Value>(&response.body) {
         obs.json = Some(parsed);
@@ -242,6 +323,28 @@ fn push_text(slot: &mut String, extra: &str) {
         slot.push('\n');
     }
     slot.push_str(extra);
+}
+
+fn ensure_rig(
+    side: &Side,
+    transport: &Transport,
+    home: &HermeticHome,
+    name: &str,
+) -> Result<(), Error> {
+    match side {
+        Side::Ts { .. } => {
+            let body = serde_json::json!({ "name": name });
+            run_http(
+                transport,
+                "POST",
+                "/api/rigs",
+                Some(&body),
+                false,
+                &mut Observation::empty(),
+            )
+        }
+        Side::Rs { .. } => super::rig::seed_witness(home, name),
+    }
 }
 
 fn ts_build_hint(pkg: &Path) -> String {

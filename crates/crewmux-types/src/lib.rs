@@ -27,12 +27,12 @@ pub use dialog::{ComposerState, DialogId};
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
 pub use id::{MAX_NAME_LEN, QItemId, RigId, RigName, SeatId, SeatName, SessionId};
-pub use workflow::{NameId, RoleId, SpecId, StepId, WorkflowInstanceId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use snapshot::{DeliveryId, SnapshotId};
 pub use tmux_version::{Version, parse_version};
 pub use ui::{LauncherKind, PodName, SeatKey, TmuxSession};
+pub use workflow::{NameId, RoleId, SpecId, StepId, WorkflowInstanceId};
 
 /// A key delivered with `send-keys`.
 ///

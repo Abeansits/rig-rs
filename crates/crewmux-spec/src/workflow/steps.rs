@@ -80,9 +80,12 @@ fn check_re_present(
         }
     }
     if let Some(max) = step.get("re_present_max_seconds") {
-        let delay = step.get("re_present_after_seconds").and_then(value::integer);
+        let delay = step
+            .get("re_present_after_seconds")
+            .and_then(value::integer);
         let max_n = value::integer(max);
-        let ok = max_n.is_some() && delay.is_some_and(|start| max_n.is_some_and(|end| end >= start));
+        let ok =
+            max_n.is_some() && delay.is_some_and(|start| max_n.is_some_and(|end| end >= start));
         if !ok {
             return Err(WorkflowParseError::new(
                 "spec_field_invalid",
@@ -157,7 +160,10 @@ fn check_harness(
     let Some(harness) = step.get("harness") else {
         return Ok(());
     };
-    if harness.as_str().is_some_and(|name| AGENT_HARNESSES.contains(&name)) {
+    if harness
+        .as_str()
+        .is_some_and(|name| AGENT_HARNESSES.contains(&name))
+    {
         return Ok(());
     }
     let allowed = AGENT_HARNESSES.join(", ");
@@ -214,7 +220,12 @@ fn check_gate(
             ),
         ));
     }
-    reject_unknown(Some(gate), keys::GATE, &format!("workflow.steps[{index}].gate"), source)?;
+    reject_unknown(
+        Some(gate),
+        keys::GATE,
+        &format!("workflow.steps[{index}].gate"),
+        source,
+    )?;
     let target = gate.get("target").and_then(Value::as_str).unwrap_or("");
     if target.is_empty() {
         return Err(WorkflowParseError::new(
@@ -254,18 +265,14 @@ fn check_depends(
         return Err(invalid(
             source,
             &format!("workflow.steps[{index}].depends_on"),
-            &format!(
-                "workflow.steps[{index}].depends_on must be a list of non-empty step ids."
-            ),
+            &format!("workflow.steps[{index}].depends_on must be a list of non-empty step ids."),
         ));
     };
     if items.iter().any(String::is_empty) {
         return Err(invalid(
             source,
             &format!("workflow.steps[{index}].depends_on"),
-            &format!(
-                "workflow.steps[{index}].depends_on must be a list of non-empty step ids."
-            ),
+            &format!("workflow.steps[{index}].depends_on must be a list of non-empty step ids."),
         ));
     }
     let mut seen = Vec::new();
@@ -274,9 +281,7 @@ fn check_depends(
             return Err(invalid(
                 source,
                 &format!("workflow.steps[{index}].depends_on"),
-                &format!(
-                    "workflow.steps[{index}].depends_on contains a duplicate prerequisite."
-                ),
+                &format!("workflow.steps[{index}].depends_on contains a duplicate prerequisite."),
             ));
         }
         seen.push(item.as_str());
@@ -319,7 +324,8 @@ fn check_acceptance(
         ));
     }
     let verdicts = acceptance.get("verdicts").and_then(value::string_list);
-    let verdicts_ok = verdicts.is_some_and(|items| !items.is_empty() && items.iter().all(|item| !item.is_empty()));
+    let verdicts_ok = verdicts
+        .is_some_and(|items| !items.is_empty() && items.iter().all(|item| !item.is_empty()));
     if !verdicts_ok {
         return Err(invalid(
             source,

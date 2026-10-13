@@ -29,7 +29,11 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if month <= 2 { year + 1 } else { year };
-    (year, u32::try_from(month).unwrap_or(1), u32::try_from(day).unwrap_or(1))
+    (
+        year,
+        u32::try_from(month).unwrap_or(1),
+        u32::try_from(day).unwrap_or(1),
+    )
 }
 
 /// Lower-case hex, no separators.
@@ -55,7 +59,10 @@ mod tests {
 
     #[test]
     fn epoch_is_iso() {
-        assert_eq!(iso8601(Timestamp::from_millis(0)), "1970-01-01T00:00:00.000Z");
+        assert_eq!(
+            iso8601(Timestamp::from_millis(0)),
+            "1970-01-01T00:00:00.000Z"
+        );
         assert_eq!(
             iso8601(Timestamp::from_millis(1_500_000_000_123)),
             "2017-07-14T02:40:00.123Z"

@@ -10,6 +10,7 @@ mod normalize;
 mod openrig;
 mod reap;
 mod report;
+mod rig;
 mod run;
 mod suite;
 mod types;

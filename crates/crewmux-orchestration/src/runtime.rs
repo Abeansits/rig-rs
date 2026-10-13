@@ -5,9 +5,7 @@
 use std::collections::BTreeMap;
 
 use crewmux_core::Timestamp;
-use crewmux_messaging::{
-    Actor, NewItem, QueueBook, QueueState, SessionRef, Update,
-};
+use crewmux_messaging::{Actor, NewItem, QueueBook, QueueState, SessionRef, Update};
 use crewmux_spec::workflow::WorkflowSpec;
 use crewmux_types::{QItemId, WorkflowInstanceId};
 use sha2::{Digest, Sha256};
@@ -87,13 +85,27 @@ impl Runtime {
     ) -> Result<(Engine, QueueBook, Instantiate), Error> {
         let spec = crewmux_spec::parse_workflow(request.yaml, request.path)
             .map_err(|err| Error::reject(err.code, err.message, 400))?;
-        let report = validate::validate(&spec, &Probes { liveness: None, hosts: None });
+        let report = validate::validate(
+            &spec,
+            &Probes {
+                liveness: None,
+                hosts: None,
+            },
+        );
         if !report.ok {
-            let first = report.issues.iter().find(|issue| matches!(issue.severity, validate::Severity::Error));
-            let detail = first.map(|issue| format!("{}: {}", issue.code, issue.message)).unwrap_or_default();
+            let first = report
+                .issues
+                .iter()
+                .find(|issue| matches!(issue.severity, validate::Severity::Error));
+            let detail = first
+                .map(|issue| format!("{}: {}", issue.code, issue.message))
+                .unwrap_or_default();
             return Err(Error::reject(
                 "spec_invalid",
-                format!("workflow spec {}@{} is invalid. {detail}", spec.id, spec.version_label),
+                format!(
+                    "workflow spec {}@{} is invalid. {detail}",
+                    spec.id, spec.version_label
+                ),
                 400,
             ));
         }
@@ -101,7 +113,11 @@ impl Runtime {
         let mut advisories = default_rig_advisory(&spec, request.rig, world);
         advisories.extend(member_advisories(&spec, world));
         let entry = spec.steps.first().ok_or_else(|| {
-            Error::reject("spec_no_steps", "workflow spec has no steps".to_owned(), 400)
+            Error::reject(
+                "spec_no_steps",
+                "workflow spec has no steps".to_owned(),
+                400,
+            )
         })?;
         let owner = entry_owner(&spec, entry, request.entry_owner, world, bound.as_ref())?;
         let mut draft_engine = engine.clone();
@@ -122,7 +138,14 @@ impl Runtime {
         draft_engine
             .specs
             .insert(Engine::spec_key(&spec.id, &spec.version_label), cached);
-        let body = packet::entry_body(&spec, instance_id.as_str(), entry, request.objective, qitem.as_str(), &owner);
+        let body = packet::entry_body(
+            &spec,
+            instance_id.as_str(),
+            entry,
+            request.objective,
+            qitem.as_str(),
+            &owner,
+        );
         draft_book.create(
             NewItem {
                 id: Some(qitem.clone()),
@@ -144,7 +167,13 @@ impl Runtime {
             },
             now,
         )?;
-        draft_book.append_note(&qitem, "workflow.nudge", Some("workflow nudge"), Some("recorded"), now)?;
+        draft_book.append_note(
+            &qitem,
+            "workflow.nudge",
+            Some("workflow nudge"),
+            Some("recorded"),
+            now,
+        )?;
         draft_engine.instances.push(Instance {
             id: instance_id.clone(),
             workflow_name: spec.id.clone(),
@@ -246,7 +275,9 @@ impl Runtime {
                 now,
             )?;
         }
-        let row = draft_engine.instance_mut(instance_id).ok_or_else(|| missing(instance_id))?;
+        let row = draft_engine
+            .instance_mut(instance_id)
+            .ok_or_else(|| missing(instance_id))?;
         row.status = Status::Aborted;
         row.frontier.clear();
         row.current_step_id = None;
@@ -271,7 +302,11 @@ impl Runtime {
     ) -> Result<(Engine, QueueBook, String), Error> {
         let instance = live(engine, instance_id, "instance_not_active")?;
         let current = instance.frontier.first().cloned().ok_or_else(|| {
-            Error::reject("packet_not_on_frontier", "workflow frontier is empty".to_owned(), 409)
+            Error::reject(
+                "packet_not_on_frontier",
+                "workflow frontier is empty".to_owned(),
+                409,
+            )
         })?;
         let mut draft_engine = engine.clone();
         let mut draft_book = book.clone();
@@ -297,7 +332,9 @@ impl Runtime {
         owner: &str,
         now: Timestamp,
     ) -> Result<(Engine, QueueBook, String), Error> {
-        let instance = engine.instance(instance_id).ok_or_else(|| missing(instance_id))?;
+        let instance = engine
+            .instance(instance_id)
+            .ok_or_else(|| missing(instance_id))?;
         if !matches!(instance.status, Status::Failed | Status::Aborted) {
             return Err(Error::reject(
                 "instance_not_resumable",
@@ -305,7 +342,10 @@ impl Runtime {
                 409,
             ));
         }
-        let step = instance.current_step_id.clone().unwrap_or_else(|| "entry".to_owned());
+        let step = instance
+            .current_step_id
+            .clone()
+            .unwrap_or_else(|| "entry".to_owned());
         let mut draft_engine = engine.clone();
         let mut draft_book = book.clone();
         let qitem = QItemId::generate();
@@ -317,7 +357,11 @@ impl Runtime {
                 body: format!("workflow resume {instance_id} step {step}"),
                 priority: 0,
                 tier: Some("mode2".to_owned()),
-                tags: vec!["workflow".to_owned(), "resume".to_owned(), format!("instance:{instance_id}")],
+                tags: vec![
+                    "workflow".to_owned(),
+                    "resume".to_owned(),
+                    format!("instance:{instance_id}"),
+                ],
                 handed_off_from: None,
                 last_nudge: None,
                 explicit_human: false,
@@ -325,7 +369,9 @@ impl Runtime {
             },
             now,
         )?;
-        let row = draft_engine.instance_mut(instance_id).ok_or_else(|| missing(instance_id))?;
+        let row = draft_engine
+            .instance_mut(instance_id)
+            .ok_or_else(|| missing(instance_id))?;
         let hops = row.hop_count;
         row.status = Status::Active;
         row.frontier = vec![qitem.clone()];
@@ -389,7 +435,11 @@ fn bind_rig(
 
 /// Advisory for an unknown spec-default rig. The caller appends member advisories.
 #[must_use]
-pub(crate) fn default_rig_advisory(spec: &WorkflowSpec, explicit: Option<&str>, world: &World) -> Vec<String> {
+pub(crate) fn default_rig_advisory(
+    spec: &WorkflowSpec,
+    explicit: Option<&str>,
+    world: &World,
+) -> Vec<String> {
     if explicit.is_some() {
         return Vec::new();
     }
@@ -410,40 +460,83 @@ pub(crate) fn default_rig_advisory(spec: &WorkflowSpec, explicit: Option<&str>, 
 }
 
 fn member_advisories(spec: &WorkflowSpec, world: &World) -> Vec<String> {
+    let mut order = Vec::new();
     let mut declared: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for step in &spec.steps {
-        let Some(role) = spec.roles.get(&step.actor_role) else {
-            continue;
-        };
-        for target in &role.preferred_targets {
-            if crewmux_messaging::is_human_seat(target) {
-                continue;
-            }
-            let Some((member, rig)) = target.split_once('@') else {
-                continue;
-            };
-            if member.is_empty() || rig.is_empty() || !world.rigs.contains(rig) {
-                continue;
-            }
-            if world.members.contains(target) {
-                continue;
-            }
-            declared
-                .entry(target.clone())
-                .or_default()
-                .push(format!("step \"{}\" (role \"{}\")", step.id, step.actor_role));
+        note_role(
+            spec,
+            world,
+            &step.id,
+            &step.actor_role,
+            &mut order,
+            &mut declared,
+        );
+        if let Some(gate) = &step.gate
+            && !crewmux_messaging::is_human_seat(&gate.target)
+        {
+            note_role(
+                spec,
+                world,
+                &step.id,
+                &gate.target,
+                &mut order,
+                &mut declared,
+            );
         }
     }
-    declared
+    order
         .into_iter()
-        .map(|(target, steps)| {
-            let rig = target.split_once('@').map_or("", |(_, rig)| rig);
-            format!(
-                "preferred target \"{target}\" names rig \"{rig}\" (registered) but NO member of that rig has this coordinate — declared by {}. Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \"{rig}\".",
-                steps.join(", ")
-            )
+        .filter_map(|target| {
+            let steps = declared.remove(&target)?;
+            Some(advisory_line(&target, &steps))
         })
         .collect()
+}
+
+fn note_role(
+    spec: &WorkflowSpec,
+    world: &World,
+    step_id: &str,
+    role_name: &str,
+    order: &mut Vec<String>,
+    declared: &mut BTreeMap<String, Vec<String>>,
+) {
+    let Some(role) = spec.roles.get(role_name) else {
+        return;
+    };
+    for target in &role.preferred_targets {
+        if !missing_member(target, world) {
+            continue;
+        }
+        if !declared.contains_key(target) {
+            order.push(target.clone());
+        }
+        declared
+            .entry(target.clone())
+            .or_default()
+            .push(format!("step \"{step_id}\" (role \"{role_name}\")"));
+    }
+}
+
+fn missing_member(target: &str, world: &World) -> bool {
+    if crewmux_messaging::is_human_seat(target) {
+        return false;
+    }
+    let Some((member, rig)) = target.split_once('@') else {
+        return false;
+    };
+    !member.is_empty()
+        && !rig.is_empty()
+        && world.rigs.contains(rig)
+        && !world.members.contains(target)
+}
+
+fn advisory_line(target: &str, steps: &[String]) -> String {
+    let rig = target.split_once('@').map_or("", |(_, rig)| rig);
+    format!(
+        "preferred target \"{target}\" names rig \"{rig}\" (registered) but NO member of that rig has this coordinate — declared by {}. Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \"{rig}\".",
+        steps.join(", ")
+    )
 }
 
 fn entry_owner(
@@ -481,7 +574,15 @@ fn rename_entry(err: Error) -> Error {
             format!("cannot instantiate: {message}"),
             400,
         ),
-        Error::Rejected { code, message, status } => Error::Rejected { code, message, status },
+        Error::Rejected {
+            code,
+            message,
+            status,
+        } => Error::Rejected {
+            code,
+            message,
+            status,
+        },
         Error::Crashed(point) => Error::Crashed(point),
     }
 }
@@ -491,7 +592,10 @@ fn live<'a>(engine: &'a Engine, id: &str, code: &'static str) -> Result<&'a Inst
     if !instance.status.is_live() {
         return Err(Error::reject(
             code,
-            format!("workflow instance {id} has status {}", instance.status.as_str()),
+            format!(
+                "workflow instance {id} has status {}",
+                instance.status.as_str()
+            ),
             409,
         ));
     }
@@ -499,7 +603,11 @@ fn live<'a>(engine: &'a Engine, id: &str, code: &'static str) -> Result<&'a Inst
 }
 
 fn missing(id: &str) -> Error {
-    Error::reject("instance_not_found", format!("workflow instance {id} not found"), 404)
+    Error::reject(
+        "instance_not_found",
+        format!("workflow instance {id} not found"),
+        404,
+    )
 }
 
 fn session(text: &str) -> Result<SessionRef, Error> {
@@ -532,7 +640,10 @@ pub fn guidance_lines(engine: &Engine, instance_id: &str) -> Vec<String> {
     let step = instance.current_step_id.as_deref().unwrap_or("(none)");
     let packet = instance.frontier.first().map_or("(none)", QItemId::as_str);
     vec![
-        format!("Workflow {}@{} step {step}", instance.workflow_name, instance.workflow_version),
+        format!(
+            "Workflow {}@{} step {step}",
+            instance.workflow_name, instance.workflow_version
+        ),
         format!("Frontier packet {packet}. project is the only advance."),
     ]
 }

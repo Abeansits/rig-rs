@@ -42,14 +42,25 @@ fn absorb(into: &mut QueueWrite, newer: QueueWrite) {
         into.book = newer.book;
         into.crash = newer.crash;
     }
+    if newer.workflow.is_some() {
+        into.workflow = newer.workflow;
+    }
     into.acks.extend(newer.acks);
 }
 
 async fn persist(app: &App, write: QueueWrite) {
-    let QueueWrite { book, acks, crash } = write;
+    let QueueWrite {
+        book,
+        acks,
+        crash,
+        workflow,
+    } = write;
     let store = std::sync::Arc::clone(&app.store);
     let saved = tokio::task::spawn_blocking(move || {
-        store.write(move |conn| crewmux_store::replace_book(conn, &book, crash))
+        store.write(move |conn| match workflow.as_deref() {
+            Some(doc) => crewmux_store::commit_projection(conn, &book, doc, crash),
+            None => crewmux_store::replace_book(conn, &book, crash),
+        })
     })
     .await;
     let result = match saved {

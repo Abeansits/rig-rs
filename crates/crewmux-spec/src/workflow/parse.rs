@@ -34,7 +34,12 @@ pub fn parse_workflow(text: &str, source_path: &str) -> Result<WorkflowSpec, Wor
     reject_unknown(Some(wf), TOP, "workflow", source_path)?;
     check_loop_guards(wf, source_path)?;
     check_routing(wf, source_path)?;
-    reject_unknown(wf.get("target"), keys::TARGET, "workflow.target", source_path)?;
+    reject_unknown(
+        wf.get("target"),
+        keys::TARGET,
+        "workflow.target",
+        source_path,
+    )?;
     reject_unknown(wf.get("entry"), keys::ENTRY, "workflow.entry", source_path)?;
     reject_unknown(
         wf.get("invariants"),
@@ -89,13 +94,14 @@ fn workflow_node<'a>(
     }
 }
 
-fn require_identity(
-    wf: &Value,
-    source_path: &str,
-) -> Result<(), WorkflowParseError> {
+fn require_identity(wf: &Value, source_path: &str) -> Result<(), WorkflowParseError> {
     let id = wf.get("id").and_then(Value::as_str).unwrap_or("");
     if id.is_empty() {
-        return Err(missing(source_path, "workflow.id", "is missing required field workflow.id"));
+        return Err(missing(
+            source_path,
+            "workflow.id",
+            "is missing required field workflow.id",
+        ));
     }
     if wf.get("version").is_none_or(Value::is_null) {
         return Err(missing(
@@ -149,9 +155,11 @@ fn check_context_refs(wf: &Value, source: &str) -> Result<(), WorkflowParseError
     let Some(refs) = wf.get("context_refs") else {
         return Ok(());
     };
-    let bad = !refs
-        .as_array()
-        .is_some_and(|items| items.iter().all(|item| item.as_str().is_some_and(|text| !text.trim().is_empty())));
+    let bad = !refs.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .all(|item| item.as_str().is_some_and(|text| !text.trim().is_empty()))
+    });
     if bad {
         return Err(WorkflowParseError::new(
             "spec_field_invalid",

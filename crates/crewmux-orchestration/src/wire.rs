@@ -5,7 +5,7 @@ use crewmux_types::QItemId;
 use serde_json::{Map, Value, json};
 
 use crate::deadline::{Evidence, Verdict};
-use crate::model::{CachedSpec, Decision, Instance};
+use crate::model::{CachedSpec, Decision, Instance, Trail};
 use crate::project::Projection;
 use crate::time::iso8601;
 use crate::validate::Validation;
@@ -16,13 +16,25 @@ pub fn instance_json(instance: &Instance, deadline: Option<&Verdict>) -> Value {
     let mut body = Map::new();
     body.insert("instanceId".to_owned(), json!(instance.id.as_str()));
     body.insert("workflowName".to_owned(), json!(instance.workflow_name));
-    body.insert("workflowVersion".to_owned(), json!(instance.workflow_version));
-    body.insert("createdBySession".to_owned(), json!(instance.created_by.as_str()));
+    body.insert(
+        "workflowVersion".to_owned(),
+        json!(instance.workflow_version),
+    );
+    body.insert(
+        "createdBySession".to_owned(),
+        json!(instance.created_by.as_str()),
+    );
     body.insert("createdAt".to_owned(), json!(iso8601(instance.created_at)));
     body.insert("status".to_owned(), json!(instance.status.as_str()));
     body.insert(
         "currentFrontier".to_owned(),
-        json!(instance.frontier.iter().map(QItemId::as_str).collect::<Vec<_>>()),
+        json!(
+            instance
+                .frontier
+                .iter()
+                .map(QItemId::as_str)
+                .collect::<Vec<_>>()
+        ),
     );
     body.insert("currentStepId".to_owned(), json!(instance.current_step_id));
     body.insert("hopCount".to_owned(), json!(instance.hop_count));
@@ -60,9 +72,23 @@ pub fn validation_json(report: &Validation) -> Value {
     serde_json::to_value(report).unwrap_or(json!({"ok": false, "issues": [], "summary": {}}))
 }
 
-/// Cache row, with `hot_potato` filled in when the author omitted the rule.
+/// Cache row. The nested spec carries `hot_potato` when the author omitted it.
 #[must_use]
 pub fn spec_row_json(cached: &CachedSpec, spec: &WorkflowSpec) -> Value {
+    let mut row = spec_row_body(cached, spec);
+    if let Value::Object(body) = &mut row {
+        body.insert("isBuiltIn".to_owned(), json!(cached.built_in));
+    }
+    row
+}
+
+/// Instantiate's spec row. TypeScript's `WorkflowSpecRow` has no `isBuiltIn`.
+#[must_use]
+pub fn instantiate_spec_json(cached: &CachedSpec, spec: &WorkflowSpec) -> Value {
+    spec_row_body(cached, spec)
+}
+
+fn spec_row_body(cached: &CachedSpec, spec: &WorkflowSpec) -> Value {
     let rule = spec
         .coordination_terminal_turn_rule
         .clone()
@@ -73,12 +99,11 @@ pub fn spec_row_json(cached: &CachedSpec, spec: &WorkflowSpec) -> Value {
         "version": cached.version,
         "purpose": spec.objective,
         "targetRig": spec.target_rig,
-        "spec": spec_json(spec, &rule),
+        "spec": spec_json(spec),
         "coordinationTerminalTurnRule": rule,
         "sourcePath": cached.source_path,
         "sourceHash": cached.source_hash,
         "cachedAt": iso8601(cached.cached_at),
-        "isBuiltIn": cached.built_in,
     })
 }
 
@@ -87,19 +112,45 @@ pub fn spec_row_json(cached: &CachedSpec, spec: &WorkflowSpec) -> Value {
 pub fn project_json(instance: &Instance, projection: &Projection) -> Value {
     let mut body = Map::new();
     body.insert("instance".to_owned(), instance_json(instance, None));
-    body.insert("closurePriorPacketId".to_owned(), json!(projection.closure_prior));
+    body.insert(
+        "closurePriorPacketId".to_owned(),
+        json!(projection.closure_prior),
+    );
     body.insert("closureReason".to_owned(), json!(projection.closure_reason));
     body.insert("nextQitemId".to_owned(), json!(projection.next_qitem));
     body.insert("nextOwnerSession".to_owned(), json!(projection.next_owner));
     body.insert("nextStepId".to_owned(), json!(projection.next_step));
     body.insert(
         "emittedEventTypes".to_owned(),
-        json!(projection.events.iter().map(|event| (*event).to_owned()).collect::<Vec<_>>()),
+        json!(
+            projection
+                .events
+                .iter()
+                .map(|event| (*event).to_owned())
+                .collect::<Vec<_>>()
+        ),
     );
     if projection.absorbed {
         body.insert("absorbedReplay".to_owned(), json!(true));
     }
     Value::Object(body)
+}
+
+/// One trail row.
+#[must_use]
+pub fn trail_json(row: &Trail) -> Value {
+    json!({
+        "trailId": row.id,
+        "instanceId": row.instance_id,
+        "stepId": row.step_id,
+        "stepRole": row.step_role,
+        "closedAt": iso8601(row.closed_at),
+        "closureReason": row.closure_reason,
+        "closureEvidence": row.closure_evidence,
+        "actorSession": row.actor_session,
+        "nextQitemId": row.next_qitem_id,
+        "priorQitemId": row.prior_qitem_id,
+    })
 }
 
 fn decision_json(decision: &Decision) -> Value {
@@ -137,7 +188,7 @@ fn evidence_json(evidence: &Evidence) -> Value {
     })
 }
 
-fn spec_json(spec: &WorkflowSpec, rule: &str) -> Value {
+fn spec_json(spec: &WorkflowSpec) -> Value {
     let mut body = Map::new();
     body.insert("id".to_owned(), json!(spec.id));
     body.insert("version".to_owned(), json!(spec.version_label));
@@ -153,6 +204,12 @@ fn spec_json(spec: &WorkflowSpec, rule: &str) -> Value {
         "steps".to_owned(),
         Value::Array(spec.steps.iter().map(step_json).collect()),
     );
+    // The cache row fills `hot_potato` when the author omitted the key, and
+    // that default is copied onto the nested spec (workflow-spec-cache.ts).
+    let rule = spec
+        .coordination_terminal_turn_rule
+        .clone()
+        .unwrap_or_else(|| "hot_potato".to_owned());
     body.insert("coordination_terminal_turn_rule".to_owned(), json!(rule));
     Value::Object(body)
 }
@@ -178,7 +235,10 @@ fn role_json(role: &RoleSpec) -> Value {
         body.insert("skill_refs".to_owned(), json!(role.skill_refs));
     }
     if !role.preferred_targets.is_empty() {
-        body.insert("preferred_targets".to_owned(), json!(role.preferred_targets));
+        body.insert(
+            "preferred_targets".to_owned(),
+            json!(role.preferred_targets),
+        );
     }
     Value::Object(body)
 }
@@ -216,4 +276,3 @@ fn insert_opt(body: &mut Map<String, Value>, key: &str, value: Option<String>) {
         body.insert(key.to_owned(), json!(value));
     }
 }
-

@@ -6,9 +6,7 @@
 //! and the caller keeps the published pair.
 
 use crewmux_core::Timestamp;
-use crewmux_messaging::{
-    Actor, NewItem, QueueBook, QueueRepo, QueueState, SessionRef, Update,
-};
+use crewmux_messaging::{Actor, NewItem, QueueBook, QueueRepo, QueueState, SessionRef, Update};
 use crewmux_spec::workflow::{StepSpec, WorkflowSpec};
 use crewmux_types::QItemId;
 use serde_json::Value;
@@ -135,7 +133,10 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
             409,
         ));
     }
-    if request.expected_version.is_some_and(|expected| expected != instance.version) {
+    if request
+        .expected_version
+        .is_some_and(|expected| expected != instance.version)
+    {
         return Err(Error::reject(
             "instance_version_conflict",
             format!(
@@ -147,7 +148,11 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
             409,
         ));
     }
-    if !instance.frontier.iter().any(|id| id.as_str() == request.packet_id) {
+    if !instance
+        .frontier
+        .iter()
+        .any(|id| id.as_str() == request.packet_id)
+    {
         let frontier = serde_json::to_string(
             &instance
                 .frontier
@@ -166,7 +171,11 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
         ));
     }
     let id = QItemId::new(&request.packet_id).map_err(|_| {
-        Error::reject("packet_not_found", format!("qitem {} not found in queue_items", request.packet_id), 404)
+        Error::reject(
+            "packet_not_found",
+            format!("qitem {} not found in queue_items", request.packet_id),
+            404,
+        )
     })?;
     if book.get(&id).is_none() {
         return Err(Error::reject(
@@ -186,9 +195,8 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
             409,
         )
     })?;
-    let spec = crewmux_spec::parse_workflow(&cached.yaml, &cached.source_path).map_err(|err| {
-        Error::reject(err.code, err.message, 400)
-    })?;
+    let spec = crewmux_spec::parse_workflow(&cached.yaml, &cached.source_path)
+        .map_err(|err| Error::reject(err.code, err.message, 400))?;
     if spec.steps.iter().any(|step| step.depends_on.is_some()) {
         return Err(Error::reject(
             "frontier_binding_indeterminate",
@@ -203,7 +211,11 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
 }
 
 fn missing(id: &str) -> Error {
-    Error::reject("instance_not_found", format!("workflow instance {id} not found"), 404)
+    Error::reject(
+        "instance_not_found",
+        format!("workflow instance {id} not found"),
+        404,
+    )
 }
 
 fn current_step<'a>(spec: &'a WorkflowSpec, instance: &Instance) -> Result<&'a StepSpec, Error> {
@@ -247,8 +259,14 @@ fn absorb(engine: &Engine, request: &ProjectRequest, step_id: &str) -> Option<Pr
     {
         return None;
     }
-    let stored_blocker = stored.blocked_on.clone().unwrap_or_else(|| "external-gate".to_owned());
-    let input_blocker = request.blocked_on.clone().unwrap_or_else(|| "external-gate".to_owned());
+    let stored_blocker = stored
+        .blocked_on
+        .clone()
+        .unwrap_or_else(|| "external-gate".to_owned());
+    let input_blocker = request
+        .blocked_on
+        .clone()
+        .unwrap_or_else(|| "external-gate".to_owned());
     if stored_blocker != input_blocker {
         return None;
     }
@@ -310,7 +328,10 @@ fn plan_route(
             400,
         ));
     }
-    let mapped = step.next_hop.as_ref().and_then(|hop| hop.mapped(request.exit.as_str()));
+    let mapped = step
+        .next_hop
+        .as_ref()
+        .and_then(|hop| hop.mapped(request.exit.as_str()));
     let branch_routed = mapped.is_some();
     let next = resolve_next_step(spec, step, Some(request.exit.as_str()));
     if branch_routed && next.is_none() {
@@ -339,7 +360,10 @@ fn plan_route(
         Some(format!(
             "max_hops_exceeded: hop {} would exceed loop_guards.max_hops={}",
             instance.hop_count.saturating_add(1),
-            spec.loop_guards.as_ref().and_then(|guards| guards.max_hops).unwrap_or(0)
+            spec.loop_guards
+                .as_ref()
+                .and_then(|guards| guards.max_hops)
+                .unwrap_or(0)
         ))
     } else {
         request.result_note.clone()
@@ -357,12 +381,16 @@ fn plan_route(
             )
         })?;
         let owner = owner_for(spec, next, request, world, instance.bound_rig.is_some())?;
-        let branch = if branch_routed { Some(next.id.clone()) } else { None };
+        let branch = if branch_routed {
+            Some(next.id.clone())
+        } else {
+            None
+        };
         (Some(owner), Some(next.id.clone()), branch)
     } else {
         (None, None, None)
     };
-    let mut events = vec!["workflow.step_closed"];
+    let mut events = vec!["queue.updated", "workflow.step_closed"];
     if routes {
         events.push("queue.created");
         events.push("workflow.next_qitem_projected");
@@ -425,7 +453,15 @@ fn apply(
     checkpoint(ctx, Phase::AfterClose)?;
     let next_id = create_next(book, request, spec, step, plan, ctx.now)?;
     checkpoint(ctx, Phase::AfterCreate)?;
-    move_frontier(engine, &instance_id, request, step, plan, next_id.as_deref(), ctx.now)?;
+    move_frontier(
+        engine,
+        &instance_id,
+        request,
+        step,
+        plan,
+        next_id.as_deref(),
+        ctx.now,
+    )?;
     checkpoint(ctx, Phase::AfterFrontier)?;
     append_trail(engine, request, step, plan, next_id.as_deref(), ctx.now);
     checkpoint(ctx, Phase::AfterTrail)?;
@@ -498,7 +534,10 @@ fn closure(plan: &Plan, request: &ProjectRequest) -> Result<Close, Error> {
             })
         }
         Exit::Waiting => {
-            let blocker = request.blocked_on.clone().unwrap_or_else(|| "external-gate".to_owned());
+            let blocker = request
+                .blocked_on
+                .clone()
+                .unwrap_or_else(|| "external-gate".to_owned());
             Ok(Close {
                 state: QueueState::Blocked,
                 reason: "blocked_on".to_owned(),
@@ -549,7 +588,10 @@ fn create_next(
         return Ok(None);
     }
     let owner = plan.owner.clone().unwrap_or_default();
-    let next = spec.steps.iter().find(|candidate| plan.next_step.as_deref() == Some(candidate.id.as_str()));
+    let next = spec
+        .steps
+        .iter()
+        .find(|candidate| plan.next_step.as_deref() == Some(candidate.id.as_str()));
     let Some(next) = next else {
         return Ok(None);
     };
@@ -603,14 +645,17 @@ fn move_frontier(
     next_id: Option<&str>,
     now: Timestamp,
 ) -> Result<(), Error> {
-    let instance = engine.instance_mut(instance_id).ok_or_else(|| missing(instance_id))?;
+    let instance = engine
+        .instance_mut(instance_id)
+        .ok_or_else(|| missing(instance_id))?;
     let remaining: Vec<QItemId> = instance
         .frontier
         .iter()
         .filter(|id| id.as_str() != request.packet_id)
         .cloned()
         .collect();
-    let (frontier, status, step_id, completed) = next_state(instance, request, plan, next_id, remaining)?;
+    let (frontier, status, step_id, completed) =
+        next_state(instance, request, plan, next_id, remaining)?;
     instance.frontier = frontier;
     instance.status = status;
     instance.current_step_id = step_id;
@@ -655,7 +700,12 @@ fn next_state(
         ));
     }
     if plan.exit == Exit::Failed {
-        return Ok((remaining, Status::Failed, None, true));
+        return Ok((
+            remaining,
+            Status::Failed,
+            instance.current_step_id.clone(),
+            true,
+        ));
     }
     Ok((remaining, Status::Completed, None, true))
 }

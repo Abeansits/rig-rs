@@ -30,7 +30,12 @@ pub struct Sweep {
 }
 
 /// Re-arm, re-nudge, and surface overdue work. Does not advance an instance.
-pub fn boot_sweep(engine: &mut Engine, book: &mut QueueBook, world: &World, now: Timestamp) -> Sweep {
+pub fn boot_sweep(
+    engine: &mut Engine,
+    book: &mut QueueBook,
+    world: &World,
+    now: Timestamp,
+) -> Sweep {
     let mut sweep = Sweep {
         visited: 0,
         newly_armed: 0,
@@ -62,10 +67,16 @@ fn sweep_one(
     let Some(instance) = engine.instance(id) else {
         return;
     };
-    let frontier: Vec<String> = instance.frontier.iter().map(|item| item.as_str().to_owned()).collect();
+    let frontier: Vec<String> = instance
+        .frontier
+        .iter()
+        .map(|item| item.as_str().to_owned())
+        .collect();
     let owner = frontier.first().cloned();
-    if let Some(owner) = owner.as_deref().and_then(|packet| book.get(&qid(packet)).map(|item| item.destination.as_str().to_owned()))
-        && keepalive::arm(engine, id, &owner)
+    if let Some(owner) = owner.as_deref().and_then(|packet| {
+        book.get(&qid(packet))
+            .map(|item| item.destination.as_str().to_owned())
+    }) && keepalive::arm(engine, id, &owner)
     {
         sweep.newly_armed = sweep.newly_armed.saturating_add(1);
     }
@@ -117,7 +128,11 @@ fn note_inconsistent(status: Status, frontier: &[String], book: &QueueBook, swee
         };
         let closed = matches!(
             item.state,
-            QueueState::Done | QueueState::HandedOff | QueueState::Canceled | QueueState::Failed | QueueState::Denied
+            QueueState::Done
+                | QueueState::HandedOff
+                | QueueState::Canceled
+                | QueueState::Failed
+                | QueueState::Denied
         );
         if closed && item.handed_off_to.is_none() {
             sweep.inconsistent.push(packet.clone());
@@ -135,7 +150,8 @@ fn ensure_stuck(
     let instance = engine.instance(id)?;
     let tagged = format!("instance:{id}");
     if book.items().iter().any(|item| {
-        item.tags.iter().any(|tag| tag == "stuck_overdue") && item.tags.iter().any(|tag| tag == &tagged)
+        item.tags.iter().any(|tag| tag == "stuck_overdue")
+            && item.tags.iter().any(|tag| tag == &tagged)
     }) {
         return None;
     }
@@ -150,7 +166,10 @@ fn ensure_stuck(
     }
     let spec = engine
         .specs
-        .get(&Engine::spec_key(&instance.workflow_name, &instance.workflow_version))
+        .get(&Engine::spec_key(
+            &instance.workflow_name,
+            &instance.workflow_version,
+        ))
         .and_then(|cached| crewmux_spec::parse_workflow(&cached.yaml, &cached.source_path).ok())?;
     let choice = dial::route_exception(&spec, "stuck_overdue", world);
     let source = SessionRef::new("workflow@kernel").ok()?;

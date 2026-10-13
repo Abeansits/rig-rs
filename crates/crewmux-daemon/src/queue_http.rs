@@ -152,6 +152,11 @@ pub(crate) async fn update_item(State(app): State<App>, body: Bytes) -> Response
         Ok(parsed) => parsed,
         Err(err) => return fail(Error::Message(err.to_string())),
     };
+    if let Some(state) = parsed.state.as_deref()
+        && let Some(blocked) = crate::workflow::guard_close(&app, &parsed.id, state).await
+    {
+        return blocked;
+    }
     let now = now_ts();
     let transition = mutate(&app, move |book| {
         let id = qid(&parsed.id)?;
@@ -209,6 +214,9 @@ async fn handoff_with(app: &App, body: &[u8], complete: bool) -> Response {
         Ok(parsed) => parsed,
         Err(err) => return fail(Error::Message(err.to_string())),
     };
+    if let Some(blocked) = crate::workflow::guard_close(app, &parsed.id, "handed-off").await {
+        return blocked;
+    }
     let now = now_ts();
     let pair = mutate(app, move |book| {
         let id = qid(&parsed.id)?;

@@ -391,7 +391,8 @@ impl QueueBook {
         if to == QueueState::Blocked {
             item.blocked_on = update.blocked_on.clone().or(item.blocked_on);
         }
-        if to == QueueState::HandedOff && update.closure_reason.as_deref() == Some("handed_off_to") {
+        if to == QueueState::HandedOff && update.closure_reason.as_deref() == Some("handed_off_to")
+        {
             let target = update.closure_target.as_deref().unwrap_or("");
             item.handed_off_to = Some(SessionRef::new(target)?);
         }

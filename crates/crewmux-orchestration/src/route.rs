@@ -24,12 +24,20 @@ pub fn resolve_next_step<'a>(
     {
         return spec.steps.iter().find(|candidate| candidate.id == target);
     }
-    if step.next_hop.as_ref().is_some_and(|hop| hop.mode.as_deref() == Some("forbid")) {
+    if step
+        .next_hop
+        .as_ref()
+        .is_some_and(|hop| hop.mode.as_deref() == Some("forbid"))
+    {
         return None;
     }
     if let Some(hop) = step.next_hop.as_ref() {
         for role in &hop.suggested_roles {
-            if let Some(found) = spec.steps.iter().find(|candidate| candidate.actor_role == *role) {
+            if let Some(found) = spec
+                .steps
+                .iter()
+                .find(|candidate| candidate.actor_role == *role)
+            {
                 return Some(found);
             }
         }
@@ -37,7 +45,10 @@ pub fn resolve_next_step<'a>(
             return None;
         }
     }
-    let index = spec.steps.iter().position(|candidate| candidate.id == step.id)?;
+    let index = spec
+        .steps
+        .iter()
+        .position(|candidate| candidate.id == step.id)?;
     spec.steps.get(index.saturating_add(1))
 }
 
@@ -132,11 +143,7 @@ fn resolve_on_bound_rig(step: &StepSpec, world: &World) -> Result<String, Error>
             409,
         ));
     };
-    let pick = select_role_seat(
-        &step.actor_role,
-        step.harness.as_deref(),
-        rig,
-    );
+    let pick = select_role_seat(&step.actor_role, step.harness.as_deref(), rig);
     if let Some(seat) = pick.seat {
         return Ok(seat);
     }
@@ -159,7 +166,8 @@ fn resolve_on_bound_rig(step: &StepSpec, world: &World) -> Result<String, Error>
         .iter()
         .filter(|row| {
             rig.iter().any(|seat| {
-                seat.logical_id == row.logical_id && seat.role.as_deref() == Some(step.actor_role.as_str())
+                seat.logical_id == row.logical_id
+                    && seat.role.as_deref() == Some(step.actor_role.as_str())
             })
         })
         .map(|row| {

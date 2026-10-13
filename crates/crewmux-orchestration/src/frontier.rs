@@ -10,7 +10,10 @@ use crate::model::Engine;
 /// Claim and `blocked` are not closes. A missing workflow table is an empty engine.
 #[must_use]
 pub fn frontier_block(engine: &Engine, qitem: &str, next: &str) -> Option<Error> {
-    if !matches!(next, "done" | "handed-off" | "canceled" | "failed" | "denied") {
+    if !matches!(
+        next,
+        "done" | "handed-off" | "canceled" | "failed" | "denied"
+    ) {
         return None;
     }
     let live = engine.instances.iter().find(|instance| {

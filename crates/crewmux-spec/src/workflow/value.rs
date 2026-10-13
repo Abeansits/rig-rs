@@ -42,9 +42,9 @@ fn escape(text: &str) -> String {
 }
 
 pub(crate) fn integer(value: &Value) -> Option<i64> {
-    value.as_i64().or_else(|| {
-        value.as_u64().and_then(|wide| i64::try_from(wide).ok())
-    })
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|wide| i64::try_from(wide).ok()))
 }
 
 pub(crate) fn version_label(value: &Value) -> String {

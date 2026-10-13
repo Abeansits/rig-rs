@@ -4,8 +4,8 @@ use serde_json::{Map, Value};
 
 use super::error::WorkflowParseError;
 use super::model::{
-    Acceptance, ClosureText, ExceptionRouting, GateSpec, Invariants, LoopGuards, NextHop,
-    RoleSpec, StepSpec, WorkflowSpec,
+    Acceptance, ClosureText, ExceptionRouting, GateSpec, Invariants, LoopGuards, NextHop, RoleSpec,
+    StepSpec, WorkflowSpec,
 };
 use super::value::{self, object};
 
@@ -97,7 +97,11 @@ fn read_role(role: &Value) -> RoleSpec {
 fn read_step(step: &Value) -> StepSpec {
     let allowed = step.get("allowed_exits").and_then(value::string_list);
     StepSpec {
-        id: step.get("id").and_then(Value::as_str).unwrap_or("").to_owned(),
+        id: step
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned(),
         actor_role: step
             .get("actor_role")
             .and_then(Value::as_str)
@@ -108,14 +112,19 @@ fn read_step(step: &Value) -> StepSpec {
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
         allowed_exits: allowed,
-        re_present_after_seconds: step.get("re_present_after_seconds").and_then(value::integer),
+        re_present_after_seconds: step
+            .get("re_present_after_seconds")
+            .and_then(value::integer),
         re_present_max_seconds: step.get("re_present_max_seconds").and_then(value::integer),
         next_hop: step.get("next_hop").map(read_hop),
         harness: step
             .get("harness")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
-        host: step.get("host").and_then(Value::as_str).map(ToOwned::to_owned),
+        host: step
+            .get("host")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
         gate: step.get("gate").and_then(read_gate),
         depends_on: step.get("depends_on").and_then(value::string_list),
         acceptance: step.get("acceptance").and_then(read_acceptance),
@@ -133,7 +142,10 @@ fn read_hop(hop: &Value) -> NextHop {
         })
         .unwrap_or_default();
     NextHop {
-        mode: hop.get("mode").and_then(Value::as_str).map(ToOwned::to_owned),
+        mode: hop
+            .get("mode")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
         suggested_roles: hop
             .get("suggested_roles")
             .and_then(value::string_list)
@@ -175,18 +187,27 @@ fn read_invariants(value: &Value) -> Invariants {
 
 fn read_closure(value: &Value) -> ClosureText {
     ClosureText {
-        success: value.get("success").and_then(Value::as_str).map(ToOwned::to_owned),
+        success: value
+            .get("success")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
         degraded: value
             .get("degraded")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
-        failed: value.get("failed").and_then(Value::as_str).map(ToOwned::to_owned),
+        failed: value
+            .get("failed")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
     }
 }
 
 fn read_guards(value: Option<&Value>) -> Option<LoopGuards> {
     let map = object(value?)?;
-    let max_hops = map.get("max_hops").filter(|item| !item.is_null()).and_then(value::integer);
+    let max_hops = map
+        .get("max_hops")
+        .filter(|item| !item.is_null())
+        .and_then(value::integer);
     let spawn_budget = map
         .get("spawn_budget")
         .filter(|item| !item.is_null())
@@ -202,7 +223,10 @@ fn read_guards(value: Option<&Value>) -> Option<LoopGuards> {
 
 fn read_routing(value: &Value) -> ExceptionRouting {
     ExceptionRouting {
-        default: value.get("default").and_then(Value::as_str).map(ToOwned::to_owned),
+        default: value
+            .get("default")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
         orchestrator_role: value
             .get("orchestrator_role")
             .and_then(Value::as_str)

@@ -78,3 +78,23 @@ fn orchestrator(spec: &WorkflowSpec, world: &World) -> DialChoice {
         position: "fallback",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{OPERATOR_SEAT, route_exception};
+    use crate::world::World;
+    use crewmux_spec::parse_workflow;
+
+    #[test]
+    fn human_only_is_the_operator_seat() {
+        let yaml = "workflow:\n  id: dial\n  version: 1\n  exception_routing:\n    default: human_only\n  roles:\n    planner:\n      preferred_targets: [a@rig]\n  steps:\n    - id: one\n      actor_role: planner\n";
+        let spec = parse_workflow(yaml, "dial.yaml").expect("parse");
+        let choice = route_exception(&spec, "stuck_overdue", &World::default());
+        assert_eq!(choice.session, OPERATOR_SEAT);
+        assert_eq!(choice.session, "human@kernel");
+        assert_eq!(choice.tier, "human-gate");
+        let trip = route_exception(&spec, "human_gate_trip", &World::default());
+        assert_eq!(trip.session, "human@kernel");
+        assert_eq!(trip.position, "human_only");
+    }
+}
