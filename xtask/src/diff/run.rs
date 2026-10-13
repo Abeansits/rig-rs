@@ -168,12 +168,11 @@ fn fill_arg(arg: &str, json: Option<&Value>) -> Result<String, Error> {
     let Some(start) = arg.find("{{") else {
         return Ok(arg.to_owned());
     };
-    let Some(end) = arg[start..].find("}}") else {
+    let after = arg.get(start..).unwrap_or("");
+    let Some(end) = after.find("}}") else {
         return Err(Error::Message(format!("unclosed placeholder in {arg}")));
     };
-    let key = arg
-        .get(start.saturating_add(2)..start.saturating_add(end))
-        .unwrap_or("");
+    let key = after.get(2..end).unwrap_or("");
     let value = json.ok_or_else(|| Error::Message(format!("no JSON yet for {arg}")))?;
     let found = lookup(value, key)
         .ok_or_else(|| Error::Message(format!("placeholder {key} is missing")))?;
@@ -183,9 +182,7 @@ fn fill_arg(arg: &str, json: Option<&Value>) -> Result<String, Error> {
     let mut rendered = String::new();
     rendered.push_str(arg.get(..start).unwrap_or(""));
     rendered.push_str(&text);
-    let rest = arg
-        .get(start.saturating_add(end).saturating_add(2)..)
-        .unwrap_or("");
+    let rest = after.get(end.saturating_add(2)..).unwrap_or("");
     rendered.push_str(&fill_arg(rest, Some(value))?);
     Ok(rendered)
 }

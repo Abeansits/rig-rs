@@ -122,17 +122,31 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
     let instance = engine
         .instance(&request.instance_id)
         .ok_or_else(|| missing(&request.instance_id))?;
-    if !instance.status.is_live() {
-        return Err(Error::reject(
-            "instance_not_active",
-            format!(
-                "workflow instance {} has status {}; only active|waiting instances accept project",
-                instance.id,
-                instance.status.as_str()
-            ),
-            409,
-        ));
+    require_live(instance)?;
+    require_version(instance, request)?;
+    require_frontier(instance, request)?;
+    require_packet(book, request)?;
+    let spec = cached_spec(engine, instance)?;
+    require_serial(&spec, instance, request)?;
+    Ok(Loaded(spec))
+}
+
+fn require_live(instance: &Instance) -> Result<(), Error> {
+    if instance.status.is_live() {
+        return Ok(());
     }
+    Err(Error::reject(
+        "instance_not_active",
+        format!(
+            "workflow instance {} has status {}; only active|waiting instances accept project",
+            instance.id,
+            instance.status.as_str()
+        ),
+        409,
+    ))
+}
+
+fn require_version(instance: &Instance, request: &ProjectRequest) -> Result<(), Error> {
     if request
         .expected_version
         .is_some_and(|expected| expected != instance.version)
@@ -148,42 +162,52 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
             409,
         ));
     }
-    if !instance
+    Ok(())
+}
+
+fn require_frontier(instance: &Instance, request: &ProjectRequest) -> Result<(), Error> {
+    if instance
         .frontier
         .iter()
         .any(|id| id.as_str() == request.packet_id)
     {
-        let frontier = serde_json::to_string(
-            &instance
-                .frontier
-                .iter()
-                .map(crewmux_types::QItemId::as_str)
-                .collect::<Vec<_>>(),
-        )
-        .unwrap_or_else(|_| "[]".to_owned());
-        return Err(Error::reject(
-            "packet_not_on_frontier",
-            format!(
-                "qitem {} is not in workflow instance {} frontier {frontier}; either the packet is already closed or belongs to a different instance",
-                request.packet_id, instance.id
-            ),
-            409,
-        ));
+        return Ok(());
     }
-    let id = QItemId::new(&request.packet_id).map_err(|_| {
-        Error::reject(
-            "packet_not_found",
-            format!("qitem {} not found in queue_items", request.packet_id),
-            404,
-        )
-    })?;
+    let frontier = serde_json::to_string(
+        &instance
+            .frontier
+            .iter()
+            .map(crewmux_types::QItemId::as_str)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_owned());
+    Err(Error::reject(
+        "packet_not_on_frontier",
+        format!(
+            "qitem {} is not in workflow instance {} frontier {frontier}; either the packet is already closed or belongs to a different instance",
+            request.packet_id, instance.id
+        ),
+        409,
+    ))
+}
+
+fn require_packet(book: &QueueBook, request: &ProjectRequest) -> Result<(), Error> {
+    let id = QItemId::new(&request.packet_id).map_err(|_| packet_missing(&request.packet_id))?;
     if book.get(&id).is_none() {
-        return Err(Error::reject(
-            "packet_not_found",
-            format!("qitem {} not found in queue_items", request.packet_id),
-            404,
-        ));
+        return Err(packet_missing(&request.packet_id));
     }
+    Ok(())
+}
+
+fn packet_missing(id: &str) -> Error {
+    Error::reject(
+        "packet_not_found",
+        format!("qitem {id} not found in queue_items"),
+        404,
+    )
+}
+
+fn cached_spec(engine: &Engine, instance: &Instance) -> Result<WorkflowSpec, Error> {
     let key = Engine::spec_key(&instance.workflow_name, &instance.workflow_version);
     let cached = engine.specs.get(&key).ok_or_else(|| {
         Error::reject(
@@ -195,8 +219,15 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
             409,
         )
     })?;
-    let spec = crewmux_spec::parse_workflow(&cached.yaml, &cached.source_path)
-        .map_err(|err| Error::reject(err.code, err.message, 400))?;
+    crewmux_spec::parse_workflow(&cached.yaml, &cached.source_path)
+        .map_err(|err| Error::reject(err.code, err.message, 400))
+}
+
+fn require_serial(
+    spec: &WorkflowSpec,
+    instance: &Instance,
+    request: &ProjectRequest,
+) -> Result<(), Error> {
     if spec.steps.iter().any(|step| step.depends_on.is_some()) {
         return Err(Error::reject(
             "frontier_binding_indeterminate",
@@ -207,7 +238,7 @@ fn load(engine: &Engine, book: &QueueBook, request: &ProjectRequest) -> Result<L
             409,
         ));
     }
-    Ok(Loaded(spec))
+    Ok(())
 }
 
 fn missing(id: &str) -> Error {

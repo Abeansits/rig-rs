@@ -98,7 +98,7 @@ async fn instantiate(State(app): State<App>, body: Bytes) -> axum::response::Res
     .await;
     match created {
         Ok(value) => json_status(StatusCode::CREATED, value),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -158,7 +158,7 @@ async fn project(State(app): State<App>, body: Bytes) -> axum::response::Respons
     .await;
     match projected {
         Ok(value) => json_status(StatusCode::OK, value),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -290,7 +290,7 @@ async fn route_one(
     .await;
     match routed {
         Ok(value) => json_status(StatusCode::OK, value),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -330,7 +330,7 @@ async fn resume_one(
     .await;
     match resumed {
         Ok(value) => json_status(StatusCode::OK, value),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -372,7 +372,7 @@ async fn abort_one(
     .await;
     match aborted {
         Ok(value) => json_status(StatusCode::OK, value),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 

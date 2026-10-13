@@ -248,8 +248,13 @@ impl Observation {
 pub enum NormRule {
     /// Crockford base32 [`ULID`](https://github.com/ulid/spec) (26 characters).
     Ulid,
-    /// RFC 3339 timestamps.
+    /// RFC 3339 timestamps. The same instant keeps one placeholder.
     Timestamp,
+    /// RFC 3339 timestamps, numbered by occurrence.
+    ///
+    /// Two calls in one millisecond stay distinct, so a side that reuses an
+    /// instant does not shift the later placeholders.
+    TimestampEach,
     /// Absolute paths under the scratch root or a system temp directory.
     AbsPath,
     /// TCP ports in `host:port` form (`127.0.0.1`, `localhost`, `::1`).

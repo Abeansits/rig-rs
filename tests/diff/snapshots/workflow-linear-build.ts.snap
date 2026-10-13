@@ -1,0 +1,53 @@
+---
+source: tests/diff/cases/workflow-linear-build.json
+expression: "ts:workflow-linear-build"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": {
+    "closurePriorPacketId": "<QITEM:3>",
+    "closureReason": "done",
+    "emittedEventTypes": [
+      "queue.updated",
+      "workflow.step_closed",
+      "workflow.completed"
+    ],
+    "instance": {
+      "boundRig": null,
+      "compiledInputDigest": null,
+      "completedAt": "<TS:1>",
+      "createdAt": "<TS:1>",
+      "createdBySession": "orch@acme-flow",
+      "currentFrontier": [],
+      "currentStepId": null,
+      "fallbackSynthesis": null,
+      "hopCount": 2,
+      "hopsBaseline": 0,
+      "instanceId": "<ULID:1>",
+      "lastContinuationDecision": {
+        "actorSession": "flow-prover@acme-flow",
+        "blockedOn": null,
+        "branchTaken": null,
+        "closedPacket": "<QITEM:3>",
+        "currentStep": "prove",
+        "exit": "done",
+        "nextPacket": null,
+        "resultNote": null
+      },
+      "lifecycleBinding": null,
+      "lifecycleOperationKey": null,
+      "resumeCount": 0,
+      "status": "completed",
+      "version": 4,
+      "workflowName": "linear-build",
+      "workflowVersion": "1"
+    },
+    "nextOwnerSession": null,
+    "nextQitemId": null,
+    "nextStepId": null
+  },
+  "stderr": "⚠ workflow advisory: preferred target \"flow-planner@acme-flow\" names rig \"acme-flow\" (registered) but NO member of that rig has this coordinate — declared by step \"plan\" (role \"planner\"). Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \"acme-flow\".\n⚠ workflow advisory: preferred target \"flow-builder@acme-flow\" names rig \"acme-flow\" (registered) but NO member of that rig has this coordinate — declared by step \"build\" (role \"builder\"). Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \"acme-flow\".\n⚠ workflow advisory: preferred target \"flow-prover@acme-flow\" names rig \"acme-flow\" (registered) but NO member of that rig has this coordinate — declared by step \"prove\" (role \"prover\"). Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \"acme-flow\".\n",
+  "stdout": "{\"advisories\":[\"preferred target \\\"flow-planner@acme-flow\\\" names rig \\\"acme-flow\\\" (registered) but NO member of that rig has this coordinate — declared by step \\\"plan\\\" (role \\\"planner\\\"). Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \\\"acme-flow\\\".\",\"preferred target \\\"flow-builder@acme-flow\\\" names rig \\\"acme-flow\\\" (registered) but NO member of that rig has this coordinate — declared by step \\\"build\\\" (role \\\"builder\\\"). Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \\\"acme-flow\\\".\",\"preferred target \\\"flow-prover@acme-flow\\\" names rig \\\"acme-flow\\\" (registered) but NO member of that rig has this coordinate — declared by step \\\"prove\\\" (role \\\"prover\\\"). Work routed there will not be claimed; it will surface as a stuck exception. Check the member name against `rig ps`, or add the member to rig \\\"acme-flow\\\".\"],\"entryOwnerSession\":\"flow-planner@acme-flow\",\"entryQitemId\":\"<QITEM:1>\",\"instance\":{\"boundRig\":null,\"compiledInputDigest\":null,\"completedAt\":null,\"createdAt\":\"<TS:1>\",\"createdBySession\":\"orch@acme-flow\",\"currentFrontier\":[\"<QITEM:1>\"],\"currentStepId\":\"plan\",\"fallbackSynthesis\":null,\"hopCount\":0,\"hopsBaseline\":0,\"instanceId\":\"<ULID:1>\",\"lastContinuationDecision\":null,\"lifecycleBinding\":null,\"lifecycleOperationKey\":null,\"resumeCount\":0,\"status\":\"active\",\"version\":1,\"workflowName\":\"linear-build\",\"workflowVersion\":\"1\"},\"replayed\":false,\"spec\":{\"cachedAt\":\"<TS:2>\",\"coordinationTerminalTurnRule\":\"hot_potato\",\"name\":\"linear-build\",\"purpose\":\"Move one packet through plan, build, prove in declaration order.\",\"sourceHash\":\"f2344dc61742effe4b4ab1d183e6088c646b09742a40670b646c23345ea549ac\",\"sourcePath\":\"<PATH:1>\",\"spec\":{\"coordination_terminal_turn_rule\":\"hot_potato\",\"id\":\"linear-build\",\"objective\":\"Move one packet through plan, build, prove in declaration order.\",\"roles\":{\"builder\":{\"preferred_targets\":[\"flow-builder@acme-flow\"]},\"planner\":{\"preferred_targets\":[\"flow-planner@acme-flow\"]},\"prover\":{\"preferred_targets\":[\"flow-prover@acme-flow\"]}},\"steps\":[{\"actor_role\":\"planner\",\"id\":\"plan\"},{\"actor_role\":\"builder\",\"id\":\"build\"},{\"actor_role\":\"prover\",\"id\":\"prove\"}],\"version\":\"1\"},\"specId\":\"<ULID:2>\",\"targetRig\":null,\"version\":\"1\"}}\n{\"closurePriorPacketId\":\"<QITEM:1>\",\"closureReason\":\"handoff\",\"emittedEventTypes\":[\"queue.updated\",\"workflow.step_closed\",\"queue.created\",\"workflow.next_qitem_projected\"],\"instance\":{\"boundRig\":null,\"compiledInputDigest\":null,\"completedAt\":null,\"createdAt\":\"<TS:3>\",\"createdBySession\":\"orch@acme-flow\",\"currentFrontier\":[\"<QITEM:2>\"],\"currentStepId\":\"build\",\"fallbackSynthesis\":null,\"hopCount\":1,\"hopsBaseline\":0,\"instanceId\":\"<ULID:1>\",\"lastContinuationDecision\":{\"actorSession\":\"flow-planner@acme-flow\",\"blockedOn\":null,\"branchTaken\":null,\"closedPacket\":\"<QITEM:1>\",\"currentStep\":\"plan\",\"exit\":\"handoff\",\"nextPacket\":\"<QITEM:2>\",\"resultNote\":null},\"lifecycleBinding\":null,\"lifecycleOperationKey\":null,\"resumeCount\":0,\"status\":\"active\",\"version\":2,\"workflowName\":\"linear-build\",\"workflowVersion\":\"1\"},\"nextOwnerSession\":\"flow-builder@acme-flow\",\"nextQitemId\":\"<QITEM:2>\",\"nextStepId\":\"build\"}\n{\"closurePriorPacketId\":\"<QITEM:2>\",\"closureReason\":\"handoff\",\"emittedEventTypes\":[\"queue.updated\",\"workflow.step_closed\",\"queue.created\",\"workflow.next_qitem_projected\"],\"instance\":{\"boundRig\":null,\"compiledInputDigest\":null,\"completedAt\":null,\"createdAt\":\"<TS:4>\",\"createdBySession\":\"orch@acme-flow\",\"currentFrontier\":[\"<QITEM:3>\"],\"currentStepId\":\"prove\",\"fallbackSynthesis\":null,\"hopCount\":2,\"hopsBaseline\":0,\"instanceId\":\"<ULID:1>\",\"lastContinuationDecision\":{\"actorSession\":\"flow-builder@acme-flow\",\"blockedOn\":null,\"branchTaken\":null,\"closedPacket\":\"<QITEM:2>\",\"currentStep\":\"build\",\"exit\":\"handoff\",\"nextPacket\":\"<QITEM:3>\",\"resultNote\":null},\"lifecycleBinding\":null,\"lifecycleOperationKey\":null,\"resumeCount\":0,\"status\":\"active\",\"version\":3,\"workflowName\":\"linear-build\",\"workflowVersion\":\"1\"},\"nextOwnerSession\":\"flow-prover@acme-flow\",\"nextQitemId\":\"<QITEM:3>\",\"nextStepId\":\"prove\"}\n{\"closurePriorPacketId\":\"<QITEM:3>\",\"closureReason\":\"done\",\"emittedEventTypes\":[\"queue.updated\",\"workflow.step_closed\",\"workflow.completed\"],\"instance\":{\"boundRig\":null,\"compiledInputDigest\":null,\"completedAt\":\"<TS:5>\",\"createdAt\":\"<TS:6>\",\"createdBySession\":\"orch@acme-flow\",\"currentFrontier\":[],\"currentStepId\":null,\"fallbackSynthesis\":null,\"hopCount\":2,\"hopsBaseline\":0,\"instanceId\":\"<ULID:1>\",\"lastContinuationDecision\":{\"actorSession\":\"flow-prover@acme-flow\",\"blockedOn\":null,\"branchTaken\":null,\"closedPacket\":\"<QITEM:3>\",\"currentStep\":\"prove\",\"exit\":\"done\",\"nextPacket\":null,\"resultNote\":null},\"lifecycleBinding\":null,\"lifecycleOperationKey\":null,\"resumeCount\":0,\"status\":\"completed\",\"version\":4,\"workflowName\":\"linear-build\",\"workflowVersion\":\"1\"},\"nextOwnerSession\":null,\"nextQitemId\":null,\"nextStepId\":null}\n",
+  "tmux_argv": []
+}

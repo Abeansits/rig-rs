@@ -152,7 +152,7 @@ async fn empty_boot_sweep_logs_the_noop_and_installs_builtins() {
         "{captured:?}"
     );
     let engine = harness.app.workflow.lock().await.clone();
-    assert!(engine.instances.is_empty());
+    assert_eq!(engine.instances.len(), 0);
     assert!(engine.specs.contains_key("linear-build@1"));
 }
 

@@ -5,7 +5,7 @@
     "jsoncanon",
     "qitem",
     "ulid",
-    "timestamp",
+    "timestamp_each",
     "abspath",
     "socketpath"
   ],

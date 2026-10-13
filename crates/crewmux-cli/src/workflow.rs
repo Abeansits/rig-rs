@@ -197,69 +197,12 @@ enum WorkflowCmd {
 
 pub(crate) fn run(args: &WorkflowArgs) -> Result<i32, Error> {
     match &args.command {
-        WorkflowCmd::Validate { spec, json } => {
-            let path = absolute(spec)?;
-            post(
-                "/api/workflow/validate",
-                &json!({"specPath": path}),
-                *json,
-                None,
-            )
+        WorkflowCmd::Validate { spec, json } => validate_spec(spec, *json),
+        WorkflowCmd::Instantiate { .. } => {
+            instantiate(&args.command, Some(SummaryKind::Instantiate))
         }
-        WorkflowCmd::Instantiate {
-            spec,
-            root_objective,
-            created_by,
-            entry_owner,
-            rig,
-            json,
-        } => post(
-            "/api/workflow/instantiate",
-            &json!({
-                "specPath": absolute(spec)?,
-                "rootObjective": root_objective,
-                "createdBySession": created_by,
-                "entryOwnerSession": entry_owner,
-                "targetRig": rig,
-            }),
-            *json,
-            Some(SummaryKind::Instantiate),
-        ),
-        WorkflowCmd::Project {
-            instance,
-            current_packet,
-            exit,
-            actor_session,
-            result_note,
-            blocked_on,
-            next_owner,
-            json,
-        } => {
-            if !EXITS.contains(&exit.as_str()) {
-                return bad_exit(exit, *json);
-            }
-            post(
-                "/api/workflow/project",
-                &json!({
-                    "instanceId": instance,
-                    "currentPacketId": current_packet,
-                    "exit": exit,
-                    "actorSession": actor_session,
-                    "resultNote": result_note,
-                    "blockedOn": blocked_on,
-                    "nextOwnerSession": next_owner,
-                }),
-                *json,
-                Some(SummaryKind::Project),
-            )
-        }
-        WorkflowCmd::List { status, json } => {
-            let path = match status {
-                Some(status) => format!("/api/workflow/list?status={status}"),
-                None => "/api/workflow/list".to_owned(),
-            };
-            get(&path, *json)
-        }
+        WorkflowCmd::Project { .. } => project(&args.command),
+        WorkflowCmd::List { status, json } => list(status.as_deref(), *json),
         WorkflowCmd::Specs { json } => get("/api/workflow/specs", *json),
         WorkflowCmd::Show { id, json } => get(&format!("/api/workflow/{id}"), *json),
         WorkflowCmd::Trace { id, json } => get(&format!("/api/workflow/{id}/trace"), *json),
@@ -302,35 +245,97 @@ pub(crate) fn run(args: &WorkflowArgs) -> Result<i32, Error> {
             *json,
             Some(SummaryKind::Abort),
         ),
-        WorkflowCmd::Run {
-            spec,
-            root_objective,
-            created_by,
-            entry_owner,
-            rig,
-            json,
-        } => {
-            let code = post(
-                "/api/workflow/instantiate",
-                &json!({
-                    "specPath": absolute(spec)?,
-                    "rootObjective": root_objective,
-                    "createdBySession": created_by,
-                    "entryOwnerSession": entry_owner,
-                    "targetRig": rig,
-                }),
-                *json,
-                None,
-            )?;
-            if code != 0 {
-                return Ok(code);
-            }
-            Ok(0)
-        }
+        WorkflowCmd::Run { .. } => instantiate(&args.command, None),
         WorkflowCmd::Watch { id, json } => watch(id, *json),
     }
 }
 
+fn validate_spec(spec: &str, json: bool) -> Result<i32, Error> {
+    let path = absolute(spec)?;
+    post(
+        "/api/workflow/validate",
+        &json!({"specPath": path}),
+        json,
+        None,
+    )
+}
+
+fn instantiate(cmd: &WorkflowCmd, summary: Option<SummaryKind>) -> Result<i32, Error> {
+    let (WorkflowCmd::Instantiate {
+        spec,
+        root_objective,
+        created_by,
+        entry_owner,
+        rig,
+        json,
+    }
+    | WorkflowCmd::Run {
+        spec,
+        root_objective,
+        created_by,
+        entry_owner,
+        rig,
+        json,
+    }) = cmd
+    else {
+        return Ok(0);
+    };
+    post(
+        "/api/workflow/instantiate",
+        &json!({
+            "specPath": absolute(spec)?,
+            "rootObjective": root_objective,
+            "createdBySession": created_by,
+            "entryOwnerSession": entry_owner,
+            "targetRig": rig,
+        }),
+        *json,
+        summary,
+    )
+}
+
+fn project(cmd: &WorkflowCmd) -> Result<i32, Error> {
+    let WorkflowCmd::Project {
+        instance,
+        current_packet,
+        exit,
+        actor_session,
+        result_note,
+        blocked_on,
+        next_owner,
+        json,
+    } = cmd
+    else {
+        return Ok(0);
+    };
+    if !EXITS.contains(&exit.as_str()) {
+        return Ok(bad_exit(exit, *json));
+    }
+    post(
+        "/api/workflow/project",
+        &json!({
+            "instanceId": instance,
+            "currentPacketId": current_packet,
+            "exit": exit,
+            "actorSession": actor_session,
+            "resultNote": result_note,
+            "blockedOn": blocked_on,
+            "nextOwnerSession": next_owner,
+        }),
+        *json,
+        Some(SummaryKind::Project),
+    )
+}
+
+fn list(status: Option<&str>, json: bool) -> Result<i32, Error> {
+    let path = match status {
+        Some(status) => format!("/api/workflow/list?status={status}"),
+        None => "/api/workflow/list".to_owned(),
+    };
+    get(&path, json)
+}
+
+#[derive(Clone, Copy)]
 enum SummaryKind {
     Instantiate,
     Project,
@@ -349,7 +354,7 @@ fn absolute(spec: &str) -> Result<String, Error> {
     Ok(full.display().to_string())
 }
 
-fn bad_exit(exit: &str, json: bool) -> Result<i32, Error> {
+fn bad_exit(exit: &str, json: bool) -> i32 {
     let fact = format!(
         "--exit must be one of {} (got \"{exit}\").",
         EXITS.join(" | ")
@@ -369,7 +374,7 @@ fn bad_exit(exit: &str, json: bool) -> Result<i32, Error> {
             "Error: {fact}\nrig workflow project did not run; daemon was not contacted.\nPass a valid exit kind. Example: --exit handoff."
         ));
     }
-    Ok(1)
+    1
 }
 
 fn post(path: &str, body: &Value, json: bool, summary: Option<SummaryKind>) -> Result<i32, Error> {
@@ -481,8 +486,10 @@ fn next_line(value: &Value) -> String {
         .pointer("/nextQitemId")
         .or_else(|| value.get("newPacketId"))
         .and_then(Value::as_str)
-        .map(|id| format!("rig queue show {id}"))
-        .unwrap_or_else(|| "rig workflow show".to_owned())
+        .map_or_else(
+            || "rig workflow show".to_owned(),
+            |id| format!("rig queue show {id}"),
+        )
 }
 
 fn text(value: &Value, pointer: &str) -> String {

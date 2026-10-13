@@ -40,6 +40,13 @@ fn timestamp_reuses_one_placeholder_for_the_same_value() {
 }
 
 #[test]
+fn timestamp_each_numbers_every_occurrence() {
+    let text = "2024-10-11T10:38:00Z 2024-10-11T10:38:00.000Z";
+    let out = normalize_text(text, &[NormRule::TimestampEach], &[]).unwrap();
+    assert_eq!(out, "<TS:1> <TS:2>");
+}
+
+#[test]
 fn abspath_masks_scratch_roots_and_temp_dirs() {
     let root = PathBuf::from("/tmp/scratch-root");
     let text = "/tmp/scratch-root/home/a /tmp/scratch-root/home/a /tmp/other/file";

@@ -74,18 +74,17 @@ fn validate_instantiate_project_and_reads_are_json() {
 }
 
 fn instantiate(env: &Env, path: &Path) -> Value {
-    let (code, report, err) = json_out(env.rig().args([
-        "workflow",
-        "validate",
-        path.to_str().expect("path"),
-        "--json",
-    ]));
+    let spec_path = path.to_str().unwrap_or("");
+    let (code, report, err) = json_out(
+        env.rig()
+            .args(["workflow", "validate", spec_path, "--json"]),
+    );
     assert_eq!(code, 0, "{err}");
-    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report.get("ok"), Some(&Value::Bool(true)), "{report}");
     let (code, created, err) = json_out(env.rig().args([
         "workflow",
         "instantiate",
-        path.to_str().expect("path"),
+        spec_path,
         "--root-objective",
         "ship",
         "--created-by",
@@ -93,10 +92,20 @@ fn instantiate(env: &Env, path: &Path) -> Value {
         "--json",
     ]));
     assert_eq!(code, 0, "{err}");
-    assert_eq!(created["entryOwnerSession"], "flow-planner@acme-flow");
-    assert_eq!(created["instance"]["version"], 1);
-    assert_eq!(created["replayed"], false, "{created}");
-    assert_eq!(created["advisories"], serde_json::json!([]));
+    assert_eq!(
+        text(&created, "/entryOwnerSession"),
+        "flow-planner@acme-flow"
+    );
+    assert_eq!(
+        created.pointer("/instance/version"),
+        Some(&serde_json::json!(1))
+    );
+    assert_eq!(
+        created.get("replayed"),
+        Some(&Value::Bool(false)),
+        "{created}"
+    );
+    assert_eq!(created.get("advisories"), Some(&serde_json::json!([])));
     created
 }
 
@@ -117,22 +126,34 @@ fn read_surfaces(env: &Env, id: &str) {
     assert_eq!(code, 0, "{err}");
     let (code, second, err) = json_out(env.rig().args(["workflow", "continue", id, "--json"]));
     assert_eq!(code, 0, "{err}");
-    assert_eq!(first["instance"]["version"], second["instance"]["version"]);
+    assert_eq!(
+        first.pointer("/instance/version"),
+        second.pointer("/instance/version")
+    );
 }
 
 fn handoff(env: &Env, created: &Value, actor: &str) -> String {
-    let id = created["instance"]["instanceId"].as_str().expect("id");
-    let packet = created["entryQitemId"].as_str().expect("packet");
-    project(env, id, packet, "handoff", actor)
+    project(
+        env,
+        text(created, "/instance/instanceId"),
+        text(created, "/entryQitemId"),
+        "handoff",
+        actor,
+    )
 }
 
 fn handoff_packet(env: &Env, created: &Value, packet: &str, actor: &str) -> String {
-    let id = created["instance"]["instanceId"].as_str().expect("id");
-    project(env, id, packet, "handoff", actor)
+    project(
+        env,
+        text(created, "/instance/instanceId"),
+        packet,
+        "handoff",
+        actor,
+    )
 }
 
 fn finish(env: &Env, created: &Value, packet: &str) {
-    let id = created["instance"]["instanceId"].as_str().expect("id");
+    let id = text(created, "/instance/instanceId");
     let (code, routed, err) = json_out(env.rig().args([
         "workflow",
         "route",
@@ -145,14 +166,18 @@ fn finish(env: &Env, created: &Value, packet: &str) {
     ]));
     assert_eq!(code, 0, "{err} {routed}");
     let done = project(env, id, packet, "done", "flow-prover@acme-flow");
-    assert!(done.is_empty());
+    assert_eq!(done, "");
     let (code, watched, err) = json_out(env.rig().args(["workflow", "watch", id, "--json"]));
     assert_eq!(code, 0, "{err}");
-    assert_eq!(watched["status"], "completed");
+    assert_eq!(
+        watched.get("status").and_then(Value::as_str),
+        Some("completed")
+    );
+    let spec_path = env.home.join("linear-build.yaml");
     let (code, run, err) = json_out(env.rig().args([
         "workflow",
         "run",
-        env.home.join("linear-build.yaml").to_str().expect("path"),
+        spec_path.to_str().unwrap_or(""),
         "--root-objective",
         "ship",
         "--created-by",
@@ -160,7 +185,7 @@ fn finish(env: &Env, created: &Value, packet: &str) {
         "--json",
     ]));
     assert_eq!(code, 0, "{err}");
-    let other = run["instance"]["instanceId"].as_str().expect("id");
+    let other = text(&run, "/instance/instanceId");
     let (code, aborted, err) = json_out(env.rig().args([
         "workflow",
         "abort",
@@ -172,7 +197,14 @@ fn finish(env: &Env, created: &Value, packet: &str) {
         "--json",
     ]));
     assert_eq!(code, 0, "{err} {aborted}");
-    assert_eq!(aborted["status"], "aborted");
+    assert_eq!(
+        aborted.get("status").and_then(Value::as_str),
+        Some("aborted")
+    );
+}
+
+fn text<'a>(value: &'a Value, pointer: &str) -> &'a str {
+    value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
 }
 
 fn project(env: &Env, id: &str, packet: &str, exit: &str, actor: &str) -> String {
@@ -190,5 +222,5 @@ fn project(env: &Env, id: &str, packet: &str, exit: &str, actor: &str) -> String
         "--json",
     ]));
     assert_eq!(code, 0, "{err} {body}");
-    body["nextQitemId"].as_str().unwrap_or("").to_owned()
+    text(&body, "/nextQitemId").to_owned()
 }

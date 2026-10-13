@@ -57,18 +57,18 @@ pub(crate) async fn guard_close(app: &App, qitem: &str, next: &str) -> Option<Re
 pub(crate) async fn mutate_pair<T>(
     app: &App,
     f: impl FnOnce(&Engine, &QueueBook) -> Result<(Engine, QueueBook, T), crewmux_orchestration::Error>,
-) -> Result<T, Response> {
+) -> Result<T, Box<Response>> {
     let (previous_book, previous_engine, next_book, doc, epoch, value) = loop {
         if let (Ok(mut queue), Ok(mut engine)) = (app.queue.try_lock(), app.workflow.try_lock()) {
             let previous_book = queue.clone();
             let previous_engine = engine.clone();
             let (next_engine, next_book, value) = match f(&engine, &queue) {
                 Ok(triple) => triple,
-                Err(err) => return Err(rejected(err)),
+                Err(err) => return Err(Box::new(rejected(err))),
             };
             let doc = match serde_json::to_string(&next_engine) {
                 Ok(doc) => doc,
-                Err(err) => return Err(fail(Error::Message(err.to_string()))),
+                Err(err) => return Err(Box::new(fail(Error::Message(err.to_string())))),
             };
             let epoch = next_book.epoch();
             *queue = next_book.clone();
@@ -79,7 +79,7 @@ pub(crate) async fn mutate_pair<T>(
     };
     if let Err(err) = app.commit_documented(next_book, Some(doc)).await {
         restore(app, epoch, previous_book, previous_engine).await;
-        return Err(fail(err));
+        return Err(Box::new(fail(err)));
     }
     Ok(value)
 }

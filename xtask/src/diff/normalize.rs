@@ -190,6 +190,7 @@ fn apply_one(
     match rule {
         NormRule::Ulid => replace_ulid(&patterns.ulid, text, &mut masks.ulid),
         NormRule::Timestamp => replace_whole(&patterns.timestamp, text, &mut masks.timestamp, "TS"),
+        NormRule::TimestampEach => replace_each(&patterns.timestamp, text, "TS"),
         NormRule::SocketPath => replace_whole(&patterns.socket, text, &mut masks.socket, "SOCK"),
         NormRule::Port => replace_ports(&patterns.port, text, masks),
         NormRule::Getcwd => strip_dash_getcwd(text),
@@ -234,6 +235,16 @@ fn is_ulid_char(ch: char) -> bool {
         ch.to_ascii_uppercase(),
         '0'..='9' | 'A'..='H' | 'J' | 'K' | 'M' | 'N' | 'P'..='T' | 'V'..='Z'
     )
+}
+
+fn replace_each(regex: &Regex, text: &str, prefix: &str) -> String {
+    let mut n = 0u32;
+    regex
+        .replace_all(text, |_caps: &Captures<'_>| {
+            n = n.saturating_add(1);
+            format!("<{prefix}:{n}>")
+        })
+        .into_owned()
 }
 
 fn replace_whole(

@@ -192,6 +192,7 @@ fn rule_from(name: &str) -> Result<NormRule, Error> {
     match name {
         "ulid" => Ok(NormRule::Ulid),
         "timestamp" => Ok(NormRule::Timestamp),
+        "timestamp_each" => Ok(NormRule::TimestampEach),
         "abspath" => Ok(NormRule::AbsPath),
         "port" => Ok(NormRule::Port),
         "socketpath" => Ok(NormRule::SocketPath),
