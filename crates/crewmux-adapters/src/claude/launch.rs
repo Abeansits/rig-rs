@@ -26,7 +26,14 @@ pub(crate) async fn prepare(
     let seat_env = seat_env(binding, opts);
     let rig_bin = crewmux_provider::rig_executable();
     let (mcp, settings) = tokio::task::spawn_blocking(move || {
-        write_seat(&dir, mode, &seat_key, &rig_home, &rig_bin, &seat_env)
+        write_seat(
+            &dir,
+            mode.as_deref(),
+            &seat_key,
+            &rig_home,
+            &rig_bin,
+            &seat_env,
+        )
     })
     .await
     .map_err(|err| Error::Message(err.to_string()))??;
@@ -86,7 +93,7 @@ fn seat_env(binding: &NodeBinding, opts: &LaunchOpts) -> crewmux_provider::SeatE
 
 fn write_seat(
     dir: &Path,
-    permission_mode: Option<String>,
+    permission_mode: Option<&str>,
     seat_key: &str,
     rig_home: &Path,
     rig_bin: &Path,
@@ -95,7 +102,7 @@ fn write_seat(
     let files = ClaudeSeatFiles::new(dir);
     let mcp = files.write_mcp(&[crewmux_provider::claude_mcp_entry(rig_bin, env)])?;
     files.write_settings(&ClaudeSeatSettings {
-        permission_mode: permission_mode.clone(),
+        permission_mode: permission_mode.map(str::to_owned),
         hooks: serde_json::json!({}),
     })?;
     let run_id = uuid::Uuid::new_v4().to_string();
@@ -106,7 +113,7 @@ fn write_seat(
             run_id,
             rig_bin: rig_binary(),
         },
-        permission_mode.as_deref(),
+        permission_mode,
     )?;
     Ok((mcp, settings))
 }
