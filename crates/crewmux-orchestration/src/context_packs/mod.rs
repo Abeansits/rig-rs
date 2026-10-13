@@ -16,7 +16,7 @@ mod time;
 mod tokens;
 mod write;
 
-pub use assemble::{assemble_bundle, assemble_plain};
+pub use assemble::{PlainInput, assemble_bundle, assemble_plain};
 pub use builtin::materialize_builtin;
 pub use compose::{
     ComposeError, ComposedPiece, ComposedProfile, ContextAtoms, NamedCompose,
@@ -24,7 +24,7 @@ pub use compose::{
 };
 pub use entry::{EntryFile, PackEntry, SourceType, context_pack_id};
 pub use error::{PackCode, PackError};
-pub use library::{Library, Root, SyncReport};
+pub use library::{Library, Root, ScanError, SyncReport};
 pub use probe::{CompiledProbes, compile_atom_probes};
 pub use read::{ReadFail, SourceRead, SourceRoots, read_source};
 pub use recap::{

@@ -6,6 +6,10 @@
 mod autostart;
 mod chatroom;
 mod command;
+mod context_add;
+mod context_cmd;
+mod context_trace;
+mod context_view;
 mod doctor_cmd;
 mod doctor_eval;
 mod doctor_facts;
@@ -154,6 +158,8 @@ enum Commands {
     CrashCart(slice8::CrashCartArgs),
     /// Agent checkpoints.
     Checkpoint(slice8::CheckpointArgs),
+    /// Browse, compose, and deliver context packs.
+    Context(context_cmd::ContextArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -204,6 +210,7 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::RestoreCheck(args) => slice8::restore_check(&args),
         Commands::CrashCart(args) => slice8::crash_cart(&args),
         Commands::Checkpoint(args) => slice8::checkpoint(&args),
+        Commands::Context(args) => context_cmd::run(&args),
     }
 }
 

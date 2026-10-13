@@ -105,45 +105,7 @@ impl Library {
         reject_existing_target(out_ref, &target)?;
         reject_namespace(out_ref, &write_root, &target)?;
         write_pack(out_ref, &target, &members)?;
-        drop(self.scan());
-        let Some(entry) = self.by_ref(out_ref)?.cloned() else {
-            drop(std::fs::remove_dir_all(&target));
-            drop(self.scan());
-            return Err(PackError::with(
-                PackCode::PackWriteFailed,
-                format!(
-                    "composed context pack '{out_ref}' was not discoverable at its durable ref"
-                ),
-                json!({"ref": out_ref, "targetDir": target.display().to_string()}),
-            ));
-        };
-        if entry.source_path != target {
-            drop(std::fs::remove_dir_all(&target));
-            drop(self.scan());
-            return Err(PackError::with(
-                PackCode::PackWriteFailed,
-                format!(
-                    "composed context pack '{out_ref}' was not discoverable at its durable ref"
-                ),
-                json!({"ref": out_ref, "targetDir": target.display().to_string()}),
-            ));
-        }
-        let plain_inputs: Vec<PlainInput<'_>> = members
-            .iter()
-            .map(|(path, _label, content)| PlainInput {
-                path,
-                content: Some(std::str::from_utf8(content).unwrap_or("")),
-            })
-            .collect();
-        let assembled = assemble_plain(&plain_inputs);
-        Ok(ComposeOutcome {
-            refer: out_ref.to_owned(),
-            entry,
-            text: assembled.text,
-            bytes: assembled.bytes,
-            estimated_tokens: assembled.estimated_tokens,
-            files: assembled.files,
-        })
+        self.published(out_ref, &target, &members)
     }
 
     /// Delete a non-builtin pack and rescan.
@@ -256,6 +218,45 @@ fn contained(entry: &PackEntry, rel: &str) -> Result<PathBuf, PackError> {
         }
     }
     Ok(cursor)
+}
+
+impl Library {
+    fn published(
+        &mut self,
+        out_ref: &str,
+        target: &Path,
+        members: &[(String, String, Vec<u8>)],
+    ) -> Result<ComposeOutcome, PackError> {
+        drop(self.scan());
+        let entry = self.by_ref(out_ref)?.cloned();
+        let Some(entry) = entry.filter(|entry| entry.source_path == target) else {
+            drop(std::fs::remove_dir_all(target));
+            drop(self.scan());
+            return Err(PackError::with(
+                PackCode::PackWriteFailed,
+                format!(
+                    "composed context pack '{out_ref}' was not discoverable at its durable ref"
+                ),
+                json!({"ref": out_ref, "targetDir": target.display().to_string()}),
+            ));
+        };
+        let plain_inputs: Vec<PlainInput<'_>> = members
+            .iter()
+            .map(|(path, _label, content)| PlainInput {
+                path,
+                content: Some(std::str::from_utf8(content).unwrap_or("")),
+            })
+            .collect();
+        let assembled = assemble_plain(&plain_inputs);
+        Ok(ComposeOutcome {
+            refer: out_ref.to_owned(),
+            entry,
+            text: assembled.text,
+            bytes: assembled.bytes,
+            estimated_tokens: assembled.estimated_tokens,
+            files: assembled.files,
+        })
+    }
 }
 
 fn assert_ref(refer: &str) -> Result<(), PackError> {

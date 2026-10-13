@@ -57,6 +57,7 @@ pub(crate) fn router(app: App) -> Router {
         .merge(crate::chat::routes())
         .merge(crate::health_http::routes())
         .merge(crate::stream_http::routes())
+        .merge(crate::context_http::routes())
         .layer(map_response(connection_close))
         .with_state(app)
 }

@@ -91,7 +91,21 @@ pub struct PackError {
 }
 
 impl PackError {
-    pub(crate) fn new(code: PackCode, message: impl Into<String>) -> Self {
+    /// Wire object: `error`, `message`, and any extra detail fields.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let mut body = json!({"error": self.code.as_str(), "message": self.message});
+        if let (Some(object), Some(extra)) = (body.as_object_mut(), self.details.as_object()) {
+            for (key, value) in extra {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+        body
+    }
+
+    /// A failure with an empty detail object.
+    #[must_use]
+    pub fn new(code: PackCode, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
