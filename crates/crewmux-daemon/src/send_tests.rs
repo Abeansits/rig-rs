@@ -5,8 +5,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crewmux_api::Client;
-use crewmux_mux::FakeMux;
+use crewmux_mux::{FakeMux, Multiplexer};
 use crewmux_types::{SEAT_ID_HEADER, SEAT_TOKEN_HEADER};
+use rmcp::ServiceExt;
+use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Value, json};
 
 use crate::flow::{harness_with, two_stub};
@@ -202,4 +204,72 @@ async fn missing_token_is_operator_not_the_body() {
     let text = screen(&harness.app).await;
     assert!(text.contains("From: operator@host"), "{text}");
     assert!(!text.contains("mallory"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replaced_stub_pane_receives_nothing_via_mcp() {
+    let harness = boot().await;
+    let (id, token) = proof(&harness.mux.recorded().await, "one__pair");
+    let pane = one_pane(&harness.mux).await;
+    let before = pastes(&harness.mux.recorded().await);
+    harness
+        .mux
+        .set_pane_process(&pane.session, Some(99), &pane.current_cmd, None)
+        .await;
+    let marker = "mcp-replaced-pane-marker";
+    let result = mcp_send(&harness.sock, &id, &token, marker).await;
+    let text = tool_text(&result);
+    assert_eq!(result.is_error, Some(true), "{text}");
+    assert!(text.contains("lineage:pane_pid_mismatch"), "{text}");
+    assert_eq!(pastes(&harness.mux.recorded().await), before);
+    let shot = screen(&harness.app).await;
+    assert_eq!(shot.matches(marker).count(), 0, "{shot}");
+}
+
+async fn one_pane(mux: &FakeMux) -> crewmux_mux::PaneInfo {
+    mux.list_panes()
+        .await
+        .expect("panes")
+        .into_iter()
+        .find(|pane| pane.session.contains("one"))
+        .expect("one")
+}
+
+fn pastes(calls: &[Vec<String>]) -> usize {
+    calls
+        .iter()
+        .filter(|argv| argv.iter().any(|arg| arg == "paste-buffer"))
+        .count()
+}
+
+fn tool_text(result: &CallToolResult) -> String {
+    result
+        .content
+        .first()
+        .and_then(|block| block.as_text())
+        .map(|text| text.text.clone())
+        .unwrap_or_default()
+}
+
+async fn mcp_send(sock: &std::path::Path, id: &str, token: &str, text: &str) -> CallToolResult {
+    let caller = crewmux_mcp::caller_from_pair(Some(id), Some(token)).expect("seat");
+    let server = crewmux_mcp::RigMcp::new(
+        Client::over_uds(sock),
+        caller,
+        crewmux_mcp::SchemaMode::Native,
+    );
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_io).await.expect("serve");
+        drop(running.waiting().await);
+    });
+    let client = ().serve(client_io).await.expect("client");
+    let mut params = CallToolRequestParams::new("agent_send".to_owned());
+    params.arguments = json!({"session": "one@pair", "text": text})
+        .as_object()
+        .cloned();
+    let result = client.call_tool(params).await.expect("call");
+    drop(client);
+    server_task.abort();
+    result
 }

@@ -1,0 +1,5 @@
+{
+  "id": "mcp-tool-names",
+  "project": "mcp-tool-names",
+  "steps": [{ "op": "mcp_tools" }]
+}

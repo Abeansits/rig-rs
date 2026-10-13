@@ -24,6 +24,42 @@ pub const MAX_CURSOR_LEN: usize = 256;
 /// Longest presented seat token, in bytes. Issued tokens are ULIDs.
 pub const MAX_SEAT_TOKEN_LEN: usize = 256;
 
+/// Secret presented with [`SEAT_ID_ENV`]. Empty, whitespace, and control characters are rejected.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SeatToken(String);
+
+impl SeatToken {
+    /// Reject an empty token, whitespace, a control character, or a token past [`MAX_SEAT_TOKEN_LEN`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError::Name`] when `text` is not a single token of the allowed length.
+    pub fn new(text: impl Into<String>) -> Result<Self, TypeError> {
+        let text = text.into();
+        let ok = !text.is_empty()
+            && text.len() <= MAX_SEAT_TOKEN_LEN
+            && !text.chars().any(|ch| ch.is_whitespace() || ch.is_control());
+        if ok {
+            Ok(Self(text))
+        } else {
+            Err(TypeError::Name(text))
+        }
+    }
+
+    /// Borrow the token.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SeatToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 const _: () = assert!(MAX_SENDER_LEN == crate::id::MAX_NAME_LEN);
 
 use std::fmt;

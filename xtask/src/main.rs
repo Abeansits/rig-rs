@@ -23,6 +23,8 @@ xtask lint-blind-enter
 xtask lint claude-json
 xtask lint window-size
 xtask lint blind-enter
+xtask lint mcp-legacy-names
+xtask lint mcp-state-path
 xtask record-tui [--openrig DIR] [--out DIR]
 
 diff exits 0 when every verdict is Equal or ExpectedDiff, 1 on Unexpected or a
@@ -180,9 +182,30 @@ fn cmd_lint(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
                 Ok(1)
             }
         },
+        Some("mcp-legacy-names") => Ok(report_lint(
+            "lint-mcp-legacy-names",
+            xtask::lint_mcp_legacy_names(&root),
+        )),
+        Some("mcp-state-path") => Ok(report_lint(
+            "lint-mcp-state-path",
+            xtask::lint_mcp_state_path(&root),
+        )),
         other => Err(Error::Usage(format!(
             "unknown lint command {other:?}\n{HELP}"
         ))),
+    }
+}
+
+fn report_lint(label: &str, result: Result<(), Error>) -> i32 {
+    match result {
+        Ok(()) => {
+            out(&format!("{label} ok"));
+            0
+        }
+        Err(error) => {
+            err(&error.to_string());
+            1
+        }
     }
 }
 

@@ -7,7 +7,7 @@ ADR-0010 makes this file the single PE register. Design-workspace ids that colli
 | --- | --- | --- |
 | PE-001 | Claude first-run is not ready | PE-001 |
 | PE-002 | Codex login | PE-002 |
-| PE-003 | MCP tool rename | PE-016 (reserved; no heading yet) |
+| PE-003 | MCP tool rename | PE-016 |
 | PE-004 | no writes to the Claude user config | PE-004 |
 | PE-005 | exactly-once direct/startup re-delivery | PE-017 (reserved; no heading yet) |
 | PE-006 | blind Enter | PE-013 |
@@ -93,6 +93,7 @@ Repo PE-006 stays the setup/doctor exception below. It is not the blind-Enter ru
 - **Snapshot:** `tests/diff/snapshots/daemon-health.rs.snap` records that Rust side. `ExpectedDiff(PE-009)` applies only while the live Rust observation still matches it. stderr, exit, json, files, and tmux argv stay compared as ordinary fields.
 - **Why this is recorded:** a cold `cargo xtask diff` against OpenRig v0.6.9 (`4b48ca21`) shows the same `status=ok` and a longer key list on the TypeScript side. Delete this heading and the `.rs.snap` when `/healthz` carries the same top-level keys.
 - **Required test:** `daemon_health_against_product_daemon`. `cargo xtask diff` against the pinned tree reports `ExpectedDiff(PE-009)` for `daemon-health`.
+- MCP `daemon_health` returns this same body. It does not add a version field. A socket that is down is `{"running": false}` rather than an error string (PE-020).
 
 ## PE-011: chat sender is a seat token, not `X-OpenRig-Session`
 
@@ -123,12 +124,40 @@ The design index calls this PE-006. That id is already the setup/doctor exceptio
 - **Rust behaviour:** the id is `session_meta.payload.id` in `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Candidates are the before-snapshot difference, the per-cwd launch lock, and first-message correlation. A tie is `ThreadIdError::Ambiguous`. The id is never guessed from a process or a log row.
 - **Required tests:** `back_to_back_launches_get_distinct_ids`, `outside_rollout_is_correlated_by_the_first_message`, `unresolvable_tie_is_ambiguous`, and `snapshot_excludes_rollouts_from_before_launch`.
 
+## PE-016: MCP tool names renamed
+
+The design index calls this PE-003. That id is already the slice 1 help exception in this file, so the MCP rename is PE-016.
+
+- **TS behaviour:** `packages/cli/src/mcp-server.ts` registers 18 tools. The names, sorted as `mcp-server.test.ts` lists them, are `rig_add`, `rig_agent_validate`, `rig_bind`, `rig_bundle_inspect`, `rig_capture`, `rig_chatroom_send`, `rig_chatroom_watch`, `rig_discover`, `rig_down`, `rig_ps`, `rig_restore`, `rig_rig_nodes`, `rig_rig_validate`, `rig_send`, `rig_snapshot_create`, `rig_snapshot_list`, `rig_status`, and `rig_up`. `tools/list` length is 18.
+- **Rust behaviour:** the stdio server name is `rig` and it registers exactly 15 tools: `rig_start`, `rig_stop`, `rig_list`, `agent_list`, `agent_add`, `agent_send`, `agent_read_screen`, `chat_send`, `chat_read`, `snapshot_create`, `snapshot_list`, `snapshot_restore`, `spec_validate_rig`, `spec_validate_agent`, and `daemon_health`. There are no aliases. `rig_discover`, `rig_bind`, and `rig_bundle_inspect` are not registered; calling one is the protocol error `unknown tool`. The other fifteen names were renamed as above.
+- **What this exception covers:** the tool name and the dropped tools. It does not cover a different HTTP path, request body, timeout, or flag. Those differences are PE-020.
+- **Lint:** `cargo xtask lint mcp-legacy-names` fails when one of the 18 legacy names appears in `docs/`, `assets/skills/`, or `crates/**/src` outside `crates/crewmux-mcp/src/names.rs`. `cargo xtask lint mcp-state-path` fails when `crewmux-mcp`'s `[dependencies]` names `crewmux-store`, `crewmux-mux`, `crewmux-adapters`, or `crewmux-durability`.
+- **Required tests:** `tools_list_is_the_fifteen_names`, `stdio_reconnect_lists_fifteen`, `bundle_inspect_is_unknown_tool`, `schemas_have_required_fields`, and `spec_validate_tools_require_yaml`.
+
 ## PE-019: the process-lineage selector is not the pre-send check
 
 - **TS behaviour:** `native-process-lineage.test.ts` selects the agent through a process tree (nix wrappers, the executable path, launcher shims). `native-claude-delivery.test.ts` pairs that selector with the ordinary transport.
 - **Rust behaviour:** before a paste (direct send, launch startup, restore re-send, and `POST /api/seats/submit`), the daemon checks the recorded pid, that the foreground is not a shell, and the session. A version-number process title (`2.1.289`) counts as Claude, because Node's `process.title` overwrites the command line. The start time distinguishes a reused pid; it does not prove the session, because `exec` keeps both. A session or resume token in argv must be the id stored at launch, including when the launch record has none (`codex resume <other>`). With no token, an open file has to name that id, or the send is refused. Claude Code 2.1.286 on Linux keeps `--session-id` in `/proc` cmdline (`comm` is `claude`); the fixture `crewmux-daemon/tests/fixtures/claude-code-2.1.286-fds/` shows the transcript fd is closed. The native binary is covered by the token check. The process-tree selector is not ported. Stub seats take the same record at launch. `rig send` and `POST /api/send` paste only after `lineage::ensure`. A shell in the live argv is a bare shell even when tmux still reports the command recorded at launch.
 - **Remaining risk:** a titled build with no argv token is refused, even when it is still the launched process. An in-app `/resume` that leaves argv and open files unchanged is only caught after the send. A same-image `exec` into a non-shell that leaves tmux naming the launch command is not distinguished from the launched process.
 - **Required test:** `pid_mismatch_refuses_before_paste`, `session_id_mismatch_refuses_before_paste`, `same_start_time_without_a_session_file_is_not_proof`, `codex_resume_token_the_record_lacks_refuses`, `exec_into_another_session_pastes_nothing`, `respawn_under_another_session_pastes_nothing`, `exec_into_bash_pastes_nothing`, `hidden_title_exec_into_another_session_pastes_nothing`, `node_title_before_launch_pastes_nothing`, `node_title_after_launch_pastes_nothing`, `node_argv_session_delivers`, `shell_argv_is_a_bare_shell_when_tmux_still_names_the_agent`, `normal_stub_seat_still_delivers`, `respawn_pane_delivers_nothing`, and `exec_into_bash_delivers_nothing`.
+
+## PE-020: MCP tools call the Rust daemon routes
+
+PE-016 covers the renamed tool list only. These are the route, body, and flag differences that remain after that rename. Matching the TypeScript assertions would call routes this daemon does not have, or would ignore a flag that changes what the tool does.
+
+- **`agent_add`:** there is no `POST /api/rigs/{id}/pods/{ns}/members` route. The tool returns `{"error":"not_implemented","feature":"agent_add"}` and does not open the socket. A 404 with an empty body was the previous result.
+- **`rig_start`:** posts the spec file's YAML bytes to `POST /api/rigs/up` (120s). It does not post `{sourceRef, plan, autoApprove, targetRoot}` to `POST /api/up`. `plan: true`, `autoApprove: true`, and any `targetRoot` are refused before HTTP, because each one would change bring-up and the daemon has no such flag. A file that does not parse as a rig spec is rejected locally; the error text does not include the file body, so a non-spec file's keys are not echoed.
+- **`rig_stop`:** `snapshot: true` calls `POST /api/snapshot/create` with `{"rig": rigId}` and, only if that succeeds, `POST /api/rigs/down` with `{"rig": rigId}`. A failed snapshot does not stop the rig. `delete: true` and `force: true` are refused. This is not `POST /api/down` with `{rigId, delete, force, snapshot}`.
+- **`rig_list`:** `GET /api/rigs/summary` returns `{id, name}` rows. There is no `GET /api/ps`, and the summary has no status, uptime, or node counts.
+- **`agent_list`:** `rigId` is required. The tool resolves it through `GET /api/rigs/summary` and returns that rig's seats from `GET /api/seats`. There is no `GET /api/rigs/:id/nodes`, and the seats are not a node inventory (`nodeKind`, attach command, resume command).
+- **`agent_read_screen`:** one session is `POST /api/seats/capture` with `{seat, lines}`. `rig` and `pod` are refused. The daemon captures a single seat, not every session in a rig or pod.
+- **`chat_send`:** optional `sender` is accepted and not forwarded, which matches the TypeScript tool (the field is deprecated and ignored). The body stays `{body}`. The `X-Rig-Seat-*` headers are forwarded. Chat does not paste into a pane, so `lineage::ensure` does not apply.
+- **`daemon_health`:** returns the `/healthz` body from PE-009 (`status` and `pid`, no version). A down socket is `{"running": false}` and does not start the daemon.
+- **`waitForIdleSeconds`:** a positive value is refused with `not_implemented` before any HTTP call. It is not sent as `waitForIdleMs`, and the client timeout is not extended. `force` combined with the wait is still the TypeScript error, also before HTTP. `force` alone does not set `dangerously_interact`.
+- **`spec_validate_rig` and `spec_validate_agent`:** local `crewmux-spec` checks. Zero HTTP. They do not `POST` the YAML to `/api/rigs/import/validate` or `/api/agents/validate`.
+- **`snapshot_create`:** `POST /api/snapshot/create` with `{"rig": rigId}`. The id is not a percent-encoded path segment under `/api/rigs/:id/snapshots`.
+- **`agent_send`:** posts `{to, body, verify}` to `POST /api/send` and forwards the `X-Rig-Seat-*` headers. It does not send a body `from`. The daemon attributes the sender from those headers (PE-011): a valid seat token is `name@rig`, and no headers is `operator@host`. Paste, including this tool, runs `lineage::ensure` first. A replaced stub pane is refused and nothing is pasted.
+- **Required tests:** `agent_add_is_not_implemented`, `rig_start_posts_spec_yaml`, `rig_start_refuses_flags`, `rig_start_hides_non_spec_keys`, `rig_stop_posts_down`, `rig_stop_snapshots_then_stops`, `rig_stop_does_not_stop_when_snapshot_fails`, `rig_stop_refuses_delete_and_force`, `rig_list_gets_summary`, `agent_list_filters_by_rig`, `agent_read_screen_returns_capture`, `agent_read_screen_refuses_rig_or_pod`, `chat_send_ignores_sender`, `agent_send_wait_is_refused`, `agent_send_returns_daemon_json`, `agent_send_rejects_unknown_arguments`, `replaced_stub_pane_receives_nothing_via_mcp`, `spec_validate_rig_is_local`, `snapshot_create_posts_body`, and `daemon_health_returns_up_body`. `cargo xtask diff` case `mcp-tool-names` maps the legacy names onto the registered Rust names.
 
 ## Status of real-login testing
 

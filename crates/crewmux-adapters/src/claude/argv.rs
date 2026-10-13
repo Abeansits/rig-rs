@@ -26,6 +26,8 @@ pub(crate) fn claude_argv(
     args.push("--mcp-config".to_owned());
     args.push(mcp.display().to_string());
     args.push("--strict-mcp-config".to_owned());
+    args.push("--allowedTools".to_owned());
+    args.push(crewmux_provider::claude_allowed_tools().join(","));
     args.push("--settings".to_owned());
     args.push(settings.display().to_string());
     args

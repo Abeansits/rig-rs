@@ -223,6 +223,7 @@ fn claude_mcp_body() -> String {
         name: crewmux_provider::RIG_MCP_NAME.to_owned(),
         command,
         args,
+        env: std::collections::BTreeMap::new(),
     }])
     .unwrap_or_default()
 }

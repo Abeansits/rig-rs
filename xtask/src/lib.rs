@@ -8,6 +8,7 @@
 mod error;
 mod lint;
 mod lint_enter;
+mod lint_mcp;
 mod lint_mux;
 mod output;
 
@@ -18,5 +19,6 @@ pub mod record_tui;
 pub use error::{Error, io_err};
 pub use lint::{lint_claude_json, lint_window_size};
 pub use lint_enter::lint_blind_enter;
+pub use lint_mcp::{lint_mcp_legacy_names, lint_mcp_state_path};
 pub use lint_mux::{lint_mux_at, workspace_root as lint_workspace_root};
 pub use output::{err, out};

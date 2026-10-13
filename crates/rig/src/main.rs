@@ -6,6 +6,9 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("mcp") {
+        return mcp_command(&args);
+    }
     if args.get(1).map(String::as_str) == Some("tui") {
         return match crewmux_cli::run_tui() {
             Ok(()) => ExitCode::SUCCESS,
@@ -32,6 +35,20 @@ fn real_main() -> Result<i32, crewmux_cli::Error> {
         return Ok(daemon_command(args));
     }
     crewmux_cli::run()
+}
+
+fn mcp_command(args: &[String]) -> ExitCode {
+    if args.len() > 2 {
+        crewmux_cli::output::stderr_line("usage: rig mcp");
+        return ExitCode::from(1);
+    }
+    match crewmux_mcp::serve_stdio_blocking() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            crewmux_cli::output::stderr_line(&err.to_string());
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn daemon_command(mut args: impl Iterator<Item = String>) -> i32 {
