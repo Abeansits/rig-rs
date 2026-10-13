@@ -32,6 +32,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
 tokio-stream.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 crewmux-transcript.workspace = true

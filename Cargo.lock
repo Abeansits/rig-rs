@@ -570,6 +570,7 @@ dependencies = [
  "crewmux-transcript",
  "crewmux-types",
  "futures-core",
+ "parking_lot",
  "rusqlite",
  "rustix",
  "serde",
@@ -660,6 +661,10 @@ version = "0.0.0"
 dependencies = [
  "crewmux-core",
  "crewmux-spec",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -682,8 +687,10 @@ dependencies = [
  "crewmux-types",
  "insta",
  "proptest",
+ "regex",
  "serde",
  "serde-saphyr",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

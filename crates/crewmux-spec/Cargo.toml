@@ -9,8 +9,10 @@ publish.workspace = true
 
 [dependencies]
 crewmux-types.workspace = true
+regex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde-saphyr.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
