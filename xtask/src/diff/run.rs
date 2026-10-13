@@ -79,7 +79,12 @@ pub fn execute(case: &LoadedCase, side: &Side, ts_port: Option<u16>) -> Result<E
     })();
     guard.finish()?;
     stepped?;
-    let roots = vec![home.root.path().to_path_buf(), home_path.clone(), rig_home];
+    let mut roots = vec![home.root.path().to_path_buf(), home_path.clone(), rig_home];
+    // A seeded built-in keeps the checkout path in `sourcePath`. That tree is
+    // under `/tmp` locally and under the runner workspace in CI.
+    if let Side::Ts { pkg, .. } = side {
+        roots.push(pkg.clone());
+    }
     let normalized = normalize_observation(&obs, &case.case.normalize, &roots)?;
     let projected = project(normalized, case.project);
     let text = canonical(&projected)?;

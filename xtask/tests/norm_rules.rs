@@ -81,6 +81,14 @@ fn custom_rule_replaces_every_match_with_the_static_string() {
 }
 
 #[test]
+fn abspath_masks_a_checkout_root_outside_tmp() {
+    let root = PathBuf::from("/home/runner/work/rig-rs/rig-rs/openrig");
+    let text = "\"sourcePath\":\"/home/runner/work/rig-rs/rig-rs/openrig/packages/daemon/dist/builtins/workflow-specs/linear-build.yaml\"";
+    let out = normalize_text(text, &[NormRule::AbsPath], &[root]).unwrap();
+    assert_eq!(out, "\"sourcePath\":\"<PATH:1>\"");
+}
+
+#[test]
 fn dash_getcwd_noise_is_stripped() {
     let text =
         "tmux has-session\nsh: 0: getcwd() failed: No such file or directory\nerror connecting\n";
