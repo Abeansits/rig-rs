@@ -1,0 +1,12 @@
+---
+source: tests/diff/cases/mcp-tool-names.json
+expression: "ts:mcp-tool-names"
+---
+{
+  "exit": 0,
+  "files": [],
+  "json": null,
+  "stderr": "",
+  "stdout": "agent_add\nagent_list\nagent_read_screen\nagent_send\nchat_read\nchat_send\ndaemon_health\nrig_list\nrig_start\nrig_stop\nsnapshot_create\nsnapshot_list\nsnapshot_restore\nspec_validate_agent\nspec_validate_rig",
+  "tmux_argv": []
+}

@@ -79,6 +79,7 @@ fn write_claude_mcp(ctx: &ApplyCtx<'_>) -> Result<(), Error> {
         name: RIG_MCP_NAME.to_owned(),
         command,
         args,
+        env: std::collections::BTreeMap::new(),
     }])?;
     Ok(())
 }

@@ -1,0 +1,421 @@
+{
+  "tools": [
+    {
+      "description": "Not implemented. The daemon has no add-member route, so this returns {\"error\":\"not_implemented\"} and does not call the daemon.",
+      "inputSchema": {
+        "$defs": {
+          "EdgeArg": {
+            "additionalProperties": false,
+            "description": "One pod-local edge on `agent_add`.",
+            "properties": {
+              "from": {
+                "description": "Source member id.",
+                "type": "string"
+              },
+              "kind": {
+                "description": "Edge kind.",
+                "type": "string"
+              },
+              "to": {
+                "description": "Destination member id.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "kind"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "edges": {
+            "description": "Optional pod-local edges.",
+            "items": {
+              "$ref": "#/$defs/EdgeArg"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "member": {
+            "description": "Member fragment. The tool returns `not_implemented` and does not post it."
+          },
+          "podNamespace": {
+            "description": "Pod namespace, percent-encoded into the path.",
+            "type": "string"
+          },
+          "rigId": {
+            "description": "Rig id, percent-encoded into the path.",
+            "type": "string"
+          },
+          "rigRoot": {
+            "description": "Optional root for agent resolution.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "rigId",
+          "podNamespace",
+          "member"
+        ],
+        "type": "object"
+      },
+      "name": "agent_add"
+    },
+    {
+      "description": "List seats for rigId. Resolves the id or name with GET /api/rigs/summary, then returns that rig's seats from GET /api/seats.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "rigId": {
+            "description": "Rig id or name. Resolved through `GET /api/rigs/summary`, then filtered in `GET /api/seats`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rigId"
+        ],
+        "type": "object"
+      },
+      "name": "agent_list"
+    },
+    {
+      "description": "Read one seat's live screen through POST /api/seats/capture. rig and pod are refused.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "description": "Capture line budget. Omitted uses the daemon default.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pod": {
+            "default": null,
+            "description": "Refused. The daemon captures one seat, not a pod.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rig": {
+            "default": null,
+            "description": "Refused. The daemon captures one seat, not every seat in a rig.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
+            "default": null,
+            "description": "Seat or session name. Required unless `rig` or `pod` is set, and those are refused.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "name": "agent_read_screen"
+    },
+    {
+      "description": "Deliver text to a seat through POST /api/send. The sender is the seat-token headers, not a body from field. A replaced pane is refused before paste. force does not set dangerously_interact. force combined with waitForIdleSeconds is rejected before any request. A positive waitForIdleSeconds is refused and does not extend the timeout.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "description": "Accepted only so `force` plus `waitForIdleSeconds` can be rejected locally.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "session": {
+            "description": "Target session name.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Message text posted to `POST /api/send`.",
+            "type": "string"
+          },
+          "verify": {
+            "description": "Ask the daemon to verify delivery.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "waitForIdleSeconds": {
+            "description": "Refused when set. The send route has no idle wait, so the timeout is not extended.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session",
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "agent_send"
+    },
+    {
+      "description": "Resolve rigName via GET /api/rigs/summary, then GET /api/rigs/{id}/chat/history?limit=20. Two daemon calls. This is history, not a stream.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "rigName": {
+            "description": "Rig name resolved through `GET /api/rigs/summary`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rigName"
+        ],
+        "type": "object"
+      },
+      "name": "chat_read"
+    },
+    {
+      "description": "Resolve rigName via GET /api/rigs/summary, then POST /api/rigs/{id}/chat/send. Optional sender is accepted and not forwarded. Seat headers are forwarded when this process is a seat.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "Message body.",
+            "type": "string"
+          },
+          "rigName": {
+            "description": "Rig name resolved through `GET /api/rigs/summary`.",
+            "type": "string"
+          },
+          "sender": {
+            "default": null,
+            "description": "Accepted and not forwarded. The daemon derives the sender.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "rigName",
+          "body"
+        ],
+        "type": "object"
+      },
+      "name": "chat_send"
+    },
+    {
+      "description": "GET /healthz and return that body. It has status and pid, and no version field. When the socket is down, returns {\"running\": false} and does not start the daemon.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "name": "daemon_health"
+    },
+    {
+      "description": "List rigs from GET /api/rigs/summary.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "name": "rig_list"
+    },
+    {
+      "description": "Post the YAML file at sourceRef to POST /api/rigs/up. plan, autoApprove, and targetRoot are refused when set to change bring-up. A file that is not a rig spec is rejected without quoting its contents.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "autoApprove": {
+            "description": "`true` is refused. The daemon bring-up has no auto-approve flag.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "plan": {
+            "description": "`true` is refused. The daemon bring-up has no plan-only mode.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "sourceRef": {
+            "description": "Path to a rig spec YAML file.",
+            "type": "string"
+          },
+          "targetRoot": {
+            "description": "Any value is refused. The daemon bring-up has no target root.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "sourceRef"
+        ],
+        "type": "object"
+      },
+      "name": "rig_start"
+    },
+    {
+      "description": "Stop one rig via POST /api/rigs/down with {\"rig\": rigId}. snapshot true creates a snapshot first and does not stop if that fails. delete and force are refused.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "delete": {
+            "description": "`true` is refused. The daemon `down` route does not delete the rig record.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "force": {
+            "description": "`true` is refused. This is not `dangerously_interact`.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "rigId": {
+            "description": "Rig id or name the daemon `down` route understands.",
+            "type": "string"
+          },
+          "snapshot": {
+            "description": "`true` creates a snapshot, then stops. A failed snapshot does not stop the rig.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "rigId"
+        ],
+        "type": "object"
+      },
+      "name": "rig_stop"
+    },
+    {
+      "description": "Create a snapshot via POST /api/snapshot/create with {\"rig\": rigId}.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "rigId": {
+            "description": "Rig id sent as `{\"rig\": ...}`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rigId"
+        ],
+        "type": "object"
+      },
+      "name": "snapshot_create"
+    },
+    {
+      "description": "List snapshots via POST /api/snapshot/list with {\"rig\": rigId}.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "rigId": {
+            "description": "Rig id sent as `{\"rig\": ...}`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rigId"
+        ],
+        "type": "object"
+      },
+      "name": "snapshot_list"
+    },
+    {
+      "description": "Restore via POST /api/restore with {\"rig\": rigId, \"snapshot\": snapshotId}.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "rigId": {
+            "description": "Rig id sent as `{\"rig\": ...}`.",
+            "type": "string"
+          },
+          "snapshotId": {
+            "description": "Snapshot id sent as `{\"snapshot\": ...}`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rigId",
+          "snapshotId"
+        ],
+        "type": "object"
+      },
+      "name": "snapshot_restore"
+    },
+    {
+      "description": "Check that agent YAML is a mapping with a non-empty name. This is not a full AgentSpec schema. No daemon call. Result is {valid, errors}.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "yaml": {
+            "description": "YAML text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "yaml"
+        ],
+        "type": "object"
+      },
+      "name": "spec_validate_agent"
+    },
+    {
+      "description": "Validate RigSpec YAML locally with crewmux-spec. No daemon call. Result is {valid, errors}.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "yaml": {
+            "description": "YAML text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "yaml"
+        ],
+        "type": "object"
+      },
+      "name": "spec_validate_rig"
+    }
+  ]
+}

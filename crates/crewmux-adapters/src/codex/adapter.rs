@@ -172,6 +172,7 @@ impl AgentAdapter for CodexAdapter {
             approval,
             resume: resume.clone(),
             mcp_env: mcp_env(&opts),
+            rig_bin: crewmux_provider::rig_executable(),
         };
         let pane = self.start_session(binding, &opts, &paths, &plan).await?;
         self.remember(OpenedSeat {
@@ -372,7 +373,7 @@ impl CodexAdapter {
             id: IdState::Pending,
             policy: AnswerPolicy {
                 auto_trust: false,
-                auto_approve_rig_tools: true,
+                auto_approve_rig_tools: false,
             },
             note,
         };
@@ -593,7 +594,7 @@ fn policy_from(binding: &NodeBinding) -> (crewmux_types::CodexApproval, bool) {
         .runtime_opts
         .get("auto_approve_rig_tools")
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
     (approval, auto)
 }
 
@@ -616,7 +617,11 @@ fn verify_existing(codex_home: &Path, id: &ThreadId, cwd: &Path) -> Result<(), E
 
 fn mcp_env(opts: &LaunchOpts) -> std::collections::BTreeMap<String, String> {
     let mut env = std::collections::BTreeMap::new();
-    for key in [crewmux_types::SEAT_ID_ENV, crewmux_types::SEAT_TOKEN_ENV] {
+    for key in [
+        crewmux_types::SEAT_ID_ENV,
+        crewmux_types::SEAT_TOKEN_ENV,
+        "RIG_HOME",
+    ] {
         if let Some(value) = opts.env.get(key) {
             env.insert((*key).to_owned(), value.clone());
         }

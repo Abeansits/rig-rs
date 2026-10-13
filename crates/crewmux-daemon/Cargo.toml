@@ -34,7 +34,11 @@ rustix = { workspace = true, features = ["fs", "process"] }
 tokio-stream.workspace = true
 
 [dev-dependencies]
+# In-process MCP client for the replaced-pane send test. Dev-only; the MCP crate
+# still reaches the daemon through crewmux-api.
+crewmux-mcp.workspace = true
 crewmux-transcript.workspace = true
+rmcp.workspace = true
 rusqlite.workspace = true
 # Hash the Claude Code 2.1.286 fd capture. Already in the workspace lockfile.
 sha2.workspace = true

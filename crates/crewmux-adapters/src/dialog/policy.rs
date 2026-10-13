@@ -5,25 +5,6 @@ use std::path::Path;
 use crate::dialog::recognise::Recognised;
 use crate::dialog::table::{Answer, DialogParams, Gate};
 
-/// ADR-0002 tool names. `seat_send` is the spike server's name and is absent.
-const RIG_TOOLS: &[&str] = &[
-    "rig_list",
-    "rig_start",
-    "rig_stop",
-    "agent_list",
-    "agent_send",
-    "agent_read",
-    "agent_add",
-    "chat_send",
-    "chat_read",
-    "snapshot_create",
-    "snapshot_restore",
-    "snapshot_list",
-    "spec_validate",
-    "daemon_health",
-    "daemon_list",
-];
-
 /// Flags from the seat spec. Both default off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AnswerPolicy {
@@ -140,7 +121,8 @@ fn approved_tool(params: &DialogParams) -> bool {
     let Some(tool) = params.tool.as_deref() else {
         return false;
     };
-    params.server.as_deref() == Some("rig") && RIG_TOOLS.contains(&tool)
+    params.server.as_deref() == Some(crewmux_provider::RIG_MCP_NAME)
+        && crate::codex::is_rig_tool(tool)
 }
 
 fn trust_ok(folder: Option<&std::path::PathBuf>, seat: &SeatContext<'_>) -> bool {
