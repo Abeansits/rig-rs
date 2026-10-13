@@ -1,5 +1,6 @@
 //! Per-seat `mcp.json` and `settings.json` passed to Claude with launch flags.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
@@ -18,6 +19,8 @@ pub struct McpServerEntry {
     pub command: String,
     /// Arguments after the executable.
     pub args: Vec<String>,
+    /// Environment for the server process. Omitted from JSON when empty.
+    pub env: BTreeMap<String, String>,
 }
 
 /// Identity stamped into one Claude process's hook commands.
@@ -149,6 +152,14 @@ fn mcp_document(servers: &[McpServerEntry]) -> Result<String, ProviderError> {
             .map(Value::String)
             .collect::<Vec<_>>();
         entry.insert("args".to_owned(), Value::Array(args));
+        if !server.env.is_empty() {
+            let env = server
+                .env
+                .iter()
+                .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                .collect::<Map<_, _>>();
+            entry.insert("env".to_owned(), Value::Object(env));
+        }
         mcp_servers.insert(server.name.clone(), Value::Object(entry));
     }
     let mut root = Map::new();

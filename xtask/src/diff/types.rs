@@ -157,6 +157,8 @@ pub enum Step {
     },
     /// Copy the tmux shim's argv log into the observation.
     TmuxCalls,
+    /// Speak `initialize` and `tools/list` to the side's MCP stdio server.
+    McpTools,
 }
 
 /// HTTP verb used by [`Step::Http`].
@@ -309,6 +311,8 @@ pub enum Project {
     HelpNames,
     /// Top-level `/healthz` keys plus the `status` string.
     HealthShape,
+    /// Sorted MCP tool names after the legacy-to-Rust rename. Dropped tools are omitted.
+    McpToolNames,
 }
 
 /// A case plus the comparison policy loaded from its JSON file.

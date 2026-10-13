@@ -150,7 +150,7 @@ The repo's `design/parity-exceptions.md` is now the **single PE register**. Its 
 
   | Design id | Topic | Repo id |
   |---|---|---|
-  | PE-003 | MCP tool rename | PE-020 |
+  | PE-003 | MCP tool rename | PE-016 |
   | PE-005 | exactly-once direct/startup re-delivery | PE-017 |
   | PE-007 | compaction completion via hooks | PE-018 |
 

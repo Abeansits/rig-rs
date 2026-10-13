@@ -8,7 +8,7 @@ use crewmux_adapters::{Readiness, classify};
 use crewmux_core::DomainEvent;
 use crewmux_messaging::{
     DeliveryOutcome, DeliveryReceipt, OutboxRecord, PasteDisplay, SessionRef,
-    obligation_fingerprint, wrap_pane,
+    obligation_fingerprint, wrap_reply,
 };
 use crewmux_mux::{
     CaptureRange, ComposerState, GuardConfig, GuardVerdict, Key, PasteOpts, evaluate,
@@ -267,7 +267,8 @@ async fn paste_and_check(
     // Launch startup, direct send, and restore re-send all paste through here.
     let seat = crate::query::find_address(app, address).await?;
     crate::lineage::ensure(app, &seat, pane).await?;
-    let payload = wrap_pane(&outbound.from, address, &outbound.body);
+    let shown = crate::query::reply_target(app, &outbound.from).await;
+    let payload = wrap_reply(&shown, address, &outbound.body, &shown);
     // History, joined. The composer region of this capture is the draft at
     // verdict time; rows above the prompt are not part of the comparison.
     let range = history_range(&payload);

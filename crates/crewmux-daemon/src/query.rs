@@ -210,6 +210,26 @@ pub(crate) async fn address_of(app: &App, seat: &Seat) -> Result<String, Error> 
     Ok(format!("{}@{}", seat.name.as_str(), rig.name.as_str()))
 }
 
+/// Address used in a pane reply hint.
+///
+/// A seat id becomes `seat@rig`. Any other sender, including `operator@host`,
+/// is returned unchanged.
+pub(crate) async fn reply_target(app: &App, from: &str) -> String {
+    let Ok(id) = from.parse::<crewmux_types::SeatId>() else {
+        return from.to_owned();
+    };
+    let found = crate::db::read(&app.store, move |conn| {
+        crewmux_core::SeatRepo::get(conn, &id)
+    })
+    .await;
+    let Ok(seat) = found else {
+        return from.to_owned();
+    };
+    address_of(app, &seat)
+        .await
+        .unwrap_or_else(|_| from.to_owned())
+}
+
 pub(crate) async fn find_address(app: &App, target: &str) -> Result<Seat, Error> {
     let name = target.split_once('@').map_or(target, |(name, _)| name);
     find_seat(app, name).await

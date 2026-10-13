@@ -26,7 +26,7 @@ pub(crate) fn router(app: App) -> Router {
         .route(CaptureSeat::PATH, post(capture_seat))
         .route(SubmitSeat::PATH, post(submit_seat))
         .route(AttachInfo::PATH, post(attach))
-        .route(RigDown::PATH, post(rig_down))
+        .route(RigDown::PATH, post(stop_rig))
         .route(crate::events::PATH, get(crate::events::events))
         .route("/shutdown", post(shutdown))
         .route(
@@ -123,7 +123,7 @@ async fn attach(State(app): State<App>, body: Bytes) -> Response {
     }
 }
 
-async fn rig_down(State(app): State<App>, body: Bytes) -> Response {
+async fn stop_rig(State(app): State<App>, body: Bytes) -> Response {
     app.touch();
     let rig = if body.is_empty() {
         None

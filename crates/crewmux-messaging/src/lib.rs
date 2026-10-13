@@ -25,7 +25,7 @@ pub use ask::{AskCorpus, AskQuery, AskResult, ChatHit, Evidence, search};
 pub use book::QueueBook;
 pub use chat::resolve_sender;
 pub use closure::{CLOSURE_REASONS, Closure, closure_required_at, validate_closure};
-pub use envelope::wrap_pane;
+pub use envelope::{wrap_pane, wrap_reply};
 pub use error::Error;
 pub use inbox::{InboxEntry, InboxState, Mailboxes, OutboxRecord};
 pub use ladder::{

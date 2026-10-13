@@ -23,8 +23,10 @@ pub(crate) async fn prepare(
     let dir = seat_dir.to_path_buf();
     let seat_key = binding.seat.to_string();
     let rig_home = rig_home_of(seat_dir);
+    let seat_env = seat_env(binding, opts);
+    let rig_bin = crewmux_provider::rig_executable();
     let (mcp, settings) = tokio::task::spawn_blocking(move || {
-        write_seat(&dir, mode.as_deref(), &seat_key, &rig_home)
+        write_seat(&dir, mode, &seat_key, &rig_home, &rig_bin, &seat_env)
     })
     .await
     .map_err(|err| Error::Message(err.to_string()))??;
@@ -61,16 +63,39 @@ pub(crate) fn token(session_id: String) -> ResumeToken {
     }
 }
 
+fn seat_env(binding: &NodeBinding, opts: &LaunchOpts) -> crewmux_provider::SeatEnv {
+    crewmux_provider::SeatEnv {
+        seat_id: opts
+            .env
+            .get(crewmux_types::SEAT_ID_ENV)
+            .cloned()
+            .unwrap_or_else(|| binding.seat.to_string()),
+        seat_token: opts
+            .env
+            .get(crewmux_types::SEAT_TOKEN_ENV)
+            .cloned()
+            .unwrap_or_default(),
+        rig_home: opts
+            .env
+            .get("RIG_HOME")
+            .cloned()
+            .or_else(|| std::env::var("RIG_HOME").ok())
+            .unwrap_or_default(),
+    }
+}
+
 fn write_seat(
     dir: &Path,
-    permission_mode: Option<&str>,
+    permission_mode: Option<String>,
     seat_key: &str,
     rig_home: &Path,
+    rig_bin: &Path,
+    env: &crewmux_provider::SeatEnv,
 ) -> Result<(PathBuf, PathBuf), crewmux_provider::ProviderError> {
     let files = ClaudeSeatFiles::new(dir);
-    let mcp = files.write_mcp(&[])?;
-    let _seat_settings = files.write_settings(&ClaudeSeatSettings {
-        permission_mode: permission_mode.map(str::to_owned),
+    let mcp = files.write_mcp(&[crewmux_provider::claude_mcp_entry(rig_bin, env)])?;
+    files.write_settings(&ClaudeSeatSettings {
+        permission_mode: permission_mode.clone(),
         hooks: serde_json::json!({}),
     })?;
     let run_id = uuid::Uuid::new_v4().to_string();
@@ -81,7 +106,7 @@ fn write_seat(
             run_id,
             rig_bin: rig_binary(),
         },
-        permission_mode,
+        permission_mode.as_deref(),
     )?;
     Ok((mcp, settings))
 }

@@ -12,6 +12,7 @@ fn launch_flags_point_at_the_seat_directory() {
             name: "rig".to_owned(),
             command: "rig".to_owned(),
             args: vec!["mcp".to_owned()],
+            env: std::collections::BTreeMap::new(),
         }])
         .unwrap();
     let settings = files
