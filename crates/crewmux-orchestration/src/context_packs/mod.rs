@@ -9,6 +9,7 @@ mod compose;
 mod entry;
 mod error;
 mod library;
+mod nofollow;
 mod probe;
 mod read;
 mod recap;

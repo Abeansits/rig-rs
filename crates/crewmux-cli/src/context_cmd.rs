@@ -1,6 +1,6 @@
 // Derived from openrig packages/cli/src/commands/context.ts (v0.6.9, Apache-2.0); ported to Rust and modified.
 
-//! `rig context`: the library verbs plus `deliver` for guarded paste and startup.
+//! `rig context`: the library verbs plus `deliver` for guarded paste.
 
 use std::path::PathBuf;
 
@@ -157,7 +157,7 @@ enum ContextCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Deliver a pack through the guarded paste path or `deliver_startup`.
+    /// Deliver a pack through the guarded paste path. `startup` is not implemented.
     Deliver {
         /// Path-like ref.
         #[arg(long = "ref")]

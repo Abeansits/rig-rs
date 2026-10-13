@@ -199,6 +199,11 @@ fn get_sync_and_profile_round_trip() {
         );
     assert_ne!(profiled, 0, "{profile_out}");
     assert!(profile_err.contains("declares no atoms"), "{profile_err}");
+    let (startup, _, startup_err) = stdout(env.rig().args([
+        "context", "deliver", "--ref", "goodpack", "--seat", "one", "--mode", "startup",
+    ]));
+    assert_ne!(startup, 0);
+    assert!(startup_err.contains("not implemented"), "{startup_err}");
 }
 
 #[test]

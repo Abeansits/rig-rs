@@ -4,7 +4,8 @@
 //! Plain concatenation and the preview frame.
 
 use super::entry::PackEntry;
-use super::error::{PackCode, PackError};
+use super::error::PackError;
+use super::library::Library;
 use super::tokens::estimate_tokens_from_bytes;
 
 /// Separator between present members. Source bytes are otherwise untouched.
@@ -119,17 +120,11 @@ pub fn assemble_bundle(entry: &PackEntry) -> Result<Bundle, PackError> {
     let mut files = Vec::new();
     let mut missing = Vec::new();
     for file in &entry.files {
-        let Some(path) = &file.absolute_path else {
+        if file.absolute_path.is_none() {
             missing.push((file.path.clone(), file.role.clone()));
             continue;
-        };
-        let content = std::fs::read_to_string(path).map_err(|err| {
-            PackError::with(
-                PackCode::FileReadFailed,
-                format!("failed to read pack file {}: {err}", path.display()),
-                serde_json::json!({"packId": entry.id, "path": file.path}),
-            )
-        })?;
+        }
+        let content = Library::read_pack_text(entry, &file.path)?;
         let header = match &file.summary {
             Some(summary) => format!("## File: {} (role: {}) — {summary}", file.path, file.role),
             None => format!("## File: {} (role: {})", file.path, file.role),

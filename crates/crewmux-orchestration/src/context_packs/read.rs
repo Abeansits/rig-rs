@@ -72,13 +72,27 @@ pub fn read_source(
     let parsed = parse_source_ref(refer).map_err(|err| ReadFail::Failed(err.message))?;
     let base = base_for(pack_dir, roots, refer, parsed.kind)?;
     let abs = base.join(&parsed.rel);
-    let text = match std::fs::read_to_string(&abs) {
+    if let Some(link) = super::nofollow::symlink_under(&base, Path::new(&parsed.rel)) {
+        return Err(ReadFail::Failed(format!(
+            "source ref '{refer}' ({}) refuses to follow symlink {}",
+            parsed.kind.as_str(),
+            link.display()
+        )));
+    }
+    let text = match super::nofollow::read_regular_text(&abs) {
         Ok(text) => text,
         Err(err) => return Err(read_error(refer, parsed.kind, &abs, &base, &err)),
     };
     let real_path = std::fs::canonicalize(&abs).unwrap_or_else(|_| abs.clone());
     let real_base = std::fs::canonicalize(&base).unwrap_or_else(|_| base.clone());
     let escapes_root = escapes(&real_base, &real_path);
+    if escapes_root {
+        return Err(ReadFail::Failed(format!(
+            "source ref '{refer}' ({}) resolves outside {}",
+            parsed.kind.as_str(),
+            real_base.display()
+        )));
+    }
     let written_at = std::fs::metadata(&real_path)
         .and_then(|meta| meta.modified())
         .ok()

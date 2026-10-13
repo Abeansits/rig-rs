@@ -59,6 +59,8 @@ mod context_deliver_tests;
 #[cfg(test)]
 mod context_route_tests;
 #[cfg(test)]
+mod context_symlink_tests;
+#[cfg(test)]
 mod flow;
 #[cfg(test)]
 mod health_tests;

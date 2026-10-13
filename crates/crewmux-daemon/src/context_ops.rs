@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use crewmux_orchestration::context_packs::{
-    ComposeFile, Library, PackCode, PackError, PlainInput, assemble_bundle, assemble_plain,
+    ComposeFile, Library, PackError, PlainInput, assemble_bundle, assemble_plain,
 };
 use serde_json::{Value, json};
 
@@ -140,13 +140,9 @@ pub(crate) fn pieces_route(lib: &mut Library, refer: Option<&str>) -> Result<Val
             owned.push((file.path.clone(), None));
             continue;
         }
-        if let Ok(content) = read_member(&entry, &file.path) {
-            pieces.push(json!({"path": file.path, "role": file.role, "content": &content}));
-            owned.push((file.path.clone(), Some(content)));
-        } else {
-            missing.push(json!({"path": file.path, "role": file.role}));
-            owned.push((file.path.clone(), None));
-        }
+        let content = read_member(&entry, &file.path)?;
+        pieces.push(json!({"path": file.path, "role": file.role, "content": &content}));
+        owned.push((file.path.clone(), Some(content)));
     }
     let inputs: Vec<PlainInput<'_>> = owned
         .iter()
@@ -170,13 +166,7 @@ fn read_member(
     entry: &crewmux_orchestration::context_packs::PackEntry,
     rel: &str,
 ) -> Result<String, PackError> {
-    let path = Library::resolve_file(entry, rel)?;
-    std::fs::read_to_string(&path).map_err(|err| {
-        PackError::new(
-            PackCode::FileReadFailed,
-            format!("failed to read {}: {err}", path.display()),
-        )
-    })
+    Library::read_pack_text(entry, rel)
 }
 
 fn entries_json(lib: &Library) -> Value {

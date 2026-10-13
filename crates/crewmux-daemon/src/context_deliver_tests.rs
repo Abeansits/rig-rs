@@ -121,7 +121,7 @@ async fn paste_64k_returns_receipt_and_fingerprint() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn startup_delivery_counts_the_file_and_does_not_paste() {
+async fn startup_delivery_is_not_implemented() {
     let harness = boot().await;
     drop(bulk(&harness.dir));
     let before = pastes(&harness.mux.recorded().await);
@@ -130,9 +130,12 @@ async fn startup_delivery_counts_the_file_and_does_not_paste() {
         json!({"ref": "bulk", "seat": "one", "mode": "startup"}),
     )
     .await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body["mode"], "startup");
-    assert_eq!(body["path"], "context-pack.md");
-    assert_eq!(body["delivered"], 1);
+    assert_eq!(status, 501, "{body}");
+    assert_eq!(body["error"], "not_implemented");
     assert_eq!(pastes(&harness.mux.recorded().await), before);
+    let shot = crate::query::capture(&harness.app, "one", None)
+        .await
+        .expect("capture");
+    let screen = shot["text"].as_str().unwrap_or("");
+    assert!(!screen.contains("PACK64-"), "{screen}");
 }

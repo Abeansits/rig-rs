@@ -147,13 +147,12 @@ impl Library {
         })
     }
 
-    /// Resolve a manifest path inside the pack. A symlink that leaves the pack
-    /// is refused.
+    /// Resolve a manifest path inside the pack. Symlinks are not followed.
     ///
     /// # Errors
     ///
     /// Returns [`PackError`] `file_outside_pack` for `..`, an absolute path, or
-    /// a symlink whose target is outside the pack directory.
+    /// any symlink component.
     pub fn resolve_file(entry: &PackEntry, rel: &str) -> Result<PathBuf, PackError> {
         if rel.contains("..") || rel.starts_with('/') || rel.starts_with('\\') {
             return Err(PackError::with(
@@ -178,6 +177,19 @@ impl Library {
         }
         Ok(abs)
     }
+
+    /// Read a manifest member without following a symlink.
+    ///
+    /// The path is resolved again at read time, then opened with `O_NOFOLLOW`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackError`] when the path leaves the pack, a component is a
+    /// symlink, or the file cannot be read as UTF-8.
+    pub fn read_pack_text(entry: &PackEntry, rel: &str) -> Result<String, PackError> {
+        let path = Self::resolve_file(entry, rel)?;
+        super::nofollow::read_regular_text(&path).map_err(|err| open_error(entry, rel, &path, &err))
+    }
 }
 
 fn contained(entry: &PackEntry, rel: &str) -> Result<PathBuf, PackError> {
@@ -193,31 +205,33 @@ fn contained(entry: &PackEntry, rel: &str) -> Result<PathBuf, PackError> {
             ));
         }
         cursor.push(segment);
-        if let Ok(meta) = std::fs::symlink_metadata(&cursor)
-            && meta.file_type().is_symlink()
-        {
-            let canonical = std::fs::canonicalize(&cursor).map_err(|err| {
-                PackError::new(
-                    PackCode::FileReadFailed,
-                    format!("failed to resolve symlink {}: {err}", cursor.display()),
-                )
-            })?;
-            let base = std::fs::canonicalize(&entry.source_path)
-                .unwrap_or_else(|_| entry.source_path.clone());
-            if canonical.strip_prefix(&base).is_err() {
-                return Err(PackError::with(
-                    PackCode::FileOutsidePack,
-                    format!(
-                        "symlink '{}' escapes pack '{}'",
-                        cursor.display(),
-                        entry.source_path.display()
-                    ),
-                    json!({"packId": entry.id, "relPath": rel, "resolved": canonical.display().to_string()}),
-                ));
-            }
+        if std::fs::symlink_metadata(&cursor).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(symlink_refused(entry, rel, &cursor));
         }
     }
     Ok(cursor)
+}
+
+fn symlink_refused(entry: &PackEntry, rel: &str, cursor: &Path) -> PackError {
+    PackError::with(
+        PackCode::FileOutsidePack,
+        format!(
+            "refusing to follow symlink '{}' in pack '{}'",
+            cursor.display(),
+            entry.source_path.display()
+        ),
+        json!({"packId": entry.id, "relPath": rel}),
+    )
+}
+
+fn open_error(entry: &PackEntry, rel: &str, path: &Path, err: &std::io::Error) -> PackError {
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return symlink_refused(entry, rel, path);
+    }
+    PackError::new(
+        PackCode::FileReadFailed,
+        format!("failed to read {}: {err}", path.display()),
+    )
 }
 
 impl Library {

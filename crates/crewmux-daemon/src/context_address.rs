@@ -94,7 +94,7 @@ fn file_body(
             ),
         ));
     }
-    let path = Library::resolve_file(entry, file_path).map_err(|err| {
+    let file_text = Library::read_pack_text(entry, file_path).map_err(|err| {
         RouteError::named(
             422,
             "file_unreadable",
@@ -102,13 +102,6 @@ fn file_body(
                 "pack '{}' file '{file_path}': {}",
                 entry.relative_path, err.message
             ),
-        )
-    })?;
-    let file_text = std::fs::read_to_string(&path).map_err(|err| {
-        RouteError::named(
-            422,
-            "file_unreadable",
-            format!("pack '{}' file '{file_path}': {err}", entry.relative_path),
         )
     })?;
     if parsed.header_path.is_empty() {

@@ -192,15 +192,36 @@ pub(crate) fn deliver(refer: &str, seat: &str, mode: &str, json_out: bool) -> Re
         .map_err(|err| Error::Json(err.to_string()))?;
     let (status, value) = call(ContextDeliver::METHOD, ContextDeliver::PATH, Some(&body))?;
     expect(status, 200, &value)?;
+    let code = delivery_exit(&value);
     if json_out {
         output::stdout_json(&value);
-    } else {
+        return Ok(code);
+    }
+    if code == 0 {
         output::stdout_line(&format!(
             "Delivered {} to {seat} via {mode}.",
             field(&value, "ref")
         ));
+        return Ok(0);
     }
-    Ok(0)
+    let outcome = value
+        .pointer("/delivery/receipts/0/outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("failed");
+    output::stderr_line(&format!(
+        "delivery {outcome} for {} to {seat}",
+        field(&value, "ref")
+    ));
+    Ok(code)
+}
+
+/// Same exit codes as `rig send`: ok 0, partial 3, anything else 1.
+fn delivery_exit(value: &Value) -> i32 {
+    match value.pointer("/delivery/status").and_then(Value::as_str) {
+        Some("partial") => 3,
+        Some("ok") | None => 0,
+        Some(_) => 1,
+    }
 }
 
 pub(crate) fn recap_write(rig: &str, seat: &str, file: &Path) -> Result<i32, Error> {
@@ -341,5 +362,23 @@ fn resolve(name: &str) -> Result<Value, Error> {
         _ => Err(Error::User(format!(
             "Context pack name '{name}' is ambiguous. Address it by path-like ref."
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::delivery_exit;
+
+    #[test]
+    fn a_failed_receipt_exits_nonzero() {
+        let failed = json!({"delivery": {"status": "failed", "receipts": [{"outcome": "failed"}]}});
+        assert_eq!(delivery_exit(&failed), 1);
+        let partial =
+            json!({"delivery": {"status": "partial", "receipts": [{"outcome": "failed"}]}});
+        assert_eq!(delivery_exit(&partial), 3);
+        let ok = json!({"delivery": {"status": "ok", "receipts": [{"outcome": "delivered"}]}});
+        assert_eq!(delivery_exit(&ok), 0);
     }
 }

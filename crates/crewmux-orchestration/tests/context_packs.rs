@@ -178,6 +178,9 @@ fn resolve_file_refuses_escape() {
 }
 
 #[test]
+/// Fixture bytes from `packages/daemon/test/context-pack-compose.test.ts` at
+/// pin `4b48ca21`: members `a.md`, `c.yaml`, and `b.data` joined by
+/// `PLAIN_COMPOSE_SEPARATOR` (`\n\n`). `labels.jsonl` records the sha256.
 fn compose_plain_bytes_match_the_ts_fixture() {
     let tmp = Tmp::new();
     let store = tmp.path().join("user");

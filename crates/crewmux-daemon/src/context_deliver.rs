@@ -1,15 +1,10 @@
-//! Paste a composed pack through the slice 4 guard, or hand it to `deliver_startup`.
+//! Paste a composed pack through the slice 4 guard.
+//!
+//! `mode: startup` is `not_implemented`. The stub adapter's `deliver_startup`
+//! counts files and writes nothing, so this route does not call it.
 
-use std::path::PathBuf;
-
-use async_trait::async_trait;
-use crewmux_adapters::{AgentAdapter, ResolvedStartupFile, SeatIo, SubmitMode};
 use crewmux_messaging::ContextPaste;
-use crewmux_mux::Capture;
-use crewmux_mux::PaneRef;
-use crewmux_orchestration::context_packs::{
-    Library, PackCode, PackError, PlainInput, assemble_plain,
-};
+use crewmux_orchestration::context_packs::{Library, PlainInput, assemble_plain};
 use serde_json::{Value, json};
 
 use crate::context_http::RouteError;
@@ -21,7 +16,6 @@ pub(crate) struct Prepared {
     mode: String,
     seat: String,
     paste: ContextPaste,
-    path: String,
 }
 
 pub(crate) fn prepare(lib: &mut Library, body: &[u8]) -> Result<Prepared, RouteError> {
@@ -62,15 +56,10 @@ pub(crate) fn prepare(lib: &mut Library, body: &[u8]) -> Result<Prepared, RouteE
     };
     let mut owned = Vec::new();
     for file in &entry.files {
-        let Some(path) = &file.absolute_path else {
+        if file.absolute_path.is_none() {
             return Err(missing(&file.path));
-        };
-        let text = std::fs::read_to_string(path).map_err(|err| {
-            RouteError::Pack(PackError::new(
-                PackCode::FileReadFailed,
-                format!("failed to read {}: {err}", path.display()),
-            ))
-        })?;
+        }
+        let text = Library::read_pack_text(&entry, &file.path)?;
         owned.push((file.path.clone(), text));
     }
     if owned.is_empty() {
@@ -88,7 +77,6 @@ pub(crate) fn prepare(lib: &mut Library, body: &[u8]) -> Result<Prepared, RouteE
         refer: refer.to_owned(),
         mode: mode.to_owned(),
         seat: seat.to_owned(),
-        path: "context-pack.md".to_owned(),
         paste: ContextPaste {
             body: assembled.text,
             tokens_est: assembled.estimated_tokens,
@@ -99,7 +87,11 @@ pub(crate) fn prepare(lib: &mut Library, body: &[u8]) -> Result<Prepared, RouteE
 
 pub(crate) async fn deliver_pack(app: &App, prepared: Prepared) -> Result<Value, RouteError> {
     if prepared.mode == "startup" {
-        return startup(app, &prepared).await;
+        return Err(RouteError::named(
+            501,
+            "not_implemented",
+            "context pack startup delivery is not implemented; use mode paste",
+        ));
     }
     let seat = prepared.seat.clone();
     let tokens = prepared.paste.tokens_est;
@@ -129,78 +121,10 @@ pub(crate) async fn deliver_pack(app: &App, prepared: Prepared) -> Result<Value,
     }))
 }
 
-async fn startup(app: &App, prepared: &Prepared) -> Result<Value, RouteError> {
-    let seat = crate::query::find_address(app, &prepared.seat)
-        .await
-        .map_err(|err| RouteError::named(404, "seat_not_found", err.to_string()))?;
-    let adapter = app.registry.get(seat.runtime).ok_or_else(|| {
-        RouteError::named(
-            400,
-            "runtime_unavailable",
-            format!("no adapter for {}", seat.runtime.as_str()),
-        )
-    })?;
-    let session = seat.tmux_session.clone().ok_or_else(|| {
-        RouteError::named(
-            400,
-            "seat_not_launched",
-            format!("seat {} has no session", seat.name.as_str()),
-        )
-    })?;
-    let cwd = seat.cwd.clone().unwrap_or_else(PathBuf::new);
-    let mut binding = crewmux_adapters::binding_for(seat.id, cwd, &session);
-    binding.pane = PaneRef {
-        session,
-        window: Some(0),
-        pane: Some(0),
-        pane_id: seat.pane_id.clone(),
-    };
-    let files = [ResolvedStartupFile {
-        path: prepared.path.clone(),
-        body: prepared.paste.body.clone(),
-    }];
-    let io = NoPaste;
-    let result = AgentAdapter::deliver_startup(adapter.as_ref(), &files, &binding, &io)
-        .await
-        .map_err(|err| RouteError::named(500, "startup_failed", err.to_string()))?;
-    Ok(json!({
-        "mode": "startup",
-        "ref": prepared.refer,
-        "seat": prepared.seat,
-        "path": prepared.path,
-        "delivered": result.delivered,
-        "tokensEst": prepared.paste.tokens_est,
-    }))
-}
-
 fn missing(path: &str) -> RouteError {
     RouteError::named(
         400,
         "missing_files",
         format!("context pack delivery requires every declared file; missing {path}"),
     )
-}
-
-/// Startup delivery must not submit a turn or send Enter.
-struct NoPaste;
-
-#[async_trait]
-impl SeatIo for NoPaste {
-    async fn submit(
-        &self,
-        _text: &str,
-        _mode: SubmitMode,
-    ) -> Result<crewmux_adapters::DeliveryReceipt, crewmux_adapters::Error> {
-        Err(crewmux_adapters::Error::Message(
-            "startup delivery does not submit a turn".to_owned(),
-        ))
-    }
-
-    async fn interrupt(&self) -> Result<(), crewmux_adapters::Error> {
-        Ok(())
-    }
-
-    async fn snapshot(&self) -> Result<Capture, crewmux_adapters::Error> {
-        Ok(Capture::new(String::new(), (0, 0)))
-    }
 }
