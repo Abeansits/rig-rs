@@ -1054,7 +1054,7 @@
 "packages/daemon/test/profile-composer.test.ts","19","todo","","","Slice 19 ports compose_profile for the profile route. This file's algebra cases are not individually ported"
 "packages/daemon/test/profile-resolver.test.ts","","todo","","",""
 "packages/daemon/test/profile-source-read-errors.test.ts","","todo","","",""
-"packages/daemon/test/profile-source-resolver.test.ts","19","todo","","","Slice 19 ports read_source for library and tree refs. This file's resolver cases are not individually ported. Project, seat, and mission reads refuse every symlink and any file with more than one link (PE-022); the TypeScript resolver follows symlinks and does not refuse hard links"
+"packages/daemon/test/profile-source-resolver.test.ts","19","todo","","","Slice 19 ports read_source for library and tree refs. This file's resolver cases are not individually ported. Project, seat, and mission reads refuse every symlink and any file with more than one link (PE-023); the TypeScript resolver follows symlinks and does not refuse hard links"
 "packages/daemon/test/progress-indexer.test.ts","","todo","","",""
 "packages/daemon/test/progress-review-done-coherence.test.ts","","todo","","",""
 "packages/daemon/test/project-boundary-profile.test.ts","","todo","","",""

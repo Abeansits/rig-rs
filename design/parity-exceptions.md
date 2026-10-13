@@ -168,7 +168,7 @@ v0.6.9's `rig context` noun is delivery-free. Its subcommands stop at `rm`, and 
 - **Verification window:** paste is already chunked. On a real pane the post-paste check captures at most 1024 history rows plus the visible pane. A 64 KiB line on the 90-column stub pane (about 730 wrapped rows) fits and is delivered. A taller paste fails closed: the prompt scrolls out, the receipt is `failed`, and Enter is not sent. `paste_64k_returns_receipt_and_fingerprint` is the in-memory multiplexer. `context_pack_64kib_delivers_on_real_tmux` is the same size on real tmux. Live Claude and Codex delivery stays gated and is not part of CI.
 - **Required tests:** `paste_64k_returns_receipt_and_fingerprint`, `startup_delivery_is_not_implemented`, `startup_returns_not_implemented_before_reading_a_symlink`, `a_failed_receipt_exits_nonzero`, `context_pack_64kib_delivers_on_real_tmux`, `context_pack_past_the_history_window_exits_nonzero`, and `recap_write_and_deliver_speak_the_daemon`.
 
-## PE-022: project, seat, and mission reads refuse every symlink
+## PE-023: project, seat, and mission reads refuse every symlink
 
 `profile-source-resolver.ts` follows a symlink and still returns the target's bytes. Rust refuses the link.
 
