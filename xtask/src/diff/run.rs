@@ -10,7 +10,7 @@ use super::compare::project;
 use super::normalize::normalize_observation;
 use super::reap::{DaemonGuard, free_port};
 use super::types::HermeticHome;
-use super::types::{LoadedCase, Observation, Side, Step, Transport, canonical};
+use super::types::{DiffCase, LoadedCase, Observation, Side, Step, Transport, canonical};
 use crate::error::{Error, io_err};
 
 /// One finished side, after normalisation and projection.
@@ -71,9 +71,11 @@ pub fn execute(case: &LoadedCase, side: &Side, ts_port: Option<u16>) -> Result<E
         guard.ensure()?;
     }
     let mut obs = Observation::empty();
+    // Only a chained case records CLI JSON. Other goldens leave `json` null.
+    let record_cli_json = chains_cli_json(&case.case);
     let stepped = (|| {
         for step in &case.case.steps {
-            apply_step(step, side, &transport, &home, &mut obs)?;
+            apply_step(step, side, &transport, &home, record_cli_json, &mut obs)?;
         }
         Ok(())
     })();
@@ -100,12 +102,13 @@ fn apply_step(
     side: &Side,
     transport: &Transport,
     home: &HermeticHome,
+    record_cli_json: bool,
     obs: &mut Observation,
 ) -> Result<(), Error> {
     match step {
         Step::Cli { argv } => {
             let argv = substitute(argv, obs.json.as_ref())?;
-            run_cli(side, &argv, home, obs)
+            run_cli(side, &argv, home, record_cli_json, obs)
         }
         Step::Http {
             method,
@@ -128,10 +131,24 @@ fn apply_step(
     }
 }
 
+/// True when a later CLI argument reads `{{...}}` from the previous JSON body.
+pub(crate) fn chains_cli_json(case: &DiffCase) -> bool {
+    case.steps.iter().any(|step| match step {
+        Step::Cli { argv } => argv.iter().any(|arg| arg.contains("{{")),
+        Step::Http { .. }
+        | Step::ReadFile(_)
+        | Step::WriteFile { .. }
+        | Step::TmuxCalls
+        | Step::McpTools
+        | Step::EnsureRig { .. } => false,
+    })
+}
+
 fn run_cli(
     side: &Side,
     argv: &[String],
     home: &HermeticHome,
+    record_cli_json: bool,
     obs: &mut Observation,
 ) -> Result<(), Error> {
     let (program, prefix) = program_for(side)?;
@@ -155,7 +172,7 @@ fn run_cli(
     push_text(&mut obs.stdout, &stdout);
     push_text(&mut obs.stderr, &String::from_utf8_lossy(&output.stderr));
     obs.exit = output.status.code().unwrap_or(1);
-    if let Some(value) = json_body(&stdout) {
+    if record_cli_json && let Some(value) = json_body(&stdout) {
         obs.json = Some(value);
     }
     Ok(())
@@ -200,15 +217,9 @@ fn lookup<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     Some(current)
 }
 
-fn json_body(stdout: &str) -> Option<Value> {
-    let trimmed = stdout.trim();
-    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        return Some(value);
-    }
-    trimmed
-        .lines()
-        .rev()
-        .find_map(|line| serde_json::from_str(line).ok())
+/// One JSON document. A second document on the next line is not the body.
+pub(crate) fn json_body(stdout: &str) -> Option<Value> {
+    serde_json::from_str(stdout.trim()).ok()
 }
 
 fn program_for(side: &Side) -> Result<(PathBuf, Vec<String>), Error> {

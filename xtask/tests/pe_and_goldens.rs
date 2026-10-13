@@ -5,8 +5,8 @@ use std::fs;
 use xtask::Error;
 use xtask::diff::{
     CaseOutcome, CaseReport, DiffVerdict, ExpectedScope, ObsField, Observation, PeId, canonical,
-    covers_for, exit_code, judge, load_case, pe_ids_in, read_rs_golden, read_ts_golden,
-    unified_diff, workspace_root, write_ts_golden,
+    covers_for, exit_code, help_command_names, judge, load_case, pe_ids_in, read_rs_golden,
+    read_ts_golden, unified_diff, workspace_root, write_ts_golden,
 };
 
 fn scratch(name: &str) -> std::io::Result<tempfile::TempDir> {
@@ -243,10 +243,20 @@ fn update_writes_only_a_ts_snapshot() {
 }
 
 #[test]
+fn help_names_sort_whoami_before_workflow() {
+    let help = "\
+Commands:
+  workflow  Declarative workflow runtime
+  whoami    Print the operator session
+";
+    assert_eq!(help_command_names(help), "whoami\nworkflow");
+}
+
+#[test]
 fn committed_rust_snapshots_match_the_merged_cli() {
     let dir = workspace_root().join("tests/diff/snapshots");
     let help = observation(
-        "ask\nattach\nbroadcast\ncapture\nchatroom\ncheckpoint\ncrash-cart\ndoctor\ndown\nhealth\nhelp\nps\nqueue\nrestore\nrestore-check\nsend\nsetup\nsnapshot\nstream\nunclaim\nup\nusage\nworkflow\nwhoami",
+        "ask\nattach\nbroadcast\ncapture\nchatroom\ncheckpoint\ncrash-cart\ndoctor\ndown\nhealth\nhelp\nps\nqueue\nrestore\nrestore-check\nsend\nsetup\nsnapshot\nstream\nunclaim\nup\nusage\nwhoami\nworkflow",
         "",
         0,
         Vec::new(),

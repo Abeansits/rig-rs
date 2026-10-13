@@ -30,3 +30,38 @@ pub use types::{
     DiffCase, DiffVerdict, HermeticHome, LoadedCase, Method, NormRule, OPENRIG_COMMIT, OPENRIG_TAG,
     ObsField, Observation, PeId, Project, Side, Step, Transport, canonical, workspace_root,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::run::{chains_cli_json, json_body};
+    use super::types::{DiffCase, Step};
+
+    fn case(argv: &[&str]) -> DiffCase {
+        DiffCase {
+            id: "sample".to_owned(),
+            steps: vec![Step::Cli {
+                argv: argv.iter().map(|arg| (*arg).to_owned()).collect(),
+            }],
+            normalize: Vec::new(),
+            expected_diff: None,
+            covers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn one_document_is_chained_and_a_second_line_is_not() {
+        let one = json_body("{\"ok\":true}\n");
+        assert_eq!(
+            one.as_ref().and_then(|value| value.get("ok")),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let pretty = json_body("{\n  \"ok\": true\n}\n");
+        assert!(pretty.is_some());
+        assert!(json_body("{\"a\":1}\n{\"b\":2}\n").is_none());
+        assert!(chains_cli_json(&case(&[
+            "workflow",
+            "{{instance.instanceId}}"
+        ])));
+        assert!(!chains_cli_json(&case(&["--help"])));
+    }
+}
