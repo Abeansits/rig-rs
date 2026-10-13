@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crewmux_orchestration::context_packs::{
-    ComposeFile, Library, PackCode, PlainInput, Root, SourceType, assemble_plain, context_pack_id,
+    ComposeFile, Library, PackCode, PlainInput, Root, SourceRoots, SourceType, assemble_plain,
+    context_pack_id, read_source,
 };
 use crewmux_spec::context::parse_manifest;
 use sha2::{Digest, Sha256};
@@ -162,7 +163,7 @@ fn resolve_file_refuses_escape() {
     let outside = tmp.path().join("secret.txt");
     fs::write(&outside, "secret").expect("secret");
     std::os::unix::fs::symlink(&outside, root.join("safe").join("leak.md")).expect("leak");
-    let library = lib(vec![Root::new(root, SourceType::UserFile)]);
+    let library = lib(vec![Root::new(root.clone(), SourceType::UserFile)]);
     let entry = library.by_ref("safe").expect("safe").expect("entry");
     for rel in ["../secret.txt", "/etc/passwd", "leak.md"] {
         let err = Library::resolve_file(entry, rel).expect_err(rel);
@@ -175,6 +176,62 @@ fn resolve_file_refuses_escape() {
     }
     let notes = Library::resolve_file(entry, "notes.md").expect("notes");
     assert_eq!(fs::read_to_string(notes).expect("read"), "inside");
+    assert_eq!(
+        Library::read_pack_text(entry, "notes.md").expect("text"),
+        "inside"
+    );
+    let leaked = Library::read_pack_text(entry, "leak.md").expect_err("symlink file");
+    assert_eq!(leaked.code, PackCode::FileOutsidePack);
+    let nested = root.join("safe").join("sub");
+    fs::create_dir_all(&nested).expect("sub");
+    fs::write(nested.join("notes.md"), "nested-inside").expect("nested");
+    let outside_dir = tmp.path().join("outside-dir");
+    fs::create_dir_all(&outside_dir).expect("outside dir");
+    fs::write(outside_dir.join("notes.md"), "OUTSIDE-SECRET-BYTES").expect("secret");
+    std::os::unix::fs::symlink(&outside_dir, root.join("safe").join("linked")).expect("dir link");
+    fs::hard_link(&outside, root.join("safe").join("hard.md")).expect("hard");
+    assert_eq!(
+        Library::read_pack_text(entry, "sub/notes.md").expect("nested"),
+        "nested-inside"
+    );
+    let via_dir = Library::read_pack_text(entry, "linked/notes.md").expect_err("symlink dir");
+    assert_eq!(via_dir.code, PackCode::FileOutsidePack);
+    let hard = Library::read_pack_text(entry, "hard.md").expect_err("hardlink");
+    assert_eq!(hard.code, PackCode::FileOutsidePack);
+    assert!(!hard.message.contains("OUTSIDE-SECRET-BYTES"));
+}
+
+#[test]
+fn project_seat_and_mission_reads_refuse_symlinks() {
+    let tmp = Tmp::new();
+    let secret = tmp.path().join("secret.txt");
+    fs::write(&secret, "OUTSIDE-SECRET-BYTES").expect("secret");
+    let project = tmp.path().join("project");
+    let seat = tmp.path().join("seat");
+    let mission = tmp.path().join("mission");
+    for root in [&project, &seat, &mission] {
+        fs::create_dir_all(root.join("nest")).expect("nest");
+        std::os::unix::fs::symlink(&secret, root.join("nest").join("leak.md")).expect("link");
+        fs::write(root.join("ok.md"), "inside").expect("ok");
+    }
+    let roots = SourceRoots {
+        project: Some(project),
+        seat: Some(seat),
+        mission: Some(mission),
+    };
+    for refer in [
+        "project:nest/leak.md",
+        "seat:nest/leak.md",
+        "mission:nest/leak.md",
+    ] {
+        let err = read_source(tmp.path(), &roots, refer).expect_err(refer);
+        let message = err.message();
+        assert!(message.contains("symlink"), "{refer}: {message}");
+        assert!(!message.contains("OUTSIDE-SECRET-BYTES"), "{message}");
+    }
+    let (text, meta) = read_source(tmp.path(), &roots, "project:ok.md").expect("ok");
+    assert_eq!(text, "inside");
+    assert!(!meta.escapes_root);
 }
 
 #[test]

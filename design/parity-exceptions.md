@@ -164,9 +164,17 @@ PE-016 covers the renamed tool list only. These are the route, body, and flag di
 v0.6.9's `rig context` noun is delivery-free. Its subcommands stop at `rm`, and `context-grammar.test.ts` asserts that list contains no send seam. Slice 19 adds a guarded paste. It does not add a startup writer.
 
 - **TS behaviour:** `rig context` serves bytes to the caller's stdout. There is no `send` subcommand and no daemon route that pastes a pack into a seat.
-- **Rust behaviour:** `rig context deliver --ref <ref> --seat <seat> --mode paste` posts `{ref, seat, mode}` to `POST /api/context-packs/deliver`. `paste` calls the slice 4 `deliver` path (`lineage::ensure`, the paste guard, a receipt, and `obligation_fingerprint`). A receipt whose `delivery.status` is `failed` exits 1, and `partial` exits 3, the same codes as `rig send`. `mode startup` returns HTTP 501 `not_implemented` and writes nothing. The stub adapter's `deliver_startup` only counts files, so this route does not call it. The other `rig context` verbs stay delivery-free.
+- **Rust behaviour:** `rig context deliver --ref <ref> --seat <seat> --mode paste` posts `{ref, seat, mode}` to `POST /api/context-packs/deliver`. `paste` calls the slice 4 `deliver` path (`lineage::ensure`, the paste guard, a receipt, and `obligation_fingerprint`). A receipt whose `delivery.status` is `failed` exits 1, and `partial` exits 3, the same codes as `rig send`. `mode startup` returns HTTP 501 `not_implemented` before the pack is looked up or any member is read, and writes nothing. The stub adapter's `deliver_startup` only counts files, so this route does not call it. The other `rig context` verbs stay delivery-free.
 - **Verification window:** paste is already chunked. On a real pane the post-paste check captures at most 1024 history rows plus the visible pane. A 64 KiB line on the 90-column stub pane (about 730 wrapped rows) fits and is delivered. A taller paste fails closed: the prompt scrolls out, the receipt is `failed`, and Enter is not sent. `paste_64k_returns_receipt_and_fingerprint` is the in-memory multiplexer. `context_pack_64kib_delivers_on_real_tmux` is the same size on real tmux. Live Claude and Codex delivery stays gated and is not part of CI.
-- **Required tests:** `paste_64k_returns_receipt_and_fingerprint`, `startup_delivery_is_not_implemented`, `a_failed_receipt_exits_nonzero`, `context_pack_64kib_delivers_on_real_tmux`, `context_pack_past_the_history_window_exits_nonzero`, and `recap_write_and_deliver_speak_the_daemon`.
+- **Required tests:** `paste_64k_returns_receipt_and_fingerprint`, `startup_delivery_is_not_implemented`, `startup_returns_not_implemented_before_reading_a_symlink`, `a_failed_receipt_exits_nonzero`, `context_pack_64kib_delivers_on_real_tmux`, `context_pack_past_the_history_window_exits_nonzero`, and `recap_write_and_deliver_speak_the_daemon`.
+
+## PE-022: project, seat, and mission reads refuse every symlink
+
+`profile-source-resolver.ts` follows a symlink and still returns the target's bytes. Rust refuses the link.
+
+- **TS behaviour:** a project, seat, or mission ref is opened with the normal path walk. A symlink is followed. A dangling link is named. `escapes_root` is set when the real path leaves the configured root, and the bytes are still returned. A hard link is an ordinary file.
+- **Rust behaviour:** `read_source` opens the configured root, then walks the relative path from that directory fd (`openat2` with `RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH` on Linux when the kernel has it, otherwise `openat` with `O_NOFOLLOW`). Any symlink component fails the read. The target's bytes are not returned, and `escapes_root` is not how a symlink is reported. A final file with `st_nlink > 1` is also refused. TypeScript does not refuse that hard-link case.
+- **Required test:** `project_seat_and_mission_reads_refuse_symlinks`.
 
 ## Status of real-login testing
 

@@ -43,6 +43,9 @@ pub(crate) fn prepare(lib: &mut Library, body: &[u8]) -> Result<Prepared, RouteE
             format!("mode must be paste | startup (got: {mode})"),
         ));
     }
+    if mode == "startup" {
+        return Err(startup_unimplemented());
+    }
     let entry = match lib.by_ref(refer) {
         Ok(Some(entry)) => entry.clone(),
         Ok(None) => {
@@ -87,11 +90,7 @@ pub(crate) fn prepare(lib: &mut Library, body: &[u8]) -> Result<Prepared, RouteE
 
 pub(crate) async fn deliver_pack(app: &App, prepared: Prepared) -> Result<Value, RouteError> {
     if prepared.mode == "startup" {
-        return Err(RouteError::named(
-            501,
-            "not_implemented",
-            "context pack startup delivery is not implemented; use mode paste",
-        ));
+        return Err(startup_unimplemented());
     }
     let seat = prepared.seat.clone();
     let tokens = prepared.paste.tokens_est;
@@ -119,6 +118,14 @@ pub(crate) async fn deliver_pack(app: &App, prepared: Prepared) -> Result<Value,
         "tokensEst": tokens,
         "delivery": delivery,
     }))
+}
+
+fn startup_unimplemented() -> RouteError {
+    RouteError::named(
+        501,
+        "not_implemented",
+        "context pack startup delivery is not implemented; use mode paste",
+    )
 }
 
 fn missing(path: &str) -> RouteError {

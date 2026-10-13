@@ -130,7 +130,7 @@ async fn refuse_all(harness: &Harness) {
 
 async fn assert_refused(sock: &Path, method: &str, path: &str, body: Option<Vec<u8>>) {
     let (status, text) = call(sock, method, path, body).await;
-    assert_ne!(status, 200, "{path} {text}");
+    assert_eq!(status, 400, "{path} {text}");
     assert!(
         !text.contains(SECRET),
         "{path} leaked {SECRET} bytes: {text}"
@@ -180,4 +180,31 @@ async fn deliver_get_and_preview_refuse_a_swap_after_install() {
     std::fs::remove_file(pack.join("notes.md")).expect("remove");
     std::os::unix::fs::symlink(&secret, pack.join("notes.md")).expect("swap");
     refuse_all(&harness).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_returns_not_implemented_before_reading_a_symlink() {
+    let harness = boot().await;
+    let pack = install_real(&harness.dir);
+    let secret = outside(&harness.dir);
+    std::fs::remove_file(pack.join("notes.md")).expect("remove");
+    std::os::unix::fs::symlink(&secret, pack.join("notes.md")).expect("link");
+    sync(&harness.sock).await;
+    let deliver = serde_json::to_vec(&serde_json::json!({
+        "ref": "leakpack",
+        "seat": "one",
+        "mode": "startup",
+    }))
+    .expect("json");
+    let (status, text) = call(
+        &harness.sock,
+        "POST",
+        "/api/context-packs/deliver",
+        Some(deliver),
+    )
+    .await;
+    assert_eq!(status, 501, "{text}");
+    let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    assert_eq!(value["error"], "not_implemented", "{text}");
+    assert!(!text.contains(SECRET), "{text}");
 }

@@ -194,7 +194,7 @@ fn walk(root: &Path, dir: &Path, found: &mut Vec<(PathBuf, String)>) {
 
 fn read_entry(pack_dir: &Path, root: &Root, refer: &str) -> Result<PackEntry, PackError> {
     let manifest_path = pack_dir.join("manifest.yaml");
-    let raw = super::nofollow::read_regular_text(&manifest_path).map_err(|err| {
+    let raw = super::nofollow::read_text_under(pack_dir, "manifest.yaml").map_err(|err| {
         PackError::new(
             PackCode::ManifestMissing,
             format!(

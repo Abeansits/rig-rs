@@ -72,16 +72,9 @@ pub fn read_source(
     let parsed = parse_source_ref(refer).map_err(|err| ReadFail::Failed(err.message))?;
     let base = base_for(pack_dir, roots, refer, parsed.kind)?;
     let abs = base.join(&parsed.rel);
-    if let Some(link) = super::nofollow::symlink_under(&base, Path::new(&parsed.rel)) {
-        return Err(ReadFail::Failed(format!(
-            "source ref '{refer}' ({}) refuses to follow symlink {}",
-            parsed.kind.as_str(),
-            link.display()
-        )));
-    }
-    let text = match super::nofollow::read_regular_text(&abs) {
+    let text = match super::nofollow::read_text_under(&base, &parsed.rel) {
         Ok(text) => text,
-        Err(err) => return Err(read_error(refer, parsed.kind, &abs, &base, &err)),
+        Err(err) => return Err(source_walk_error(refer, parsed.kind, &abs, &base, err)),
     };
     let real_path = std::fs::canonicalize(&abs).unwrap_or_else(|_| abs.clone());
     let real_base = std::fs::canonicalize(&base).unwrap_or_else(|_| base.clone());
@@ -132,6 +125,33 @@ fn base_for(
             kind.as_str()
         ))
     })
+}
+
+fn source_walk_error(
+    refer: &str,
+    kind: SourceKind,
+    abs: &Path,
+    base: &Path,
+    err: super::nofollow::WalkFail,
+) -> ReadFail {
+    match err {
+        super::nofollow::WalkFail::Symlink => ReadFail::Failed(format!(
+            "source ref '{refer}' ({}) refuses to follow symlink {}",
+            kind.as_str(),
+            abs.display()
+        )),
+        super::nofollow::WalkFail::Hardlink => ReadFail::Failed(format!(
+            "source ref '{refer}' ({}) has more than one link at {}",
+            kind.as_str(),
+            abs.display()
+        )),
+        super::nofollow::WalkFail::Escape => ReadFail::Failed(format!(
+            "source ref '{refer}' ({}) resolves outside {}",
+            kind.as_str(),
+            base.display()
+        )),
+        super::nofollow::WalkFail::Io(err) => read_error(refer, kind, abs, base, &err),
+    }
 }
 
 fn read_error(

@@ -180,15 +180,16 @@ impl Library {
 
     /// Read a manifest member without following a symlink.
     ///
-    /// The path is resolved again at read time, then opened with `O_NOFOLLOW`.
+    /// The pack directory is opened, and the relative path is walked from that
+    /// directory fd. A symlink or a file with more than one link is refused.
     ///
     /// # Errors
     ///
     /// Returns [`PackError`] when the path leaves the pack, a component is a
-    /// symlink, or the file cannot be read as UTF-8.
+    /// symlink, the file has another link, or the bytes are not UTF-8.
     pub fn read_pack_text(entry: &PackEntry, rel: &str) -> Result<String, PackError> {
-        let path = Self::resolve_file(entry, rel)?;
-        super::nofollow::read_regular_text(&path).map_err(|err| open_error(entry, rel, &path, &err))
+        super::nofollow::read_text_under(&entry.source_path, rel)
+            .map_err(|err| map_walk(entry, rel, err))
     }
 }
 
@@ -224,14 +225,34 @@ fn symlink_refused(entry: &PackEntry, rel: &str, cursor: &Path) -> PackError {
     )
 }
 
-fn open_error(entry: &PackEntry, rel: &str, path: &Path, err: &std::io::Error) -> PackError {
-    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
-        return symlink_refused(entry, rel, path);
+fn map_walk(entry: &PackEntry, rel: &str, err: super::nofollow::WalkFail) -> PackError {
+    match err {
+        super::nofollow::WalkFail::Symlink => {
+            symlink_refused(entry, rel, &entry.source_path.join(rel))
+        }
+        super::nofollow::WalkFail::Hardlink => PackError::with(
+            PackCode::FileOutsidePack,
+            format!(
+                "refusing to read '{rel}' in pack '{}': the file has more than one link",
+                entry.source_path.display()
+            ),
+            json!({"packId": entry.id, "relPath": rel}),
+        ),
+        super::nofollow::WalkFail::Escape => PackError::with(
+            PackCode::FileOutsidePack,
+            format!(
+                "relative path '{rel}' must be inside the pack directory (no '..', no leading '/')"
+            ),
+            json!({"packId": entry.id, "relPath": rel}),
+        ),
+        super::nofollow::WalkFail::Io(err) => PackError::new(
+            PackCode::FileReadFailed,
+            format!(
+                "failed to read {rel} in {}: {err}",
+                entry.source_path.display()
+            ),
+        ),
     }
-    PackError::new(
-        PackCode::FileReadFailed,
-        format!("failed to read {}: {err}", path.display()),
-    )
 }
 
 impl Library {

@@ -68,11 +68,12 @@ impl PackCode {
             | Self::UnsafeRefNamespace
             | Self::ManifestMissing
             | Self::ManifestParse
-            | Self::ManifestInvalid => 400,
+            | Self::ManifestInvalid
+            | Self::FileOutsidePack => 400,
             Self::PackNotRemovable => 403,
             Self::PackNotFound => 404,
             Self::PackExists => 409,
-            Self::PackWriteFailed | Self::FileReadFailed | Self::FileOutsidePack => 500,
+            Self::PackWriteFailed | Self::FileReadFailed => 500,
             Self::StoreUnavailable => 503,
         }
     }
