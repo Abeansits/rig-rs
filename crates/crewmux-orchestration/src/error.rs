@@ -32,6 +32,12 @@ impl Error {
     }
 }
 
+impl From<crewmux_types::TypeError> for Error {
+    fn from(err: crewmux_types::TypeError) -> Self {
+        Self::reject("packet_not_found", err.to_string(), 404)
+    }
+}
+
 impl From<crewmux_messaging::Error> for Error {
     fn from(err: crewmux_messaging::Error) -> Self {
         match err {
