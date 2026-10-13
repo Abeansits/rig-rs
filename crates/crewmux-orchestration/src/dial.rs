@@ -3,13 +3,13 @@
 //! Exception dial. `human_gate_trip` is intrinsically human-only.
 //!
 //! The human seat is the operator surface (`human@kernel`): TUI attention and
-//! the CLI inbox. It is not the Slack gateway registry. See PE-021.
+//! the CLI inbox. It is not the Slack gateway registry. See PE-022.
 
 use crewmux_spec::workflow::WorkflowSpec;
 
 use crate::world::World;
 
-/// Operator-surface human seat. PE-021.
+/// Operator-surface human seat. PE-022.
 pub const OPERATOR_SEAT: &str = "human@kernel";
 
 /// Where an exception packet goes.

@@ -378,6 +378,7 @@ fn fake_clock_deadline_and_boot_sweep_do_not_advance() {
     let version = instance.version;
     let sweep = boot_sweep(&mut engine, &mut book, &world(), now(1_000));
     assert_eq!(sweep.visited, 1);
+    assert_eq!(sweep.renudged, 0);
     assert_eq!(
         engine.instance(&created.instance_id).expect("row").version,
         version
@@ -389,6 +390,105 @@ fn fake_clock_deadline_and_boot_sweep_do_not_advance() {
             .hop_count,
         0
     );
+}
+
+#[test]
+fn lost_nudge_is_reissued_once() {
+    let (mut engine, book, created) = Runtime::instantiate(
+        &Engine::default(),
+        &QueueBook::new(),
+        &request(LINEAR, "linear-build.yaml"),
+        &world(),
+        now(1_000),
+    )
+    .expect("instantiate");
+    let version = engine.instance(&created.instance_id).expect("row").version;
+    let mut quiet = book.items();
+    for item in &mut quiet {
+        item.last_nudge = None;
+    }
+    let mut book = QueueBook::restore(quiet, book.all_transitions());
+    let sweep = boot_sweep(&mut engine, &mut book, &world(), now(2_000));
+    assert_eq!(sweep.renudged, 1);
+    assert_eq!(sweep.visited, 1);
+    let id = QItemId::new(&created.entry_qitem).expect("id");
+    let nudged = book.get(&id).expect("packet");
+    assert!(nudged.last_nudge.is_some());
+    assert!(
+        book.all_transitions()
+            .iter()
+            .any(|row| row.note == "workflow.boot-nudge")
+    );
+    let again = boot_sweep(&mut engine, &mut book, &world(), now(3_000));
+    assert_eq!(again.renudged, 0);
+    let row = engine.instance(&created.instance_id).expect("row");
+    assert_eq!(row.version, version);
+    assert_eq!(row.hop_count, 0);
+    assert_eq!(row.status, Status::Active);
+}
+
+#[test]
+fn resume_of_a_failed_instance_reopens_one_packet() {
+    let (engine, book, created) = Runtime::instantiate(
+        &Engine::default(),
+        &QueueBook::new(),
+        &request(LINEAR, "linear-build.yaml"),
+        &world(),
+        now(1_000),
+    )
+    .expect("instantiate");
+    let (engine, book, failed) = project_at(
+        &engine,
+        &book,
+        (&created.instance_id, &created.entry_qitem, Exit::Failed),
+        now(2_000),
+        None,
+    )
+    .expect("fail");
+    assert!(failed.events.contains(&"workflow.failed"));
+    let failed_row = engine.instance(&created.instance_id).expect("failed");
+    assert_eq!(failed_row.status, Status::Failed);
+    let step = failed_row.current_step_id.clone();
+    let (opened, packets, packet) = Runtime::resume(
+        &engine,
+        &book,
+        &created.instance_id,
+        "orch@acme-flow",
+        "orch@acme-flow",
+        now(3_000),
+    )
+    .expect("resume");
+    assert_eq!(
+        engine.instance(&created.instance_id).expect("same").status,
+        Status::Failed
+    );
+    let row = opened.instance(&created.instance_id).expect("resumed");
+    assert_eq!(row.status, Status::Active);
+    assert_eq!(row.resume_count, 1);
+    assert_eq!(row.current_step_id, step);
+    assert_eq!(row.frontier.len(), 1);
+    assert_ne!(packet, created.entry_qitem);
+    let id = QItemId::new(&packet).expect("id");
+    let item = packets.get(&id).expect("packet");
+    assert_eq!(item.state, QueueState::Pending);
+    assert_eq!(item.destination.as_str(), "orch@acme-flow");
+    assert!(opened.keepalives.iter().any(|job| job.armed));
+    let err = Runtime::resume(
+        &opened,
+        &packets,
+        &created.instance_id,
+        "orch@acme-flow",
+        "orch@acme-flow",
+        now(4_000),
+    )
+    .expect_err("second");
+    assert!(matches!(
+        err,
+        crewmux_orchestration::Error::Rejected {
+            code: "instance_not_resumable",
+            ..
+        }
+    ));
 }
 
 #[test]

@@ -203,6 +203,45 @@ fn finish(env: &Env, created: &Value, packet: &str) {
     );
 }
 
+#[test]
+fn resume_after_failure_returns_a_packet() {
+    let env = Env::new();
+    let path = spec(&env);
+    let created = instantiate(&env, &path);
+    let id = text(&created, "/instance/instanceId");
+    let packet = text(&created, "/entryQitemId");
+    let next = project(&env, id, packet, "failed", "flow-planner@acme-flow");
+    assert_eq!(next, "");
+    let (code, resumed, err) = json_out(env.rig().args([
+        "workflow",
+        "resume",
+        id,
+        "--actor-session",
+        "orch@acme-flow",
+        "--json",
+    ]));
+    assert_eq!(code, 0, "{err} {resumed}");
+    assert_eq!(
+        resumed.get("ownerSession").and_then(Value::as_str),
+        Some("orch@acme-flow")
+    );
+    assert_eq!(resumed.get("resumeCount"), Some(&serde_json::json!(1)));
+    assert_eq!(resumed.get("stepId").and_then(Value::as_str), Some("plan"));
+    let fresh = text(&resumed, "/newPacketId");
+    assert_ne!(fresh, "");
+    assert_ne!(fresh, packet);
+    let (code, _again, err) = json_out(env.rig().args([
+        "workflow",
+        "resume",
+        id,
+        "--actor-session",
+        "orch@acme-flow",
+        "--json",
+    ]));
+    assert_eq!(code, 1);
+    assert!(err.contains("is not failed or aborted"), "{err}");
+}
+
 fn text<'a>(value: &'a Value, pointer: &str) -> &'a str {
     value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
 }
