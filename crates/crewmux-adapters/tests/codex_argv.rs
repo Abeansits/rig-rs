@@ -20,6 +20,7 @@ fn mcp_override_uses_dash_c_and_never_passes_never() {
         approval: CodexApproval::Never,
         resume: ThreadId::new("thread-a").ok(),
         mcp_env: std::collections::BTreeMap::from([("RIG_SEAT_ID".to_owned(), "s".to_owned())]),
+        rig_bin: std::path::PathBuf::from("/usr/bin/rig"),
     };
     let argv = codex_launch_argv(&plan);
     assert!(argv.iter().any(|arg| arg == "-c"));
@@ -50,6 +51,7 @@ fn untrusted_approval_is_passed_through() {
         approval: CodexApproval::Untrusted,
         resume: None,
         mcp_env: std::collections::BTreeMap::new(),
+        rig_bin: std::path::PathBuf::from("/usr/bin/rig"),
     };
     let argv = codex_launch_argv(&plan);
     assert!(argv.windows(2).any(|pair| {

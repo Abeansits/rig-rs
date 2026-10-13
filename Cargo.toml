@@ -88,6 +88,12 @@ signal-hook = "0.4.5"
 sha2 = "0.11.0"
 unicode-normalization = "0.1.25"
 uuid = { version = "1.28.0", features = ["v4"] }
+# Slice 6. `cargo add -p crewmux-mcp rmcp --features server,macros,transport-io,client`
+# then hoisted. rmcp is the MCP stdio SDK (server, macros, schemars via the server feature).
+rmcp = { version = "3.5.1", features = ["server", "macros", "transport-io", "client"] }
+# JsonSchema derives expand to the `schemars` crate. rmcp already uses 1.2.2.
+# `cargo add -p crewmux-mcp schemars --features chrono04`
+schemars = { version = "1.2.2", features = ["chrono04"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

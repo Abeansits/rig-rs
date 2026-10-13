@@ -51,6 +51,7 @@ enum StepFile {
         body: String,
     },
     TmuxCalls,
+    McpTools,
 }
 
 /// Load every `*.json` case in `tests/diff/cases`, sorted by id.
@@ -157,6 +158,7 @@ fn step_from(step: StepFile) -> Result<Step, Error> {
             relative_path(&path).map(|path| Step::WriteFile { path, body })
         }
         StepFile::TmuxCalls => Ok(Step::TmuxCalls),
+        StepFile::McpTools => Ok(Step::McpTools),
     }
 }
 
@@ -189,6 +191,7 @@ fn project_from(name: Option<&str>) -> Result<Project, Error> {
         Some("exit") => Ok(Project::ExitCode),
         Some("help-names") => Ok(Project::HelpNames),
         Some("health-shape") => Ok(Project::HealthShape),
+        Some("mcp-tool-names") => Ok(Project::McpToolNames),
         Some(other) => Err(Error::Message(format!("unknown project {other}"))),
     }
 }

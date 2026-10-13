@@ -200,6 +200,14 @@ pub fn project(obs: Observation, kind: Project) -> Observation {
             files: BTreeMapEmpty::empty(),
             tmux_argv: Vec::new(),
         },
+        Project::McpToolNames => Observation {
+            stdout: super::mcp_list::project_names(&obs.stdout),
+            stderr: String::new(),
+            exit: obs.exit,
+            json: None,
+            files: BTreeMapEmpty::empty(),
+            tmux_argv: Vec::new(),
+        },
     }
 }
 

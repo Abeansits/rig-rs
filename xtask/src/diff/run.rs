@@ -105,6 +105,7 @@ fn apply_step(
         Step::ReadFile(path) => read_home_file(home, path, obs),
         Step::WriteFile { path, body } => write_home_file(home, path, body),
         Step::TmuxCalls => collect_tmux(home, obs),
+        Step::McpTools => super::mcp_list::collect(side, home, obs),
     }
 }
 
