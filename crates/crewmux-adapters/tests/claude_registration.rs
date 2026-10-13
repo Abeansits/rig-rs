@@ -94,7 +94,85 @@ async fn launch_argv_allows_exactly_the_rig_tools() {
             .is_some_and(|path| path.starts_with('/')),
         "{doc}"
     );
+    assert_launch_files(
+        &doc,
+        &flat,
+        &binding.seat.to_string(),
+        &root.display().to_string(),
+    );
     assert!(!home.join(".claude").exists());
     assert!(!home.join(".claude.json").exists());
     drop(std::fs::remove_dir_all(&root));
+}
+
+fn assert_launch_files(doc: &serde_json::Value, flat: &[String], seat_id: &str, rig_home: &str) {
+    assert_eq!(
+        json_at(doc, &["mcpServers", "rig", "env", "RIG_SEAT_ID"]),
+        seat_id
+    );
+    assert_eq!(
+        json_at(doc, &["mcpServers", "rig", "env", "RIG_SEAT_TOKEN"]),
+        "tok"
+    );
+    assert_eq!(
+        json_at(doc, &["mcpServers", "rig", "env", "RIG_HOME"]),
+        rig_home
+    );
+    let settings = flag(flat, "--settings");
+    assert!(
+        settings.contains("/run/") && settings.ends_with("settings.json"),
+        "{settings}"
+    );
+    let body = std::fs::read_to_string(&settings).unwrap_or_default();
+    let hooks: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreCompact",
+        "PostCompact",
+        "Stop",
+        "SessionEnd",
+    ] {
+        let command = hook_command(&hooks, event);
+        assert!(command.contains("RIG_SEAT_KEY="), "{event}: {command}");
+        assert!(command.contains(&format!(" hook {event}")), "{command}");
+        assert!(command.contains('/'), "{command}");
+    }
+}
+
+fn json_at(value: &serde_json::Value, path: &[&str]) -> String {
+    let mut current = value;
+    for key in path {
+        let Some(next) = current.get(*key) else {
+            return String::new();
+        };
+        current = next;
+    }
+    current.as_str().unwrap_or("").to_owned()
+}
+
+fn hook_command(hooks: &serde_json::Value, event: &str) -> String {
+    hooks
+        .get("hooks")
+        .and_then(|value| value.get(event))
+        .and_then(|value| value.get(0))
+        .and_then(|value| value.get("hooks"))
+        .and_then(|value| value.get(0))
+        .and_then(|value| value.get("command"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn flag(flat: &[String], name: &str) -> String {
+    flat.windows(2)
+        .find_map(|pair| {
+            let first = pair.first()?;
+            if first == name {
+                pair.get(1).cloned()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
 }

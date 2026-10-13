@@ -9,7 +9,7 @@ ADR-0010 makes this file the single PE register. Design-workspace ids that colli
 | PE-002 | Codex login | PE-002 |
 | PE-003 | MCP tool rename | PE-016 |
 | PE-004 | no writes to the Claude user config | PE-004 |
-| PE-005 | exactly-once direct/startup re-delivery | PE-017 (reserved; no heading yet) |
+| PE-005 | exactly-once direct/startup re-delivery | PE-017 |
 | PE-006 | blind Enter | PE-013 |
 | PE-007 | compaction completion via hooks | PE-018 |
 

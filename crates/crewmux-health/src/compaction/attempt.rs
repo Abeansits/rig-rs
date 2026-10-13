@@ -225,17 +225,29 @@ impl Book {
         changed
     }
 
-    /// Cancel the open managed attempt for `seat_key`.
+    /// Cancel managed attempts that are still open, and a completed attempt
+    /// whose restore has not been submitted.
+    ///
+    /// A `Completed` attempt is the restoring stage. Leaving it in place lets
+    /// the next `Stop` submit that restore.
     pub fn cancel(&mut self, seat_key: &str) -> bool {
-        let Some(attempt) =
-            self.attempts.iter_mut().rev().find(|attempt| {
-                attempt.seat_key == seat_key && attempt.managed && attempt.seat_open()
-            })
-        else {
-            return false;
-        };
-        attempt.state = AttemptState::Cancelled;
-        true
+        let mut changed = false;
+        for attempt in &mut self.attempts {
+            if attempt.seat_key != seat_key || !attempt.managed {
+                continue;
+            }
+            if !matches!(
+                attempt.state,
+                AttemptState::Requested
+                    | AttemptState::PreCompactSeen { .. }
+                    | AttemptState::Completed { .. }
+            ) {
+                continue;
+            }
+            attempt.state = AttemptState::Cancelled;
+            changed = true;
+        }
+        changed
     }
 
     /// The attempt whose restore may be submitted.

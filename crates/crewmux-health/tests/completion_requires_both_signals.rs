@@ -49,6 +49,20 @@ fn assert_completed(start_first: bool) {
     assert_eq!(loaded.summary_len, Some(3));
 }
 
+#[test]
+fn cancel_drops_a_due_restore() {
+    let mut book = Book::new();
+    book.request("seat", AttemptId("manual-1".into()), 0);
+    book.on_hook("seat", &pre("s1", CompactTrigger::Manual), 1_000);
+    book.on_hook("seat", &start("s1"), 2_000);
+    book.on_hook("seat", &post("s1", CompactTrigger::Manual, "sum"), 3_000);
+    assert!(book.due_restore("seat", true, 13_000).is_some());
+    assert!(book.cancel("seat"));
+    assert!(book.due_restore("seat", true, 13_000).is_none());
+    let attempt = book.for_seat("seat").into_iter().next().expect("attempt");
+    assert!(matches!(attempt.state, AttemptState::Cancelled));
+}
+
 fn pre(session: &str, trigger: CompactTrigger) -> HookEvent {
     HookEvent::PreCompact {
         session_id: session.to_owned(),

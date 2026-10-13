@@ -6,6 +6,9 @@ use std::time::Duration;
 
 use crewmux_adapters::{AdapterRegistry, ClaudeAdapter};
 use crewmux_core::{Rig, RigRepo, Seat, SeatRepo, SeatState, Timestamp};
+use crewmux_health::compaction::{
+    AttemptState, CompactTrigger, HookEvent, ManualCompactionStage, SessionSource,
+};
 use crewmux_mux::{Capture, FakeMux, Multiplexer};
 use crewmux_types::{RigId, RigName, RuntimeKind, SeatId, SeatName};
 use tokio_util::sync::CancellationToken;
@@ -51,6 +54,102 @@ async fn compact_after_cancel_sends_again() {
         "{second}"
     );
     drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn cancel_during_restore_drops_the_pending_prompt() {
+    let rig = boot("restore-cancel", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let body = br#"{"seat":"claude","skip_map":true}"#;
+    let session = "11111111-1111-4111-8111-111111111111";
+    let first = trigger(&rig.app, body).await.expect("first compact");
+    assert_eq!(first["compact_sent"], true, "{first}");
+    let seat_key = {
+        let guard = rig.app.compaction.lock().await;
+        guard
+            .book
+            .attempts()
+            .first()
+            .expect("attempt")
+            .seat_key
+            .clone()
+    };
+    {
+        let mut guard = rig.app.compaction.lock().await;
+        guard.book.on_hook(&seat_key, &precompact(session), 1);
+        guard.book.on_hook(&seat_key, &compact_start(session), 2);
+        guard.book.on_hook(&seat_key, &post_compact(session), 3);
+        guard.enforcer.note_hooks_completed("claude");
+        let attempt = guard
+            .book
+            .for_seat(&seat_key)
+            .into_iter()
+            .next_back()
+            .expect("completed");
+        assert!(matches!(attempt.state, AttemptState::Completed { .. }));
+        assert!(
+            guard
+                .book
+                .due_restore(&seat_key, true, crate::state::now_ms())
+                .is_some()
+        );
+        assert_eq!(
+            guard.enforcer.manual_stage("claude"),
+            Some(ManualCompactionStage::Restoring)
+        );
+    }
+    let cancelled = cancel(&rig.app, br#"{"seat":"claude"}"#)
+        .await
+        .expect("cancel");
+    assert_eq!(cancelled["state"], "cancelled");
+    let before = rig.mux.last_paste().await;
+    super::apply::ingest(&rig.app, &seat_key, stop_hook(session).as_bytes())
+        .await
+        .expect("stop");
+    assert_eq!(
+        rig.mux.last_paste().await,
+        before,
+        "a cancelled restore was pasted on Stop"
+    );
+    let second = trigger(&rig.app, body)
+        .await
+        .expect("compact after a cancelled restore");
+    assert_eq!(second["compact_sent"], true, "{second}");
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+fn precompact(session: &str) -> HookEvent {
+    HookEvent::PreCompact {
+        session_id: session.to_owned(),
+        trigger: CompactTrigger::Manual,
+        custom_instructions: None,
+        transcript_path: PathBuf::new(),
+        cwd: PathBuf::new(),
+    }
+}
+
+fn compact_start(session: &str) -> HookEvent {
+    HookEvent::SessionStart {
+        session_id: session.to_owned(),
+        source: SessionSource::Compact,
+        context_tokens: None,
+    }
+}
+
+fn post_compact(session: &str) -> HookEvent {
+    HookEvent::PostCompact {
+        session_id: session.to_owned(),
+        trigger: CompactTrigger::Manual,
+        compact_summary: "sum".to_owned(),
+    }
+}
+
+fn stop_hook(session: &str) -> String {
+    serde_json::json!({
+        "hook_event_name": "Stop",
+        "session_id": session
+    })
+    .to_string()
 }
 
 struct Boot {
