@@ -14,6 +14,7 @@ mod readiness;
 mod runtime;
 mod snapshot;
 mod ui;
+mod workflow;
 
 pub mod tmux_version;
 
@@ -26,6 +27,7 @@ pub use dialog::{ComposerState, DialogId};
 pub use doctor::{CheckStatus, DoctorCheck};
 pub use error::TypeError;
 pub use id::{MAX_NAME_LEN, QItemId, RigId, RigName, SeatId, SeatName, SessionId};
+pub use workflow::{NameId, RoleId, SpecId, StepId, WorkflowInstanceId};
 pub use readiness::ReadinessCode;
 pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use snapshot::{DeliveryId, SnapshotId};

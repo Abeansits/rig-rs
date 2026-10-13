@@ -1,0 +1,7 @@
+{"file":"basic-loop.yaml","sha256":"4ee33c4ed27abdf760f27bad36b6105ad494980c47bbb40e5ea5ba6b77455c54","bytes":2330}
+{"file":"branched-remediation.yaml","sha256":"53a4a5de51b839e8360ce5a6cdd77bbd2ff1a1a58812868727001bfcfa7e2649","bytes":976}
+{"file":"conveyor.yaml","sha256":"c2399ba6dd10d5c7df25fcf86213e0a04a3871a04f6143ab245e27ffeba3b4d1","bytes":2778}
+{"file":"factory-rsi.yaml","sha256":"fe85e436c63751da2c17fa6e5bff299fa01f99ccc4dc01d71b68424baebf5a60","bytes":7073}
+{"file":"gated-release.yaml","sha256":"94f3268a364b05ca96dbe79ca6773b618403117cca32d3c3e6c679a210713af2","bytes":863}
+{"file":"linear-build.yaml","sha256":"f2344dc61742effe4b4ab1d183e6088c646b09742a40670b646c23345ea549ac","bytes":653}
+{"file":"workflow-authored-wait.yaml","sha256":"29dee6d441dcf8396b049e792f6b97c0949263a5de226d3046d87cf08a678d21","bytes":391}
