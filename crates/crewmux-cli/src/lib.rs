@@ -7,6 +7,7 @@ mod autostart;
 mod chatroom;
 mod command;
 mod context_add;
+mod context_call;
 mod context_cmd;
 mod context_trace;
 mod context_view;

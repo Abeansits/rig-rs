@@ -55,6 +55,10 @@ pub use error::Error;
 pub use serve::run;
 
 #[cfg(test)]
+mod context_deliver_tests;
+#[cfg(test)]
+mod context_route_tests;
+#[cfg(test)]
 mod flow;
 #[cfg(test)]
 mod health_tests;

@@ -41,7 +41,7 @@ enum ContextCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Compose ordered files into a durable context-pack ref.
+    /// Compose ordered files into a durable pack ref.
     Compose {
         /// Path-like durable output ref.
         #[arg(long)]
@@ -160,7 +160,7 @@ enum ContextCmd {
     /// Deliver a pack through the guarded paste path or `deliver_startup`.
     Deliver {
         /// Path-like ref.
-        #[arg(long)]
+        #[arg(long = "ref")]
         refer: String,
         /// Seat name or `seat@rig`.
         #[arg(long)]

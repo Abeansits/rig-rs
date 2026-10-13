@@ -90,30 +90,14 @@ pub(crate) fn apply(
     stamp(atoms, context, meta, warnings, query, slice)
 }
 
-fn stamp(
-    atoms: &mut Vec<Atom>,
-    context: &mut ContextAtoms,
-    meta: &mut BTreeMap<String, (&'static str, &'static str)>,
-    warnings: &mut Vec<String>,
-    query: &LegacyQuery<'_>,
-    slice: &str,
-) -> Result<(), RouteError> {
-    let (intent, intent_source, extra, extra_warnings) = project_intent(query.workspace);
-    warnings.extend(extra_warnings);
-    let prefix = if query.profile.is_some() {
-        "profile"
-    } else {
-        "legacy-default"
-    };
-    let max_order = atoms.iter().map(|atom| atom.order).fold(i64::MIN, i64::max);
-    let mut project = Vec::new();
-    project.push(work_atom(
+fn project_atoms(prefix: &str, intent: &str, extra: &[String], max_order: i64) -> Vec<Atom> {
+    let mut project = vec![work_atom(
         &format!("{prefix}-project-spec"),
         &format!("project:{intent}"),
         max_order.saturating_add(1),
         None,
         Purpose::Depth,
-    ));
+    )];
     for (index, address) in extra.iter().enumerate() {
         let id = format!("{prefix}-project-context-{}", index + 1);
         let requires = if index == 0 {
@@ -131,6 +115,26 @@ fn stamp(
             Purpose::Depth,
         ));
     }
+    project
+}
+
+fn stamp(
+    atoms: &mut Vec<Atom>,
+    context: &mut ContextAtoms,
+    meta: &mut BTreeMap<String, (&'static str, &'static str)>,
+    warnings: &mut Vec<String>,
+    query: &LegacyQuery<'_>,
+    slice: &str,
+) -> Result<(), RouteError> {
+    let (intent, intent_source, extra, extra_warnings) = project_intent(query.workspace);
+    warnings.extend(extra_warnings);
+    let prefix = if query.profile.is_some() {
+        "profile"
+    } else {
+        "legacy-default"
+    };
+    let max_order = atoms.iter().map(|atom| atom.order).fold(i64::MIN, i64::max);
+    let project = project_atoms(prefix, &intent, &extra, max_order);
     let final_order = match project.last() {
         Some(atom) => atom.order,
         None => max_order,

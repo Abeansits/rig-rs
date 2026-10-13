@@ -25,6 +25,7 @@ xtask lint window-size
 xtask lint blind-enter
 xtask lint mcp-legacy-names
 xtask lint mcp-state-path
+xtask generate-context-packs [--check]
 xtask record-tui [--openrig DIR] [--out DIR]
 
 diff exits 0 when every verdict is Equal or ExpectedDiff, 1 on Unexpected or a
@@ -62,6 +63,30 @@ fn cmd_lint_mux() -> i32 {
     }
 }
 
+fn cmd_context_packs(args: &mut impl Iterator<Item = String>) -> Result<i32, Error> {
+    let check = match args.next().as_deref() {
+        Some("--check") => true,
+        Some(other) => {
+            return Err(Error::Usage(format!(
+                "unknown generate-context-packs flag {other}\n{HELP}"
+            )));
+        }
+        None => false,
+    };
+    if args.next().is_some() {
+        return Err(Error::Usage(format!(
+            "generate-context-packs takes at most --check\n{HELP}"
+        )));
+    }
+    xtask::generate_context_packs(&workspace_root(), check)?;
+    out(if check {
+        "generate-context-packs check ok"
+    } else {
+        "generate-context-packs wrote builtin_gen.rs"
+    });
+    Ok(0)
+}
+
 fn cmd_lint_blind_enter() -> i32 {
     match lint_blind_enter(&lint_workspace_root()) {
         Ok(()) => {
@@ -83,6 +108,7 @@ fn dispatch() -> Result<i32, Error> {
         Some("lint-mux") => Ok(cmd_lint_mux()),
         Some("lint-blind-enter") => Ok(cmd_lint_blind_enter()),
         Some("lint") => cmd_lint(&mut args),
+        Some("generate-context-packs") => cmd_context_packs(&mut args),
         Some("record-tui") => cmd_record_tui(&mut args),
         Some("--help" | "-h") | None => {
             out(HELP);
