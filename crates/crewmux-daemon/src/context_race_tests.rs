@@ -175,3 +175,102 @@ async fn swapping_a_directory_for_a_symlink_never_returns_outside_bytes() {
         "outside bytes appeared {leaks} times across {swaps} swaps"
     );
 }
+
+fn install_pack_root(home: &Path) -> (PathBuf, PathBuf) {
+    let context = home.join("context");
+    let pack = context.join("racepack");
+    std::fs::create_dir_all(&pack).expect("pack");
+    let manifest = "name: racepack\nversion: \"1\"\ntaxonomy: mission\nfiles:\n  - path: notes.md\n    role: source\n";
+    std::fs::write(pack.join("manifest.yaml"), manifest).expect("manifest");
+    std::fs::write(pack.join("notes.md"), INSIDE).expect("inside");
+    let outside = home.join("outside");
+    std::fs::create_dir_all(&outside).expect("outside");
+    std::fs::write(outside.join("manifest.yaml"), manifest).expect("outside manifest");
+    std::fs::write(outside.join("notes.md"), SECRET).expect("secret");
+    let alias = context.join("alias");
+    std::os::unix::fs::symlink(&outside, &alias).expect("alias");
+    (pack, alias)
+}
+
+fn leave_pack_symlinked(pack: &Path, alias: &Path) {
+    let linked = std::fs::symlink_metadata(pack).is_ok_and(|meta| meta.file_type().is_symlink());
+    if !linked {
+        assert!(
+            exchange(pack, alias),
+            "could not leave the pack root as a symlink"
+        );
+    }
+    let linked = std::fs::symlink_metadata(pack).is_ok_and(|meta| meta.file_type().is_symlink());
+    assert!(
+        linked,
+        "pack root is a directory, so a followed open would not be caught"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn swapping_the_pack_root_for_a_symlink_never_returns_outside_bytes() {
+    let harness = boot().await;
+    let (pack, alias) = install_pack_root(&harness.dir);
+    let synced = call(
+        &harness.sock,
+        "POST",
+        "/api/context-packs/library/sync",
+        Some(b"{}".to_vec()),
+    )
+    .await;
+    assert!(!synced.contains(SECRET), "{synced}");
+    let stop = Arc::new(AtomicBool::new(false));
+    let swaps = Arc::new(AtomicU32::new(0));
+    let worker = {
+        let stop = Arc::clone(&stop);
+        let swaps = Arc::clone(&swaps);
+        let pack = pack.clone();
+        let alias = alias.clone();
+        std::thread::spawn(move || swap_until(&pack, &alias, &stop, &swaps))
+    };
+    let fingerprint = obligation_fingerprint("context", "one@pair", SECRET);
+    let mut leaks = 0u32;
+    let pieces = "/api/context-packs/library/by-ref/pieces?ref=racepack";
+    let deliver = serde_json::to_vec(&serde_json::json!({
+        "ref": "racepack",
+        "seat": "one",
+        "mode": "paste",
+    }))
+    .expect("json");
+    for _ in 0..TRIALS {
+        let got = call(&harness.sock, "GET", pieces, None).await;
+        leaks += u32::from(leaked(&got, &fingerprint));
+        let posted = call(
+            &harness.sock,
+            "POST",
+            "/api/context-packs/deliver",
+            Some(deliver.clone()),
+        )
+        .await;
+        leaks += u32::from(leaked(&posted, &fingerprint));
+    }
+    stop.store(true, Ordering::Relaxed);
+    worker.join().expect("swap thread");
+    leave_pack_symlinked(&pack, &alias);
+    let settled = call(&harness.sock, "GET", pieces, None).await;
+    leaks += u32::from(leaked(&settled, &fingerprint));
+    assert!(
+        settled.contains("file_outside_pack"),
+        "a symlinked pack root was not refused, so reverting O_NOFOLLOW would pass: {settled}"
+    );
+    let shot = crate::query::capture(&harness.app, "one", None)
+        .await
+        .expect("capture");
+    let screen = shot["text"].as_str().unwrap_or("");
+    leaks += u32::from(screen.contains(SECRET));
+    let swaps = swaps.load(Ordering::Relaxed);
+    println!("pack-root race: leaks={leaks} swaps={swaps}");
+    assert!(
+        swaps > 0,
+        "the pack root was never exchanged with the symlink"
+    );
+    assert_eq!(
+        leaks, 0,
+        "outside bytes appeared {leaks} times across {swaps} swaps"
+    );
+}

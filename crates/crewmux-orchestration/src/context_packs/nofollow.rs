@@ -1,12 +1,15 @@
 //! Reads that stay inside an opened directory.
 //!
-//! The root is opened once. Each relative component is then opened from that
-//! directory fd, so replacing a parent directory with a symlink cannot change
-//! which file is read. On Linux, `openat2` with `RESOLVE_NO_SYMLINKS` and
-//! `RESOLVE_BENEATH` does that walk in one call when the kernel supports it.
-//! Otherwise, and on macOS, each directory component is `openat` with
-//! `O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC`, and the final file is `openat`
-//! with `O_NOFOLLOW`. Bytes come only from that final fd.
+//! The library folder is opened first. The pack root is then opened from that
+//! directory fd with `O_NOFOLLOW | O_DIRECTORY`, or on Linux `openat2` with
+//! `RESOLVE_NO_SYMLINKS` and `RESOLVE_BENEATH`. A symlink in the pack root's
+//! place is refused. Each relative component is opened from the pack fd, so
+//! replacing a directory inside the pack with a symlink cannot change which
+//! file is read. On Linux, `openat2` does that inner walk in one call when the
+//! kernel supports it. Otherwise, and on macOS, each directory component is
+//! `openat` with `O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC`, and the final file is
+//! `openat` with `O_NOFOLLOW`. The same `O_NOFOLLOW` open is the fallback when
+//! `openat2` returns `ENOSYS`. Bytes come only from the final fd.
 
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
@@ -82,13 +85,55 @@ fn segments(rel: &str) -> Result<Vec<&str>, WalkFail> {
 }
 
 fn open_root(root: &Path) -> Result<OwnedFd, WalkFail> {
-    openat(
-        rustix::fs::CWD,
-        root,
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(WalkFail::Escape)?;
+    let parent = open_parent(root)?;
+    open_pack_root(&parent, name)
+}
+
+fn open_parent(root: &Path) -> Result<OwnedFd, WalkFail> {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+    let parent = root.parent().filter(|path| !path.as_os_str().is_empty());
+    let path = parent.unwrap_or(Path::new("."));
+    openat(rustix::fs::CWD, path, flags, Mode::empty())
+        .map_err(|err| WalkFail::Io(Error::from(err)))
+}
+
+fn open_pack_root(parent: &OwnedFd, name: &str) -> Result<OwnedFd, WalkFail> {
+    if let Some(opened) = open_pack_at2(parent, name) {
+        return opened;
+    }
+    open_dir(parent, name)
+}
+
+#[cfg(target_os = "linux")]
+fn open_pack_at2(parent: &OwnedFd, name: &str) -> Option<Result<OwnedFd, WalkFail>> {
+    match rustix::fs::openat2(
+        parent,
+        name,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
-    )
-    .map_err(|err| WalkFail::Io(Error::from(err)))
+        rustix::fs::ResolveFlags::NO_SYMLINKS | rustix::fs::ResolveFlags::BENEATH,
+    ) {
+        Ok(fd) => Some(Ok(fd)),
+        Err(err) if err == rustix::io::Errno::NOSYS || err == rustix::io::Errno::NOTSUP => None,
+        Err(err) => Some(Err(refuse_symlink(parent, name, err))),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_pack_at2(_parent: &OwnedFd, _name: &str) -> Option<Result<OwnedFd, WalkFail>> {
+    None
+}
+
+fn refuse_symlink(dir: &OwnedFd, name: &str, err: rustix::io::Errno) -> WalkFail {
+    if component_is_symlink(dir, name) {
+        WalkFail::Symlink
+    } else {
+        classify(err)
+    }
 }
 
 fn open_relative(root: &OwnedFd, segments: &[&str]) -> Result<OwnedFd, WalkFail> {
@@ -146,8 +191,7 @@ fn open_dir(dir: &OwnedFd, name: &str) -> Result<OwnedFd, WalkFail> {
         Mode::empty(),
     ) {
         Ok(fd) => Ok(fd),
-        Err(_) if component_is_symlink(dir, name) => Err(WalkFail::Symlink),
-        Err(err) => Err(classify(err)),
+        Err(err) => Err(refuse_symlink(dir, name, err)),
     }
 }
 
@@ -240,5 +284,30 @@ mod tests {
         let hard = super::read_text_under(&root, "hard.md").expect_err("hardlink");
         assert!(matches!(hard, WalkFail::Hardlink), "{hard:?}");
         drop(std::fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn pack_root_symlink_is_refused_on_both_walks() {
+        let library = temp();
+        let pack = library.join("pack");
+        std::fs::create_dir_all(&pack).expect("pack");
+        std::fs::write(pack.join("notes.md"), "inside").expect("inside");
+        let outside = library.join("outside");
+        std::fs::create_dir_all(&outside).expect("outside");
+        std::fs::write(outside.join("notes.md"), "OUTSIDE-SECRET-BYTES").expect("secret");
+        let parked = library.join("parked");
+        std::fs::rename(&pack, &parked).expect("mv");
+        std::os::unix::fs::symlink(&outside, &pack).expect("link");
+        for try_at2 in [true, false] {
+            let err = super::read_bytes(&pack, "notes.md", try_at2).expect_err("root symlink");
+            assert!(
+                matches!(err, WalkFail::Symlink),
+                "try_at2={try_at2} {err:?}"
+            );
+            assert!(!err.to_string().contains("OUTSIDE-SECRET-BYTES"));
+        }
+        let real = super::read_bytes(&parked, "notes.md", false).expect("real");
+        assert_eq!(real, b"inside");
+        drop(std::fs::remove_dir_all(library));
     }
 }

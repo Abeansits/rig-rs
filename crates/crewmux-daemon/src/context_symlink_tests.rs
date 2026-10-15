@@ -208,3 +208,18 @@ async fn startup_returns_not_implemented_before_reading_a_symlink() {
     assert_eq!(value["error"], "not_implemented", "{text}");
     assert!(!text.contains(SECRET), "{text}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deliver_get_and_preview_refuse_a_symlinked_pack_root() {
+    let harness = boot().await;
+    let pack = install_real(&harness.dir);
+    sync(&harness.sock).await;
+    let outside = harness.dir.join("outside-pack");
+    std::fs::create_dir_all(&outside).expect("outside");
+    std::fs::write(outside.join("manifest.yaml"), manifest("notes.md")).expect("manifest");
+    std::fs::write(outside.join("notes.md"), SECRET).expect("secret");
+    let parked = harness.dir.join("parked-pack");
+    std::fs::rename(&pack, &parked).expect("mv");
+    std::os::unix::fs::symlink(&outside, &pack).expect("link");
+    refuse_all(&harness).await;
+}
