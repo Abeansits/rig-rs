@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crewmux_adapters::AdapterRegistry;
 use crewmux_messaging::{Mailboxes, QueueBook};
 use crewmux_mux::Multiplexer;
+use crewmux_orchestration::Engine;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -39,6 +40,8 @@ pub(crate) struct App {
     pub home: PathBuf,
     /// Live queue. SQLite is updated by the persist worker.
     pub queue: Arc<tokio::sync::Mutex<QueueBook>>,
+    /// Workflow document. Committed with the queue in one store transaction.
+    pub workflow: Arc<tokio::sync::Mutex<Engine>>,
     /// Inbox and outbox.
     pub mail: Arc<tokio::sync::Mutex<Mailboxes>>,
     /// Canonical `/api/events` hub.
@@ -98,8 +101,10 @@ pub(crate) struct QueueWrite {
     pub book: QueueBook,
     /// Completed after the snapshot write, including a store error.
     pub acks: Vec<oneshot::Sender<Result<(), String>>>,
-    /// Test hook forwarded to `replace_book`. Production writes pass `None`.
+    /// Test hook forwarded to `replace_book` or `commit_projection`. Production writes pass `None`.
     pub crash: Option<&'static str>,
+    /// Workflow document committed with `book` when present.
+    pub workflow: Option<String>,
 }
 
 impl App {
@@ -124,6 +129,7 @@ impl App {
             registry,
             home,
             queue: Arc::new(tokio::sync::Mutex::new(QueueBook::new())),
+            workflow: Arc::new(tokio::sync::Mutex::new(Engine::default())),
             mail: Arc::new(tokio::sync::Mutex::new(Mailboxes::new())),
             hub: Arc::new(EventHub::new()),
             taps: Arc::new(KeyTaps::default()),
@@ -267,6 +273,7 @@ impl App {
             book,
             acks: Vec::new(),
             crash: None,
+            workflow: None,
         }));
     }
 
@@ -276,6 +283,19 @@ impl App {
     ///
     /// Returns [`Error::Message`] when the writer has stopped or the snapshot write failed.
     pub(crate) async fn commit_queue(&self, book: QueueBook) -> Result<(), Error> {
+        self.commit_documented(book, None).await
+    }
+
+    /// Persist `book` and, when present, the workflow document in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Message`] when the writer has stopped or the snapshot write failed.
+    pub(crate) async fn commit_documented(
+        &self,
+        book: QueueBook,
+        workflow: Option<String>,
+    ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let crash = self.persist_crash.lock().await.take();
         self.persist_tx
@@ -283,6 +303,7 @@ impl App {
                 book,
                 acks: vec![tx],
                 crash,
+                workflow,
             })
             .map_err(|_| Error::Message("queue writer stopped".to_owned()))?;
         match rx.await {

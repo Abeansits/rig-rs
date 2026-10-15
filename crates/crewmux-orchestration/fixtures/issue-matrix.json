@@ -1,0 +1,1050 @@
+[
+  {
+    "name": "packages/cli/test/workflow-acceptance-cli.test.ts#1",
+    "path": "packages/cli/test/workflow-acceptance-cli.test.ts#1",
+    "yaml": "workflow:\n  id: cli-acceptance\n  version: 1\n  entry: { role: producer }\n  roles:\n    producer: { preferred_targets: [producer@rig] }\n    gate: { preferred_targets: [gate@rig] }\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits: [handoff]\n    - id: accept\n      actor_role: gate\n      acceptance:\n        candidate: abc123\n        verdicts: [CLEAR]\n        evidence_ref: proof/review.md\n      allowed_exits: [done]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/assets/vm-preview-fixtures/workflows/sample-basic-loop.yaml",
+    "path": "packages/daemon/assets/vm-preview-fixtures/workflows/sample-basic-loop.yaml",
+    "yaml": "# Example workflow for the populated VM preview.\n# Its distinct ID avoids colliding with the built-in basic-loop specification\n# when copied into the populated daemon's configured workflows directory.\n# The daemon discovers it on the next workflow-library listing.\nworkflow:\n  id: vm-preview-basic-loop\n  version: 1\n  objective: >\n    Walk one work packet through the conveyor rig slowly enough for a new user\n    to inspect each handoff.\n  target:\n    rig: conveyor\n  entry:\n    role: intake\n  coordination_terminal_turn_rule: hot_potato\n  roles:\n    intake:\n      skill_refs: [openrig-user, backlog-capture]\n      preferred_targets: [intake-lead@conveyor]\n    planner:\n      skill_refs: [openrig-user, verification-before-completion]\n      preferred_targets: [plan-planner@conveyor]\n    builder:\n      skill_refs: [openrig-user]\n      preferred_targets: [build-builder@conveyor]\n    reviewer:\n      skill_refs: [openrig-user, review-team]\n      preferred_targets: [review-reviewer@conveyor]\n    closer:\n      skill_refs: [openrig-user]\n      preferred_targets: [intake-lead@conveyor]\n  steps:\n    - id: intake\n      actor_role: intake\n      objective: Restate the objective and hand off one packet.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [planner]\n    - id: plan\n      actor_role: planner\n      objective: Produce a short plan for one build turn.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [builder]\n    - id: build\n      actor_role: builder\n      objective: Build or draft the planned output.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [reviewer]\n    - id: review\n      actor_role: reviewer\n      objective: Check the output and clear it for close.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [closer]\n    - id: close\n      actor_role: closer\n      objective: Close the walkthrough packet.\n      allowed_exits: [done, failed]\n      next_hop:\n        mode: forbid\n  invariants:\n    continuation_required: true\n    preserve_lineage: true\n    closure_required: true\n    allowed_exits: [handoff, waiting, done, failed]\n  loop_guards:\n    max_hops: 10\n    spawn_budget: 0\n  closure:\n    success: Walkthrough packet closed.\n    degraded: Walkthrough stopped with a named blocker.\n    failed: Walkthrough failed with evidence.\n",
+    "ok": true,
+    "issues": [
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.continuation_required",
+        "message": "\"invariants.continuation_required\" is declared but not enforced in v1 — the engine records it without acting on it. Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.preserve_lineage",
+        "message": "\"invariants.preserve_lineage\" is declared but not enforced in v1 — the engine records it without acting on it (lineage IS always preserved via chain_of_record; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.closure_required",
+        "message": "\"invariants.closure_required\" is declared but not enforced in v1 — the engine records it without acting on it (closure IS always required by the hot-potato contract; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.closure",
+        "message": "\"closure.{success,degraded,failed}\" is declared but not enforced in v1 — the engine records it without acting on it (display-only messages; no consumer renders them yet). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.loop_guards.spawn_budget",
+        "message": "\"loop_guards.spawn_budget\" is declared but not enforced in v1 — the engine records it without acting on it (it guards a SPAWN mechanism and no spawn/fan-out seam exists in the single-frontier model; enforcement is a NAMED acceptance item of the WF-2/WF-6 parallel-frontier fan-out work (arch ruling 2026-07-06)). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.roles.intake.skill_refs",
+        "message": "\"skill_refs\" is declared but not enforced in v1 — the engine records it without acting on it (documentation-only; owner resolution uses preferred_targets). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/src/builtins/workflow-specs/basic-loop.yaml",
+    "path": "packages/daemon/src/builtins/workflow-specs/basic-loop.yaml",
+    "yaml": "# OpenRig 0.3.0 starter workflow.\n# A slower walkthrough loop for watching one work packet move end to end.\nworkflow:\n  id: basic-loop\n  version: 1\n  objective: >\n    Walk one work packet through the conveyor rig slowly enough for a new user\n    to inspect each handoff.\n  target:\n    rig: conveyor\n  entry:\n    role: intake\n  coordination_terminal_turn_rule: hot_potato\n  roles:\n    intake:\n      skill_refs: [openrig-user, backlog-capture]\n      preferred_targets: [intake-lead@conveyor]\n    planner:\n      skill_refs: [openrig-user, verification-before-completion]\n      preferred_targets: [plan-planner@conveyor]\n    builder:\n      skill_refs: [openrig-user]\n      preferred_targets: [build-builder@conveyor]\n    reviewer:\n      skill_refs: [openrig-user, review-team]\n      preferred_targets: [review-reviewer@conveyor]\n    closer:\n      skill_refs: [openrig-user]\n      preferred_targets: [intake-lead@conveyor]\n  steps:\n    - id: intake\n      actor_role: intake\n      objective: Restate the objective and hand off one packet.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [planner]\n    - id: plan\n      actor_role: planner\n      objective: Produce a short plan for one build turn.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [builder]\n    - id: build\n      actor_role: builder\n      objective: Build or draft the planned output.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [reviewer]\n    - id: review\n      actor_role: reviewer\n      objective: Check the output and clear it for close.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [closer]\n    - id: close\n      actor_role: closer\n      objective: Close the walkthrough packet.\n      allowed_exits: [done, failed]\n      next_hop:\n        mode: forbid\n  invariants:\n    continuation_required: true\n    preserve_lineage: true\n    closure_required: true\n    allowed_exits: [handoff, waiting, done, failed]\n  loop_guards:\n    max_hops: 10\n    spawn_budget: 0\n  closure:\n    success: Walkthrough packet closed.\n    degraded: Walkthrough stopped with a named blocker.\n    failed: Walkthrough failed with evidence.\n",
+    "ok": true,
+    "issues": [
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.continuation_required",
+        "message": "\"invariants.continuation_required\" is declared but not enforced in v1 — the engine records it without acting on it. Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.preserve_lineage",
+        "message": "\"invariants.preserve_lineage\" is declared but not enforced in v1 — the engine records it without acting on it (lineage IS always preserved via chain_of_record; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.closure_required",
+        "message": "\"invariants.closure_required\" is declared but not enforced in v1 — the engine records it without acting on it (closure IS always required by the hot-potato contract; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.closure",
+        "message": "\"closure.{success,degraded,failed}\" is declared but not enforced in v1 — the engine records it without acting on it (display-only messages; no consumer renders them yet). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.loop_guards.spawn_budget",
+        "message": "\"loop_guards.spawn_budget\" is declared but not enforced in v1 — the engine records it without acting on it (it guards a SPAWN mechanism and no spawn/fan-out seam exists in the single-frontier model; enforcement is a NAMED acceptance item of the WF-2/WF-6 parallel-frontier fan-out work (arch ruling 2026-07-06)). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.roles.intake.skill_refs",
+        "message": "\"skill_refs\" is declared but not enforced in v1 — the engine records it without acting on it (documentation-only; owner resolution uses preferred_targets). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/src/builtins/workflow-specs/branched-remediation.yaml",
+    "path": "packages/daemon/src/builtins/workflow-specs/branched-remediation.yaml",
+    "yaml": "# OpenRig 0.4.6 spec-language example — the BRANCHED REMEDIATION shape.\n# `failed` branches to a remediation step (branch keys = the recorded\n# exit enum ONLY); the remediate → verify → remediate loop is a\n# branch-created cycle, legitimate ONLY under the declared max_hops\n# (remove loop_guards and validation fails naming the cycle + the fix).\nworkflow:\n  id: branched-remediation\n  version: 1\n  objective: Build with a bounded failed-path remediation loop.\n  loop_guards:\n    max_hops: 8\n  roles:\n    builder:\n      preferred_targets: [flow-builder@acme-flow]\n    fixer:\n      preferred_targets: [flow-fixer@acme-flow]\n    prover:\n      preferred_targets: [flow-prover@acme-flow]\n  steps:\n    - id: build\n      actor_role: builder\n      next_hop:\n        on: { failed: remediate }\n    - id: verify\n      actor_role: prover\n      next_hop:\n        on: { failed: remediate }\n    - id: remediate\n      actor_role: fixer\n      next_hop:\n        suggested_roles: [prover]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/src/builtins/workflow-specs/conveyor.yaml",
+    "path": "packages/daemon/src/builtins/workflow-specs/conveyor.yaml",
+    "yaml": "# OpenRig 0.3.0 starter workflow.\n# Generic station pipeline. Multiple workflow instances may run at once; queue\n# depth at each station is the backpressure signal.\nworkflow:\n  id: conveyor\n  version: 1\n  objective: >\n    Move a work packet through intake, planning, build, review, and close on\n    the generic conveyor starter rig.\n  target:\n    rig: conveyor\n  entry:\n    role: intake\n  coordination_terminal_turn_rule: hot_potato\n  roles:\n    intake:\n      skill_refs: [openrig-user, backlog-capture, orchestration-team]\n      preferred_targets: [intake-lead@conveyor]\n    planner:\n      skill_refs: [openrig-user, requirements-writer]\n      preferred_targets: [plan-planner@conveyor]\n    builder:\n      skill_refs: [openrig-user, development-team, test-driven-development]\n      preferred_targets: [build-builder@conveyor]\n    reviewer:\n      skill_refs: [openrig-user, review-team, plan-review]\n      preferred_targets: [review-reviewer@conveyor]\n    closer:\n      skill_refs: [openrig-user, orchestration-team, verification-before-completion]\n      preferred_targets: [intake-lead@conveyor]\n  steps:\n    - id: intake\n      actor_role: intake\n      objective: Clarify the request, create a small packet, and hand it to planning.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [planner]\n    - id: plan\n      actor_role: planner\n      objective: Turn the packet into an executable plan with verification.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [builder]\n    - id: build\n      actor_role: builder\n      objective: Execute the plan and produce proof for review.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [reviewer]\n    - id: review\n      actor_role: reviewer\n      objective: >\n        Check the build output. Use ordinary queue handoff to send targeted\n        rework back to build when needed; use the workflow handoff path when\n        the packet is ready to close.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [closer, builder]\n    - id: close\n      actor_role: closer\n      objective: Close the packet with evidence and any follow-up notes.\n      allowed_exits: [done, failed]\n      next_hop:\n        mode: forbid\n  invariants:\n    continuation_required: true\n    preserve_lineage: true\n    closure_required: true\n    allowed_exits: [handoff, waiting, done, failed]\n  loop_guards:\n    max_hops: 20\n    spawn_budget: 0\n  closure:\n    success: Packet closed with evidence.\n    degraded: Packet stopped with a named blocker or follow-up.\n    failed: Packet failed; preserve the review finding and owner.\n",
+    "ok": true,
+    "issues": [
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.continuation_required",
+        "message": "\"invariants.continuation_required\" is declared but not enforced in v1 — the engine records it without acting on it. Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.preserve_lineage",
+        "message": "\"invariants.preserve_lineage\" is declared but not enforced in v1 — the engine records it without acting on it (lineage IS always preserved via chain_of_record; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.closure_required",
+        "message": "\"invariants.closure_required\" is declared but not enforced in v1 — the engine records it without acting on it (closure IS always required by the hot-potato contract; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.closure",
+        "message": "\"closure.{success,degraded,failed}\" is declared but not enforced in v1 — the engine records it without acting on it (display-only messages; no consumer renders them yet). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.loop_guards.spawn_budget",
+        "message": "\"loop_guards.spawn_budget\" is declared but not enforced in v1 — the engine records it without acting on it (it guards a SPAWN mechanism and no spawn/fan-out seam exists in the single-frontier model; enforcement is a NAMED acceptance item of the WF-2/WF-6 parallel-frontier fan-out work (arch ruling 2026-07-06)). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.roles.intake.skill_refs",
+        "message": "\"skill_refs\" is declared but not enforced in v1 — the engine records it without acting on it (documentation-only; owner resolution uses preferred_targets). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/src/builtins/workflow-specs/factory-rsi.yaml",
+    "path": "packages/daemon/src/builtins/workflow-specs/factory-rsi.yaml",
+    "yaml": "# OpenRig 0.4.6 canonical single-rig RSI factory MVP (OPR.0.4.6.FAC2).\n#\n# ONE rig + ONE workflow = the recursive-self-improvement factory MVP. The\n# in-band INNER LOOP is a bounded, engine-routed SDLC:\n#   plan → implement → qa_check → review → release\n# under the enforceable max_hops guard (WF-1 sanction); a failing check or\n# review routes back to implement for bounded remediation; exceptions route via\n# the WF-5 dial (orchestrator-first); the release leg PREPARES and holds the ship\n# decision at a human gate (publish is a human act). Runs on the shipped engine\n# with the v0 hardcode seam (target.rig baked + preferred_targets) — no binding\n# layer needed.\n#\n# The RSI recursion is the DECOUPLED dogfood edge: the dogfood seat runs\n# out-of-band and continuously against the SHIPPED product (not a second QA on\n# the build artifact) and feeds its findings into the next plan — ungated, with\n# no loop-stop in the MVP. The exact continuous out-of-band runtime mechanism is\n# refined in a later release; here the inner loop is in-band and dogfood is the\n# out-of-band feed, referenced by the `dogfood` role below.\nworkflow:\n  id: factory-rsi\n  version: 1\n  objective: >\n    Plan, build, check, review, and release one slice as a bounded,\n    deterministic, engine-routed inner loop on a single rig. Dogfood runs\n    out-of-band against the shipped product and feeds its findings into the next\n    plan — the RSI edge, with no human required.\n  target:\n    rig: factory-rsi\n  entry:\n    role: planner\n  coordination_terminal_turn_rule: hot_potato\n  # Exceptions route orchestrator-first (the WF-5 v1.3 dial); the human knows\n  # at altitude via the awareness row. The orchestrator role below is the dial\n  # target — resolved through the same role→preferred_targets mechanism.\n  exception_routing:\n    default: orchestrator\n    orchestrator_role: orchestrator\n  roles:\n    planner:\n      skill_refs: [openrig-user, requirements-writer]\n      preferred_targets: [plan-planner@factory-rsi]\n    implementer:\n      skill_refs: [openrig-user, development-team, test-driven-development]\n      preferred_targets: [build-implementer@factory-rsi]\n    qa:\n      skill_refs: [openrig-user, verification-before-completion]\n      preferred_targets: [check-qa@factory-rsi]\n    reviewer:\n      skill_refs: [openrig-user, review-team, plan-review]\n      preferred_targets: [review-reviewer@factory-rsi]\n    release_manager:\n      skill_refs: [openrig-user, release-manager]\n      preferred_targets: [release-manager@factory-rsi]\n    orchestrator:\n      skill_refs: [openrig-user, orchestration-team]\n      preferred_targets: [orch-lead@factory-rsi]\n    # The dogfood role is DECOUPLED from the inner loop: it runs out-of-band\n    # against the SHIPPED product and feeds findings into the next plan (the RSI\n    # edge). It is intentionally NOT an inner-loop step here; the continuous\n    # out-of-band runtime mechanism is refined in a later release.\n    dogfood:\n      skill_refs: [openrig-user, dogfood, systematic-debugging]\n      preferred_targets: [dogfood-tester@factory-rsi]\n  steps:\n    - id: plan\n      actor_role: planner\n      objective: >\n        Turn the current input — the product corpus on cycle 1, or the recorded\n        out-of-band dogfood findings thereafter — into ONE buildable slice spec.\n        The findings arrive as recorded closure evidence, never chat.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [implementer]\n    - id: implement\n      actor_role: implementer\n      objective: Build the slice per the plan and produce proof for the check.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [qa]\n    - id: qa_check\n      actor_role: qa\n      objective: >\n        Check the built artifact. Passing hands to review; a FAILING check (the\n        artifact's verdict, not the step's dysfunction) routes back to implement\n        for bounded remediation.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [reviewer]\n        on:\n          failed: implement\n    - id: review\n      actor_role: reviewer\n      objective: >\n        Review the artifact (cross-runtime diversity vs the builder). Passing\n        hands to the release prep; a failing review routes back to implement.\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        mode: require\n        suggested_roles: [release_manager]\n        on:\n          failed: implement\n    - id: release_prep\n      actor_role: release_manager\n      objective: >\n        Prepare the release notes, docs/website updates, and the release PR, and\n        record the cycle's release evidence at `proof/PROOF.md` in the workspace\n        (the `evidence_ref` the sign-off gate points at). This is the\n        release-manager's ACTUAL work and it runs BEFORE any gate — the prepared\n        artifacts exist first; publish stays a human act (held at release_signoff).\n      allowed_exits: [handoff, waiting, failed]\n      next_hop:\n        # Explicit step-id route (NOT suggested_roles): release_prep and\n        # release_signoff share the release_manager actor_role, so a role-based\n        # hop would be ambiguous (it would match the first release_manager step).\n        # The prepared artifacts therefore exist BEFORE the human gate below.\n        on:\n          handoff: release_signoff\n    - id: release_signoff\n      actor_role: release_manager\n      objective: >\n        Hold the ship decision at the human gate, against the release artifacts\n        already prepared in release_prep. Approval lets the human proceed to\n        publish; nothing is published automatically.\n      allowed_exits: [done, waiting, failed]\n      gate:\n        target: human@kernel\n        summary: \"RSI cycle clean; release artifacts prepared — sign off to publish (publish is a human act).\"\n        # Workspace-relative pointer to the release evidence release_prep records\n        # (the same convention the shipped gated-release.yaml example uses); it is\n        # produced in the running workspace per cycle, not a slice file.\n        evidence_ref: proof/PROOF.md\n      next_hop:\n        mode: forbid\n  invariants:\n    continuation_required: true\n    preserve_lineage: true\n    closure_required: true\n    allowed_exits: [handoff, waiting, done, failed]\n  loop_guards:\n    # ENFORCEABLE (integer >= 1) — sanctions the bounded remediation loops\n    # (qa_check→implement, review→implement); the WF-1 validator requires it and\n    # the Argo unbounded-recursion lesson demands it. A trip becomes a WF-5\n    # exception; a resume grants one more bounded window (WF-5 FR-4 livelock rail).\n    max_hops: 20\n    spawn_budget: 0\n  closure:\n    success: RSI cycle clean; release candidate prepared and held at the human ship gate.\n    degraded: Cycle stopped with a named blocker or a bounded max_hops trip awaiting resume.\n    failed: Step failed as an exception; preserve the finding and route via the dial.\n",
+    "ok": true,
+    "issues": [
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.continuation_required",
+        "message": "\"invariants.continuation_required\" is declared but not enforced in v1 — the engine records it without acting on it. Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.preserve_lineage",
+        "message": "\"invariants.preserve_lineage\" is declared but not enforced in v1 — the engine records it without acting on it (lineage IS always preserved via chain_of_record; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.closure_required",
+        "message": "\"invariants.closure_required\" is declared but not enforced in v1 — the engine records it without acting on it (closure IS always required by the hot-potato contract; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.closure",
+        "message": "\"closure.{success,degraded,failed}\" is declared but not enforced in v1 — the engine records it without acting on it (display-only messages; no consumer renders them yet). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.loop_guards.spawn_budget",
+        "message": "\"loop_guards.spawn_budget\" is declared but not enforced in v1 — the engine records it without acting on it (it guards a SPAWN mechanism and no spawn/fan-out seam exists in the single-frontier model; enforcement is a NAMED acceptance item of the WF-2/WF-6 parallel-frontier fan-out work (arch ruling 2026-07-06)). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.roles.planner.skill_refs",
+        "message": "\"skill_refs\" is declared but not enforced in v1 — the engine records it without acting on it (documentation-only; owner resolution uses preferred_targets). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/src/builtins/workflow-specs/gated-release.yaml",
+    "path": "packages/daemon/src/builtins/workflow-specs/gated-release.yaml",
+    "yaml": "# OpenRig 0.4.6 spec-language example — the GATED STAGE shape.\n# A human sign-off gate on the final step (compiles to the shipped\n# human-route machinery: tier human-gate + summary + evidence_ref,\n# resolved by `rig queue resolve`), plus per-step harness pins.\nworkflow:\n  id: gated-release\n  version: 1\n  objective: Build, prove, then hold the ship decision at a human gate.\n  roles:\n    builder:\n      preferred_targets: [flow-builder@acme-flow]\n    prover:\n      preferred_targets: [flow-prover@acme-flow, flow-prover2@acme-flow]\n  steps:\n    - id: build\n      actor_role: builder\n      harness: claude-code\n    - id: prove\n      actor_role: prover\n      harness: codex\n    - id: ship-signoff\n      actor_role: prover\n      gate:\n        target: human@kernel\n        summary: \"Release candidate proven; sign off to ship\"\n        evidence_ref: proof/PROOF.md\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/src/builtins/workflow-specs/linear-build.yaml",
+    "path": "packages/daemon/src/builtins/workflow-specs/linear-build.yaml",
+    "yaml": "# OpenRig 0.4.6 spec-language example — the LINEAR PIPELINE shape.\n# Zero WF-2 features: declaration-order routing, byte-identical to the\n# WF-1 engine's behavior (the zero-regression reference shape).\nworkflow:\n  id: linear-build\n  version: 1\n  objective: Move one packet through plan, build, prove in declaration order.\n  roles:\n    planner:\n      preferred_targets: [flow-planner@acme-flow]\n    builder:\n      preferred_targets: [flow-builder@acme-flow]\n    prover:\n      preferred_targets: [flow-prover@acme-flow]\n  steps:\n    - id: plan\n      actor_role: planner\n    - id: build\n      actor_role: builder\n    - id: prove\n      actor_role: prover\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/src/domain/review/gather.ts#1",
+    "path": "packages/daemon/src/domain/review/gather.ts#1",
+    "yaml": "workflow:<name>\n",
+    "parse": {
+      "code": "spec_shape_invalid",
+      "message": "workflow spec at packages/daemon/src/domain/review/gather.ts#1 must be a YAML mapping with a top-level 'workflow:' key"
+    }
+  },
+  {
+    "name": "packages/daemon/src/domain/review/gather.ts#2",
+    "path": "packages/daemon/src/domain/review/gather.ts#2",
+    "yaml": "workflow:\n",
+    "parse": {
+      "code": "spec_shape_invalid",
+      "message": "workflow spec at packages/daemon/src/domain/review/gather.ts#2 is missing the top-level 'workflow:' key"
+    }
+  },
+  {
+    "name": "packages/daemon/test/bundle-routes.test.ts#1",
+    "path": "packages/daemon/test/bundle-routes.test.ts#1",
+    "yaml": "workflow:\n  id: bundle-routed-test\n  version: '1'\n  objective: A bundle-routed workflow fixture\n  target:\n    rig: test-fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@test-fixture\n  steps:\n    - id: produce\n      actor_role: producer\n      objective: Draft.\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/fixtures/workflow-authored-wait.yaml",
+    "path": "packages/daemon/test/fixtures/workflow-authored-wait.yaml",
+    "yaml": "workflow:\n  id: authored-wait\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets: [worker@rig]\n    next:\n      preferred_targets: [next@rig]\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits: [handoff, waiting, failed]\n      re_present_after_seconds: 60\n    - id: follow\n      actor_role: next\n      allowed_exits: [waiting, done, failed]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/p34-terminal-closing-writers.test.ts#1",
+    "path": "packages/daemon/test/p34-terminal-closing-writers.test.ts#1",
+    "yaml": "workflow:\n  id: p34-two-step\n  version: 1\n  objective: P34 terminal-closing writers\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - failed\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/slice-detail-projector-v1.test.ts#1",
+    "path": "packages/daemon/test/slice-detail-projector-v1.test.ts#1",
+    "yaml": "workflow:\n  id: test-loop\n  version: \"1\"\n  objective: 4-step test loop\n  entry:\n    role: a\n  invariants:\n    allowed_exits: [handoff, waiting, done, failed]\n  roles:\n    a:\n      preferred_targets: [a@r]\n    b:\n      preferred_targets: [b@r]\n    c:\n      preferred_targets: [c@r]\n    d:\n      preferred_targets: [d@r]\n  steps:\n    - id: step-a\n      actor_role: a\n      allowed_exits: [handoff]\n      next_hop:\n        suggested_roles: [b]\n    - id: step-b\n      actor_role: b\n      allowed_exits: [handoff]\n      next_hop:\n        suggested_roles: [c]\n    - id: step-c\n      actor_role: c\n      allowed_exits: [handoff]\n      next_hop:\n        suggested_roles: [d]\n    - id: step-d\n      actor_role: d\n      allowed_exits: [done]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/spec-library-workflow-folder-route.test.ts#1",
+    "path": "packages/daemon/test/spec-library-workflow-folder-route.test.ts#1",
+    "yaml": "workflow:\n  id: bad-spec\n  # missing required version, roles, steps\n  objective: This will not parse cleanly\n",
+    "parse": {
+      "code": "spec_field_missing",
+      "message": "workflow spec at packages/daemon/test/spec-library-workflow-folder-route.test.ts#1 is missing required field workflow.version"
+    }
+  },
+  {
+    "name": "packages/daemon/test/spec-library-workflow-scanner.test.ts#1",
+    "path": "packages/daemon/test/spec-library-workflow-scanner.test.ts#1",
+    "yaml": "workflow:\n  id: c1-branch\n  version: 1\n  objective: branch fixture\n  target: { rig: r }\n  entry: { role: builder }\n  roles:\n    builder: { preferred_targets: [b@r] }\n    fixer: { preferred_targets: [f@r] }\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [failed, done]\n      next_hop:\n        on: { failed: remediate }\n    - id: remediate\n      actor_role: fixer\n      allowed_exits: [done]\n  invariants:\n    allowed_exits: [failed, done]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/starter-spec-loader.test.ts#1",
+    "path": "packages/daemon/test/starter-spec-loader.test.ts#1",
+    "yaml": "workflow:\n  id: alpha-spec\n  version: 1\n  objective: alpha test\n  roles:\n    a:\n      preferred_targets: [a@r]\n  steps:\n    - id: only\n      actor_role: a\n      allowed_exits: [handoff]\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "step_cannot_finish",
+        "field": "workflow.steps[0].allowed_exits",
+        "message": "step \"only\" allows exits [\"handoff\"], but none of them can finish it: done is not allowed, and handoff has no next step to route to. Add \"done\" to allowed_exits, or give the step a next step.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/starter-spec-loader.test.ts#2",
+    "path": "packages/daemon/test/starter-spec-loader.test.ts#2",
+    "yaml": "workflow:\n  id: beta-spec\n  version: 1\n  objective: beta test\n  roles:\n    b:\n      preferred_targets: [b@r]\n  steps:\n    - id: only\n      actor_role: b\n      allowed_exits: [handoff]\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "step_cannot_finish",
+        "field": "workflow.steps[0].allowed_exits",
+        "message": "step \"only\" allows exits [\"handoff\"], but none of them can finish it: done is not allowed, and handoff has no next step to route to. Add \"done\" to allowed_exits, or give the step a next step.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/workflow-boot-sweep.test.ts#1",
+    "path": "packages/daemon/test/workflow-boot-sweep.test.ts#1",
+    "yaml": "workflow:\n  id: fr4-sweep\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-bound-rig.test.ts#1",
+    "path": "packages/daemon/test/workflow-bound-rig.test.ts#1",
+    "yaml": "workflow:\n  id: fac1-default-rig\n  version: 1\n  objective: bound-rig default test\n  target:\n    rig: factory-a\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - dev-worker@rig\n  steps:\n    - id: act\n      actor_role: worker\n      allowed_exits:\n        - handoff\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-bound-rig.test.ts#2",
+    "path": "packages/daemon/test/workflow-bound-rig.test.ts#2",
+    "yaml": "workflow:\n  id: fac1-no-target\n  version: 1\n  objective: unbound test\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - dev-worker@rig\n  steps:\n    - id: act\n      actor_role: worker\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-continue-honesty.test.ts#1",
+    "path": "packages/daemon/test/workflow-continue-honesty.test.ts#1",
+    "yaml": "workflow:\n  id: fr8-honesty\n  version: 1\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-continue-honesty.test.ts#2",
+    "path": "packages/daemon/test/workflow-continue-honesty.test.ts#2",
+    "yaml": "workflow:\n  id: fr9-all\n  version: 1\n  roles:\n    worker:\n      skill_refs: [some-skill]\n      preferred_targets:\n        - worker@rig\n  steps:\n    - id: only\n      actor_role: worker\n      allowed_exits:\n        - done\n  invariants:\n    continuation_required: true\n    preserve_lineage: true\n    closure_required: true\n    allowed_exits: [handoff, waiting, done, failed]\n  closure:\n    success: done well\n  loop_guards:\n    max_hops: 5\n    spawn_budget: 2\n",
+    "ok": true,
+    "issues": [
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.continuation_required",
+        "message": "\"invariants.continuation_required\" is declared but not enforced in v1 — the engine records it without acting on it. Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.preserve_lineage",
+        "message": "\"invariants.preserve_lineage\" is declared but not enforced in v1 — the engine records it without acting on it (lineage IS always preserved via chain_of_record; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.invariants.closure_required",
+        "message": "\"invariants.closure_required\" is declared but not enforced in v1 — the engine records it without acting on it (closure IS always required by the hot-potato contract; the flag itself gates nothing). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.closure",
+        "message": "\"closure.{success,degraded,failed}\" is declared but not enforced in v1 — the engine records it without acting on it (display-only messages; no consumer renders them yet). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.loop_guards.spawn_budget",
+        "message": "\"loop_guards.spawn_budget\" is declared but not enforced in v1 — the engine records it without acting on it (it guards a SPAWN mechanism and no spawn/fan-out seam exists in the single-frontier model; enforcement is a NAMED acceptance item of the WF-2/WF-6 parallel-frontier fan-out work (arch ruling 2026-07-06)). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      },
+      {
+        "code": "declared_not_enforced_v1",
+        "field": "workflow.roles.worker.skill_refs",
+        "message": "\"skill_refs\" is declared but not enforced in v1 — the engine records it without acting on it (documentation-only; owner resolution uses preferred_targets). Keep it for forward-compatibility or remove it; it changes nothing today.",
+        "severity": "warning"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/workflow-continue-honesty.test.ts#3",
+    "path": "packages/daemon/test/workflow-continue-honesty.test.ts#3",
+    "yaml": "workflow:\n  id: fr9-clean\n  version: 1\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n  steps:\n    - id: only\n      actor_role: worker\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits: [handoff, waiting, done, failed]\n  loop_guards:\n    max_hops: 5\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-cross-loop-three-step.test.ts#1",
+    "path": "packages/daemon/test/workflow-cross-loop-three-step.test.ts#1",
+    "yaml": "workflow:\n  id: cross-loop-three-step\n  version: 1\n  objective: PRD acceptance criteria load-bearing\n  entry:\n    role: discovery\n  roles:\n    discovery:\n      preferred_targets:\n        - discovery@rig-discovery\n    productlab:\n      preferred_targets:\n        - productlab@rig-productlab\n    delivery:\n      preferred_targets:\n        - delivery@rig-delivery\n  steps:\n    - id: discover\n      actor_role: discovery\n      allowed_exits:\n        - handoff\n    - id: shape\n      actor_role: productlab\n      allowed_exits:\n        - handoff\n    - id: deliver\n      actor_role: delivery\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-deadline-read-surfaces.test.ts#1",
+    "path": "packages/daemon/test/workflow-deadline-read-surfaces.test.ts#1",
+    "yaml": "workflow:\n  id: deadline-read-fixture\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - failed\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-deadline.test.ts#1",
+    "path": "packages/daemon/test/workflow-deadline.test.ts#1",
+    "yaml": "workflow:\n  id: fr2-deadline\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n        - failed\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-deadline.test.ts#2",
+    "path": "packages/daemon/test/workflow-deadline.test.ts#2",
+    "yaml": "workflow:\n  id: fr6-cycle\n  version: 1\n  entry:\n    role: ping\n  roles:\n    ping:\n      preferred_targets:\n        - ping@rig\n    pong:\n      preferred_targets:\n        - pong@rig\n  steps:\n    - id: ping-step\n      actor_role: ping\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - pong\n    - id: pong-step\n      actor_role: pong\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - ping\n  loop_guards:\n    max_hops: 3\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-deadline.test.ts#3",
+    "path": "packages/daemon/test/workflow-deadline.test.ts#3",
+    "yaml": "workflow:\n  id: fr6-linear\n  version: 1\n  entry:\n    role: ping\n  roles:\n    ping:\n      preferred_targets:\n        - ping@rig\n    pong:\n      preferred_targets:\n        - pong@rig\n  steps:\n    - id: first\n      actor_role: ping\n      allowed_exits:\n        - handoff\n    - id: second\n      actor_role: pong\n      allowed_exits:\n        - handoff\n    - id: last\n      actor_role: ping\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-dependency-exception.test.ts#1",
+    "path": "packages/daemon/test/workflow-dependency-exception.test.ts#1",
+    "yaml": "workflow:\n  id: dependency-exception\n  version: 1\n  entry: {role: owner}\n  roles:\n    owner: {preferred_targets: [owner@rig]}\n  exception_routing: {orchestrator_role: owner}\n  steps:\n    - id: root\n      actor_role: owner\n      depends_on: []\n      allowed_exits: [done, failed]\n    - id: left\n      actor_role: owner\n      depends_on: [root]\n      allowed_exits: [done, failed]\n    - id: right\n      actor_role: owner\n      depends_on: [root]\n      allowed_exits: [done, failed]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-dependency-reentry.test.ts#1",
+    "path": "packages/daemon/test/workflow-dependency-reentry.test.ts#1",
+    "yaml": "workflow:\n  id: build-with-signoff\n  version: 1\n  entry: {role: owner}\n  loop_guards: {max_hops: 7}\n  roles:\n    owner: {preferred_targets: [owner@rig]}\n  exception_routing: {orchestrator_role: owner}\n  steps:\n    - id: implement\n      actor_role: owner\n      depends_on: []\n      allowed_exits: [handoff, failed]\n    - id: code_review_codex\n      actor_role: owner\n      depends_on: [implement]\n      allowed_exits: [handoff, failed]\n      next_hop: {on: {failed: implement}}\n    - id: code_review_claude\n      actor_role: owner\n      depends_on: [implement]\n      allowed_exits: [handoff, failed]\n      next_hop: {on: {failed: implement}}\n    - id: ship_signoff\n      actor_role: owner\n      depends_on: [code_review_codex, code_review_claude]\n      allowed_exits: [done, failed]\n      gate: {target: human@host, summary: Ship sign-off, evidence_ref: proof/build.md}\n      next_hop: {on: {failed: implement}}\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-dependency-reentry.test.ts#2",
+    "path": "packages/daemon/test/workflow-dependency-reentry.test.ts#2",
+    "yaml": "workflow:\n  id: straight-through\n  version: 1\n  entry: {role: owner}\n  roles:\n    owner: {preferred_targets: [owner@rig]}\n  exception_routing: {orchestrator_role: owner}\n  steps:\n    - id: a\n      actor_role: owner\n      depends_on: []\n      allowed_exits: [handoff]\n    - id: b\n      actor_role: owner\n      depends_on: [a]\n      allowed_exits: [handoff]\n    - id: c\n      actor_role: owner\n      depends_on: [b]\n      allowed_exits: [handoff]\n    - id: gate\n      actor_role: owner\n      depends_on: [b, c]\n      allowed_exits: [done]\n      gate: {target: human@host, summary: Sign-off, evidence_ref: proof/straight.md}\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-exception-item.test.ts#1",
+    "path": "packages/daemon/test/workflow-exception-item.test.ts#1",
+    "yaml": "workflow:\n  id: wf5-exc-pipeline\n  version: 1\n  objective: WF-5 class-a fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n    orch:\n      preferred_targets:\n        - orch-lead@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - done\n        - failed\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n        - failed\n  exception_routing:\n    orchestrator_role: orch\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-exception-stuck.test.ts#1",
+    "path": "packages/daemon/test/workflow-exception-stuck.test.ts#1",
+    "yaml": "workflow:\n  id: wf5-stuck-pipeline\n  version: 1\n  objective: WF-5 class-b fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    orch:\n      preferred_targets:\n        - orch-lead@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - done\n        - waiting\n  exception_routing:\n    orchestrator_role: orch\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-frontier-guard.test.ts#1",
+    "path": "packages/daemon/test/workflow-frontier-guard.test.ts#1",
+    "yaml": "workflow:\n  id: guard-fixture\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - failed\n      next_hop:\n        suggested_roles:\n          - reviewer\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-human-destination.test.ts#1",
+    "path": "packages/daemon/test/workflow-human-destination.test.ts#1",
+    "yaml": "workflow:\n  id: registered-human-test\n  version: 1\n  roles:\n    worker: { preferred_targets: [worker@rig] }\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits: [done, failed]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-keepalive-arming.test.ts#1",
+    "path": "packages/daemon/test/workflow-keepalive-arming.test.ts#1",
+    "yaml": "workflow:\n  id: fr3-arming\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n        - failed\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n        - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-lifecycle-productization.test.ts#1",
+    "path": "packages/daemon/test/workflow-lifecycle-productization.test.ts#1",
+    "yaml": "workflow:\n  id: lifecycle-parallel\n  version: 1\n  entry:\n    role: root\n  roles:\n    root: { preferred_targets: [root@rig] }\n    left: { preferred_targets: [left@rig] }\n    right: { preferred_targets: [right@rig] }\n    join: { preferred_targets: [join@rig] }\n  exception_routing: { orchestrator_role: root }\n  steps:\n    - id: root\n      actor_role: root\n      allowed_exits: [done, failed]\n    - id: left\n      actor_role: left\n      depends_on: [root]\n      allowed_exits: [done, failed]\n    - id: right\n      actor_role: right\n      depends_on: [root]\n      allowed_exits: [done, failed]\n    - id: join\n      actor_role: join\n      depends_on: [left, right]\n      allowed_exits: [done, failed]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-lifecycle-productization.test.ts#2",
+    "path": "packages/daemon/test/workflow-lifecycle-productization.test.ts#2",
+    "yaml": "workflow:\n  id: lifecycle-acceptance\n  version: 1\n  entry: { role: producer }\n  roles:\n    producer: { preferred_targets: [producer@rig] }\n    gate: { preferred_targets: [gate@rig] }\n  steps:\n    - id: produce\n      actor_role: producer\n      depends_on: []\n      allowed_exits: [handoff]\n    - id: accept\n      actor_role: gate\n      depends_on: [produce]\n      acceptance:\n        candidate: abc123\n        verdicts: [CLEAR]\n        evidence_ref: proof/review.md\n      allowed_exits: [done]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-lifecycle-productization.test.ts#3",
+    "path": "packages/daemon/test/workflow-lifecycle-productization.test.ts#3",
+    "yaml": "workflow:\n  id: lifecycle-mapped-failure\n  version: 1\n  entry: { role: root }\n  roles:\n    root: { preferred_targets: [root@rig] }\n    left: { preferred_targets: [left@rig] }\n    right: { preferred_targets: [right@rig] }\n    repair: { preferred_targets: [repair@rig] }\n  exception_routing: { orchestrator_role: root }\n  steps:\n    - id: root\n      actor_role: root\n      allowed_exits: [done]\n    - id: left\n      actor_role: left\n      depends_on: [root]\n      allowed_exits: [done, failed]\n      next_hop:\n        on:\n          failed: repair\n    - id: right\n      actor_role: right\n      depends_on: [root]\n      allowed_exits: [done, failed]\n    - id: repair\n      actor_role: repair\n      allowed_exits: [done]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-lifecycle-productization.test.ts#4",
+    "path": "packages/daemon/test/workflow-lifecycle-productization.test.ts#4",
+    "yaml": "workflow:\n  id: lifecycle-guarded-cycle\n  version: 1\n  entry: { role: root }\n  loop_guards:\n    max_hops: 1\n  roles:\n    root: { preferred_targets: [root@rig] }\n    left: { preferred_targets: [left@rig] }\n    right: { preferred_targets: [right@rig] }\n  exception_routing: { orchestrator_role: root }\n  steps:\n    - id: root\n      actor_role: root\n      allowed_exits: [done, failed]\n    - id: left\n      actor_role: left\n      depends_on: [root]\n      allowed_exits: [done, failed]\n      next_hop:\n        on:\n          done: root\n    - id: right\n      actor_role: right\n      depends_on: [root]\n      allowed_exits: [done, failed]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-lifecycle-routes.test.ts#1",
+    "path": "packages/daemon/test/workflow-lifecycle-routes.test.ts#1",
+    "yaml": "workflow:\n  id: route-parallel\n  version: 1\n  entry: { role: root }\n  exception_routing: { default: orchestrator, orchestrator_role: root }\n  roles:\n    root: { preferred_targets: [root@rig] }\n    left: { preferred_targets: [left@rig] }\n    right: { preferred_targets: [right@rig] }\n  steps:\n    - { id: root, actor_role: root, allowed_exits: [done, failed] }\n    - { id: left, actor_role: left, depends_on: [root], allowed_exits: [done, failed] }\n    - { id: right, actor_role: right, depends_on: [root], allowed_exits: [done, failed] }\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#1",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#1",
+    "yaml": "workflow:\n  id: fac3-typo-member\n  version: 1\n  objective: FR-5 AC pair — typo member on a registered rig\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - dev-typo1@acme-build\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - handoff\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#2",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#2",
+    "yaml": "workflow:\n  id: fac3-valid-member\n  version: 1\n  objective: FR-5 AC pair — valid existing member is silent\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - dev-builder1@acme-build\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#3",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#3",
+    "yaml": "workflow:\n  id: fac3-cold-member\n  version: 1\n  objective: FR-5 existence-not-liveness — a never-launched member is silent\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - dev-cold1@acme-build\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#4",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#4",
+    "yaml": "workflow:\n  id: fac3-terminal-member\n  version: 1\n  objective: FR-5 any-kind — an explicitly named terminal member is silent\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - ops-term1@acme-build\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#5",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#5",
+    "yaml": "workflow:\n  id: fac3-negatives\n  version: 1\n  objective: FR-5 skip order — raw, human, and unregistered-rig targets raise nothing\n  entry:\n    role: legacy\n  roles:\n    legacy:\n      preferred_targets:\n        - r01-legacy-pane\n    human_reviewer:\n      preferred_targets:\n        - human@kernel\n    ghost:\n      preferred_targets:\n        - dev-x@ghost-rig\n  steps:\n    - id: one\n      actor_role: legacy\n      allowed_exits:\n        - handoff\n    - id: two\n      actor_role: human_reviewer\n      allowed_exits:\n        - handoff\n    - id: three\n      actor_role: ghost\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#6",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#6",
+    "yaml": "workflow:\n  id: fac3-handler-gate\n  version: 1\n  objective: FR-5 F-1 scope — a handler gate's target role is swept\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - dev-builder1@acme-build\n    gatekeeper:\n      preferred_targets:\n        - dev-typo2@acme-build\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - handoff\n    - id: check\n      actor_role: builder\n      gate:\n        target: gatekeeper\n        summary: gate check\n        evidence_ref: proof/x.md\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#7",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#7",
+    "yaml": "workflow:\n  id: fac3-self-gate\n  version: 1\n  objective: FR-5 dedupe — gate target role == actor role probes once\n  entry:\n    role: gatekeeper\n  roles:\n    gatekeeper:\n      preferred_targets:\n        - dev-typo3@acme-build\n  steps:\n    - id: audit\n      actor_role: gatekeeper\n      gate:\n        target: gatekeeper\n        summary: self gate\n        evidence_ref: proof/x.md\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#8",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#8",
+    "yaml": "workflow:\n  id: fac3-aggregation\n  version: 1\n  objective: FR-5 aggregation — one advisory names every declaring step\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - dev-typo1@acme-build\n  steps:\n    - id: build-one\n      actor_role: builder\n      allowed_exits:\n        - handoff\n    - id: build-two\n      actor_role: builder\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-member-advisory.test.ts#9",
+    "path": "packages/daemon/test/workflow-member-advisory.test.ts#9",
+    "yaml": "workflow:\n  id: fac3-composed\n  version: 1\n  objective: one list, two producers — degrade advisory + member advisory compose\n  target:\n    rig: vanished-rig\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - dev-typo1@acme-build\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-projector.test.ts#1",
+    "path": "packages/daemon/test/workflow-projector.test.ts#1",
+    "yaml": "workflow:\n  id: pd-three-step\n  version: 1\n  objective: 3-step transactional-scribe test\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n    finalizer:\n      preferred_targets:\n        - finalizer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - handoff\n    - id: finalize\n      actor_role: finalizer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-projector.test.ts#2",
+    "path": "packages/daemon/test/workflow-projector.test.ts#2",
+    "yaml": "workflow:\n  id: pd-permissive\n  version: 1\n  objective: closure-shape unit tests\n  entry:\n    role: anyone\n  roles:\n    anyone:\n      preferred_targets:\n        - anyone@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: act\n      actor_role: anyone\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n        - failed\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-projector.test.ts#3",
+    "path": "packages/daemon/test/workflow-projector.test.ts#3",
+    "yaml": "workflow:\n  id: loop-regression\n  version: 1\n  entry:\n    role: discovery-router\n  roles:\n    discovery-router:\n      preferred_targets:\n        - discovery@rig\n    qa-tester:\n      preferred_targets:\n        - qa@rig\n  steps:\n    - id: discovery\n      actor_role: discovery-router\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - qa-tester\n    - id: qa\n      actor_role: qa-tester\n      allowed_exits:\n        - handoff\n        - done\n      next_hop:\n        suggested_roles:\n          - discovery-router\n  invariants:\n    allowed_exits:\n      - handoff\n      - done\n  loop_guards:\n    max_hops: 10\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-projector.test.ts#4",
+    "path": "packages/daemon/test/workflow-projector.test.ts#4",
+    "yaml": "workflow:\n  id: pd-resume-after-waiting\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n    finalizer:\n      preferred_targets:\n        - finalizer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n    - id: finalize\n      actor_role: finalizer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-replay-idempotency.test.ts#1",
+    "path": "packages/daemon/test/workflow-replay-idempotency.test.ts#1",
+    "yaml": "workflow:\n  id: fr5-replay\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n        - failed\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-resume.test.ts#1",
+    "path": "packages/daemon/test/workflow-resume.test.ts#1",
+    "yaml": "workflow:\n  id: wf5-resume-pipeline\n  version: 1\n  objective: WF-5 resume fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n    orch:\n      preferred_targets:\n        - orch-lead@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - done\n        - failed\n        - waiting\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n        - failed\n  exception_routing:\n    orchestrator_role: orch\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-resume.test.ts#2",
+    "path": "packages/daemon/test/workflow-resume.test.ts#2",
+    "yaml": "workflow:\n  id: wf5-resume-loop\n  version: 1\n  objective: WF-5 livelock-rail fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - failed\n      next_hop:\n        on:\n          handoff: review\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - handoff\n        - failed\n      next_hop:\n        on:\n          handoff: produce\n  loop_guards:\n    max_hops: 2\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-role-determinism.test.ts#1",
+    "path": "packages/daemon/test/workflow-role-determinism.test.ts#1",
+    "yaml": "workflow:\n  id: fac1-c4-replay\n  version: 1\n  objective: replay pins\n  target:\n    rig: factory-a\n  entry:\n    role: planner\n  roles:\n    planner: {}\n    driver: {}\n  steps:\n    - id: plan\n      actor_role: planner\n      allowed_exits:\n        - handoff\n        - waiting\n    - id: build\n      actor_role: driver\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-role-resolution.test.ts#1",
+    "path": "packages/daemon/test/workflow-role-resolution.test.ts#1",
+    "yaml": "workflow:\n  id: fac1-role-only\n  version: 1\n  objective: role-only two-step flow\n  target:\n    rig: factory-a\n  entry:\n    role: planner\n  roles:\n    planner: {}\n    driver: {}\n  steps:\n    - id: plan\n      actor_role: planner\n      allowed_exits:\n        - handoff\n        - failed\n    - id: build\n      actor_role: driver\n      allowed_exits:\n        - done\n        - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-role-resolution.test.ts#2",
+    "path": "packages/daemon/test/workflow-role-resolution.test.ts#2",
+    "yaml": "workflow:\n  id: fac1-handler-gate\n  version: 1\n  objective: role-only handler gate\n  target:\n    rig: factory-a\n  entry:\n    role: planner\n  roles:\n    planner: {}\n    guard: {}\n  steps:\n    - id: plan\n      actor_role: planner\n      allowed_exits:\n        - handoff\n    - id: gatecheck\n      actor_role: planner\n      gate:\n        target: guard\n        summary: guard check\n",
+    "ok": true,
+    "issues": [
+      {
+        "code": "gate_handler_no_targets",
+        "field": "workflow.steps[1].gate.target",
+        "message": "step \"gatecheck\" gates on handler role \"guard\" which declares no preferred_targets — the gate item will have no seat to route to when it trips. Add preferred_targets to the role before instantiating.",
+        "severity": "warning"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/workflow-role-resolution.test.ts#3",
+    "path": "packages/daemon/test/workflow-role-resolution.test.ts#3",
+    "yaml": "workflow:\n  id: fac1-human-gate\n  version: 1\n  objective: role-only human gate\n  entry:\n    role: planner\n  target:\n    rig: factory-a\n  roles:\n    planner: {}\n  steps:\n    - id: plan\n      actor_role: planner\n      allowed_exits:\n        - handoff\n    - id: signoff\n      actor_role: planner\n      gate:\n        target: human@kernel\n        summary: sign this off\n        evidence_ref: proof/x.md\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-route.test.ts#1",
+    "path": "packages/daemon/test/workflow-route.test.ts#1",
+    "yaml": "workflow:\n  id: route-fixture\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - waiting\n        - failed\n      next_hop:\n        suggested_roles:\n          - reviewer\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n        - failed\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-route.test.ts#2",
+    "path": "packages/daemon/test/workflow-route.test.ts#2",
+    "yaml": "workflow:\n  id: route-repark-fixture\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    handler:\n      preferred_targets:\n        - handler@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - failed\n      next_hop:\n        suggested_roles:\n          - handler\n    - id: review\n      actor_role: handler\n      gate:\n        target: handler\n        summary: needs handler sign-off\n        evidence_ref: proof/review.md\n      allowed_exits:\n        - waiting\n        - done\n        - failed\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-route.test.ts#3",
+    "path": "packages/daemon/test/workflow-route.test.ts#3",
+    "yaml": "workflow:\n  id: route-gated-human\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - done\n        - failed\n      gate:\n        target: human@kernel\n        summary: \"Sign off the walk\"\n        evidence_ref: proof/PROOF.md\n  invariants:\n    allowed_exits:\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-route.test.ts#4",
+    "path": "packages/daemon/test/workflow-route.test.ts#4",
+    "yaml": "workflow:\n  id: route-pinned\n  version: 1\n  entry:\n    role: builder\n  roles:\n    builder:\n      preferred_targets:\n        - codex-seat@rig\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits:\n        - done\n        - failed\n      harness: codex\n  invariants:\n    allowed_exits:\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-routes.test.ts#1",
+    "path": "packages/daemon/test/workflow-routes.test.ts#1",
+    "yaml": "workflow:\n  id: routes-fixture\n  version: 1\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-routes.test.ts#2",
+    "path": "packages/daemon/test/workflow-routes.test.ts#2",
+    "yaml": "workflow:\n  id: rb-remote\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      host: vps-1\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-routes.test.ts#3",
+    "path": "packages/daemon/test/workflow-routes.test.ts#3",
+    "yaml": "workflow:\n  id: rb-harness\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      harness: codex\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-routes.test.ts#4",
+    "path": "packages/daemon/test/workflow-routes.test.ts#4",
+    "yaml": "workflow:\n  id: rb-gate\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      gate:\n        target: nobody-anywhere\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "gate_target_unresolved",
+        "field": "workflow.steps[0].gate.target",
+        "message": "step \"s1\" gates on \"nobody-anywhere\" which is neither a human seat session (human@kernel form) nor a role declared in workflow.roles. Declare the handler role or use a human seat session.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/workflow-routes.test.ts#5",
+    "path": "packages/daemon/test/workflow-routes.test.ts#5",
+    "yaml": "workflow:\n  id: fac1-route-roleonly\n  version: 1\n  entry:\n    role: lead\n  roles:\n    lead: {}\n    worker: {}\n  steps:\n    - id: plan\n      actor_role: lead\n      allowed_exits:\n        - handoff\n    - id: build\n      actor_role: worker\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-runtime.test.ts#1",
+    "path": "packages/daemon/test/workflow-runtime.test.ts#1",
+    "yaml": "workflow:\n  id: fr1-three-step\n  version: 1\n  objective: FR-1 KEEP-fence pin fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@rig\n    reviewer:\n      preferred_targets:\n        - reviewer@rig\n    finalizer:\n      preferred_targets:\n        - finalizer@rig\n  steps:\n    - id: produce\n      actor_role: producer\n      allowed_exits:\n        - handoff\n        - waiting\n        - done\n        - failed\n    - id: review\n      actor_role: reviewer\n      allowed_exits:\n        - handoff\n    - id: finalize\n      actor_role: finalizer\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n      - failed\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-runtime.test.ts#2",
+    "path": "packages/daemon/test/workflow-runtime.test.ts#2",
+    "yaml": "workflow:\n  id: p19-liveness\n  version: 1\n  objective: liveness probe\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - dev-worker@lrig\n  steps:\n    - id: act\n      actor_role: worker\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-spec-cache.test.ts#1",
+    "path": "packages/daemon/test/workflow-spec-cache.test.ts#1",
+    "yaml": "workflow:\n  id: test-three-step\n  version: 1\n  objective: A 3-step test fixture\n  target:\n    rig: workflow-fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@workflow-fixture\n    reviewer:\n      preferred_targets:\n        - reviewer@workflow-fixture\n    finalizer:\n      preferred_targets:\n        - finalizer@workflow-fixture\n  steps:\n    - id: produce\n      actor_role: producer\n      objective: Draft the artifact.\n      allowed_exits:\n        - handoff\n    - id: review\n      actor_role: reviewer\n      objective: Review the artifact.\n      allowed_exits:\n        - handoff\n    - id: finalize\n      actor_role: finalizer\n      objective: Sign off.\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - handoff\n      - waiting\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-spec-folder-scanner.test.ts#1",
+    "path": "packages/daemon/test/workflow-spec-folder-scanner.test.ts#1",
+    "yaml": "workflow:\n  id: folder-test\n  version: '1'\n  objective: A folder-scan fixture\n  target:\n    rig: folder-fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@folder-fixture\n  steps:\n    - id: produce\n      actor_role: producer\n      objective: Draft.\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-spec-folder-scanner.test.ts#2",
+    "path": "packages/daemon/test/workflow-spec-folder-scanner.test.ts#2",
+    "yaml": "workflow:\n  id: bad-spec\n  # missing required 'version', 'roles', 'steps'\n  objective: This will not parse cleanly\n",
+    "parse": {
+      "code": "spec_field_missing",
+      "message": "workflow spec at packages/daemon/test/workflow-spec-folder-scanner.test.ts#2 is missing required field workflow.version"
+    }
+  },
+  {
+    "name": "packages/daemon/test/workflow-spec-folder-scanner.test.ts#3",
+    "path": "packages/daemon/test/workflow-spec-folder-scanner.test.ts#3",
+    "yaml": "workflow:\n  id: folder-test-2\n  version: '1'\n  objective: second fixture\n  target:\n    rig: folder-fixture\n  entry:\n    role: producer\n  roles:\n    producer:\n      preferred_targets:\n        - producer@folder-fixture\n  steps:\n    - id: produce\n      actor_role: producer\n      objective: Draft.\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-specs-diagnostic-migration.test.ts#1",
+    "path": "packages/daemon/test/workflow-specs-diagnostic-migration.test.ts#1",
+    "yaml": "workflow:\n  id: valid-spec\n  version: '1'\n  objective: test fixture\n  target:\n    rig: rig-fix\n  entry:\n    role: a\n  roles:\n    a:\n      preferred_targets:\n        - a@rig-fix\n  steps:\n    - id: s1\n      actor_role: a\n      objective: x\n      allowed_exits:\n        - done\n  invariants:\n    allowed_exits:\n      - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-validation-strictness.test.ts#1",
+    "path": "packages/daemon/test/workflow-validation-strictness.test.ts#1",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-validation-strictness.test.ts#2",
+    "path": "packages/daemon/test/workflow-validation-strictness.test.ts#2",
+    "yaml": "workflow:\n  id: unreachable\n  version: 1\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n      next_hop:\n        mode: forbid\n    - id: orphan\n      actor_role: worker\n      allowed_exits:\n        - done\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "step_unreachable",
+        "field": "workflow.steps",
+        "message": "step \"orphan\" is unreachable: neither the structural routing walk from the entry step (\"work\") nor any branch edge reaches it. Fix the next_hop edges/branches or remove the dead step.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/workflow-validation-strictness.test.ts#3",
+    "path": "packages/daemon/test/workflow-validation-strictness.test.ts#3",
+    "yaml": "workflow:\n  id: cyclic\n  version: 1\n  roles:\n    ping:\n      preferred_targets:\n        - ping@rig\n    pong:\n      preferred_targets:\n        - pong@rig\n  steps:\n    - id: ping-step\n      actor_role: ping\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - pong\n    - id: pong-step\n      actor_role: pong\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - ping\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "cycle_without_max_hops",
+        "field": "workflow.loop_guards.max_hops",
+        "message": "the routing graph cycles (ping-step → pong-step → ping-step) and workflow.loop_guards.max_hops is not declared — the instance would hop unbounded. Loops (including branch-created remediation loops) are legitimate only under an enforced guard: declare loop_guards.max_hops to sanction the cycle.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "packages/daemon/test/workflow-validation-strictness.test.ts#4",
+    "path": "packages/daemon/test/workflow-validation-strictness.test.ts#4",
+    "yaml": "workflow:\n  id: plain-linear\n  version: 1\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n  steps:\n    - id: a\n      actor_role: worker\n    - id: b\n      actor_role: worker\n    - id: c\n      actor_role: worker\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#1",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#1",
+    "yaml": "workflow:\n  id: wf2-branched\n  version: 1\n  loop_guards:\n    max_hops: 8\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    fixer:\n      preferred_targets: [fixer@rig]\n    prover:\n      preferred_targets: [prover@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        on: { failed: remediate }\n    - id: verify\n      actor_role: prover\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        on: { failed: remediate }\n    - id: remediate\n      actor_role: fixer\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        suggested_roles: [prover]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#2",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#2",
+    "yaml": "workflow:\n  id: wf2-linear\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    prover:\n      preferred_targets: [prover@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, waiting, done, failed]\n    - id: verify\n      actor_role: prover\n      allowed_exits: [handoff, waiting, done, failed]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#3",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#3",
+    "yaml": "workflow:\n  id: wf2-harness\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [claude-seat@rig, codex-seat@rig]\n    prover:\n      preferred_targets: [codex-seat@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, done]\n      harness: codex\n    - id: prove\n      actor_role: prover\n      allowed_exits: [done]\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#4",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#4",
+    "yaml": "workflow:\n  id: wf2-gated-human\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    prover:\n      preferred_targets: [prover@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, done]\n    - id: signoff\n      actor_role: prover\n      allowed_exits: [done]\n      gate:\n        target: human@kernel\n        summary: \"Sign off the release\"\n        evidence_ref: proof/PROOF.md\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#5",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#5",
+    "yaml": "workflow:\n  id: wf2-gated-handler\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    checker:\n      preferred_targets: [checker@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, done]\n    - id: checkpoint\n      actor_role: builder\n      allowed_exits: [done]\n      gate:\n        target: checker\n        summary: \"Handler check before close\"\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#6",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#6",
+    "yaml": "workflow:\n  id: wf2-gated-handler-pinned\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    checker:\n      preferred_targets: [claude-check@rig, codex-check@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, done]\n    - id: checkpoint\n      actor_role: builder\n      allowed_exits: [done]\n      harness: codex\n      gate:\n        target: checker\n        summary: \"Pinned handler check\"\n",
+    "ok": true,
+    "issues": []
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#7",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#7",
+    "yaml": "workflow:\n  id: legacy-gates\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      gates: [approval]\n",
+    "parse": {
+      "code": "spec_gates_removed",
+      "message": "workflow spec at packages/daemon/test/workflow-wf2-spec-language.test.ts#7: workflow.steps[0].gates is removed in 0.4.6. The string list could not carry a target/summary/evidence without becoming a magic-string mini-grammar, and it was never enforced. Declare the structured step-level gate instead:\n  gate:\n    target: <human seat session or declared role name>\n    summary: <plain-language ask>          # required for a human target\n    evidence_ref: <durable artifact path>  # required for a human target"
+    }
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#8",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#8",
+    "yaml": "workflow:\n  id: legacy-prefer\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      next_hop:\n        mode: prefer\n        suggested_roles: [a]\n",
+    "parse": {
+      "code": "spec_prefer_mode_removed",
+      "message": "workflow spec at packages/daemon/test/workflow-wf2-spec-language.test.ts#8: workflow.steps[0].next_hop.mode \"prefer\" is removed in 0.4.6. It never had distinct behavior — routing treated it identically to omitting mode. Delete the mode line (same routing), or use \"require\" (route ONLY via suggested_roles; no declaration-order fallback) / \"forbid\" (terminal step)."
+    }
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#9",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#9",
+    "yaml": "workflow:\n  id: bad-branch-key\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      next_hop:\n        on: { success: s1 }\n",
+    "parse": {
+      "code": "spec_branch_key_invalid",
+      "message": "workflow spec at packages/daemon/test/workflow-wf2-spec-language.test.ts#9: workflow.steps[0].next_hop.on key \"success\" is not a recorded exit. Branch keys are the closed exit enum ONLY: [handoff, waiting, done, failed] — branching on anything else (free text, identity, evidence JSON) is deliberately unsupported (branch purity)."
+    }
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#10",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#10",
+    "yaml": "workflow:\n  id: bad-harness\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      harness: terminal\n",
+    "parse": {
+      "code": "spec_harness_invalid",
+      "message": "workflow spec at packages/daemon/test/workflow-wf2-spec-language.test.ts#10: workflow.steps[0].harness must be one of the AGENT harnesses [claude-code, codex] (got \"terminal\"). A terminal node is not an agent harness — a workflow step cannot be pinned to it. Pi Agent joins the value space in 0.4.7 when its adapter lands."
+    }
+  },
+  {
+    "name": "packages/daemon/test/workflow-wf2-spec-language.test.ts#11",
+    "path": "packages/daemon/test/workflow-wf2-spec-language.test.ts#11",
+    "yaml": "workflow:\n  id: bad-gate-key\n  version: 1\n  roles:\n    a: { preferred_targets: [a@rig] }\n  steps:\n    - id: s1\n      actor_role: a\n      gate:\n        target: human@kernel\n        summary: ok\n        evidence_ref: proof/x.md\n        condition: always\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at packages/daemon/test/workflow-wf2-spec-language.test.ts#11: unknown key \"condition\" at workflow.steps[0].gate. Allowed keys: [target, summary, evidence_ref]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "strict-unknown-top",
+    "path": "strict-unknown-top",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  retry_policy: aggressive\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at strict-unknown-top: unknown key \"retry_policy\" at workflow. Allowed keys: [id, version, objective, target, entry, roles, steps, invariants, closure, loop_guards, exception_routing, coordination_terminal_turn_rule, context_refs]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "strict-unknown-step",
+    "path": "strict-unknown-step",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      harnesss: codex\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at strict-unknown-step: unknown key \"harnesss\" at workflow.steps[0]. Allowed keys: [id, actor_role, objective, allowed_exits, re_present_after_seconds, re_present_max_seconds, next_hop, harness, host, gate, depends_on, acceptance]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "strict-unknown-role",
+    "path": "strict-unknown-role",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      fallback: none\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at strict-unknown-role: unknown key \"fallback\" at workflow.roles.worker. Allowed keys: [skill_refs, preferred_targets]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "strict-unknown-hop",
+    "path": "strict-unknown-hop",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        on_failure: retry\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at strict-unknown-hop: unknown key \"on_failure\" at workflow.steps[0].next_hop. Allowed keys: [mode, suggested_roles, on]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "strict-unknown-entry",
+    "path": "strict-unknown-entry",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n    fallback_role: next\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at strict-unknown-entry: unknown key \"fallback_role\" at workflow.entry. Allowed keys: [role]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "strict-phantom-role",
+    "path": "strict-phantom-role",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - phantom-role\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "next_hop_role_not_declared",
+        "field": "workflow.steps[0].next_hop.suggested_roles",
+        "message": "step \"work\" suggests next-hop role \"phantom-role\" which is not declared in workflow.roles. Declare the role or fix the spelling — the edge can never route.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "strict-role-no-step",
+    "path": "strict-role-no-step",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n    ghost:\n      preferred_targets:\n        - ghost@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - ghost\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "next_hop_role_has_no_step",
+        "field": "workflow.steps[0].next_hop.suggested_roles",
+        "message": "step \"work\" suggests next-hop role \"ghost\" but no step declares actor_role \"ghost\" — resolveNextStep matches suggestions against step actor_roles, so this edge can never route. Add a step for the role or fix the suggestion.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "strict-entry-mismatch",
+    "path": "strict-entry-mismatch",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: next\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "entry_role_mismatch",
+        "field": "workflow.entry.role",
+        "message": "workflow.entry.role is \"next\" but the authoritative entry is steps[0] (\"work\", actor_role \"worker\") — the runtime instantiates from steps[0], so a differing entry.role would lie on every surface that reports it. Reorder steps so the intended entry step is first, or fix/remove entry.role.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "strict-extra-root",
+    "path": "strict-extra-root",
+    "yaml": "workflow:\n  id: strictness\n  version: 1\n  entry:\n    role: worker\n  roles:\n    worker:\n      preferred_targets:\n        - worker@rig\n    next:\n      preferred_targets:\n        - next@rig\n  steps:\n    - id: work\n      actor_role: worker\n      allowed_exits:\n        - handoff\n      next_hop:\n        suggested_roles:\n          - next\n    - id: follow\n      actor_role: next\n      allowed_exits:\n        - done\nextra_root_key: true\n",
+    "parse": {
+      "code": "spec_unknown_key",
+      "message": "workflow spec at strict-extra-root: unknown key \"extra_root_key\" at (document root). Allowed keys: [workflow]. Unknown keys were silently DROPPED before 0.4.6 (the spec looked accepted while the field did nothing); they now fail loud — remove the key or fix its spelling."
+    }
+  },
+  {
+    "name": "branch-missing-target",
+    "path": "branch-missing-target",
+    "yaml": "workflow:\n  id: wf2-branched\n  version: 1\n  loop_guards:\n    max_hops: 8\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    fixer:\n      preferred_targets: [fixer@rig]\n    prover:\n      preferred_targets: [prover@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        on: { failed: nowhere }\n    - id: verify\n      actor_role: prover\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        on: { failed: remediate }\n    - id: remediate\n      actor_role: fixer\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        suggested_roles: [prover]\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "branch_target_not_found",
+        "field": "workflow.steps[0].next_hop.on.failed",
+        "message": "step \"build\" branches exit \"failed\" to step \"nowhere\" which does not exist. Fix the step id or remove the branch — the edge can never route.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "branch-unguarded-cycle",
+    "path": "branch-unguarded-cycle",
+    "yaml": "workflow:\n  id: wf2-branched\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    fixer:\n      preferred_targets: [fixer@rig]\n    prover:\n      preferred_targets: [prover@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        on: { failed: remediate }\n    - id: verify\n      actor_role: prover\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        on: { failed: remediate }\n    - id: remediate\n      actor_role: fixer\n      allowed_exits: [handoff, waiting, done, failed]\n      next_hop:\n        suggested_roles: [prover]\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "cycle_without_max_hops",
+        "field": "workflow.loop_guards.max_hops",
+        "message": "the routing graph cycles (verify → remediate → verify) and workflow.loop_guards.max_hops is not declared — the instance would hop unbounded. Loops (including branch-created remediation loops) are legitimate only under an enforced guard: declare loop_guards.max_hops to sanction the cycle.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "gate-missing-evidence",
+    "path": "gate-missing-evidence",
+    "yaml": "workflow:\n  id: wf2-gated-human\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    prover:\n      preferred_targets: [prover@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, done]\n    - id: signoff\n      actor_role: prover\n      allowed_exits: [done]\n      gate:\n        target: human@kernel\n        summary: \"Sign off the release\"\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "gate_human_fields_missing",
+        "field": "workflow.steps[1].gate",
+        "message": "step \"signoff\" gates on human seat human@kernel but is missing evidence_ref. A human-routed gate item must carry a plain-language summary AND a durable evidence pointer (the shipped human-route contract) — add both.",
+        "severity": "error"
+      }
+    ]
+  },
+  {
+    "name": "gate-unresolved",
+    "path": "gate-unresolved",
+    "yaml": "workflow:\n  id: wf2-gated-handler\n  version: 1\n  roles:\n    builder:\n      preferred_targets: [builder@rig]\n    checker:\n      preferred_targets: [checker@rig]\n  steps:\n    - id: build\n      actor_role: builder\n      allowed_exits: [handoff, done]\n    - id: checkpoint\n      actor_role: builder\n      allowed_exits: [done]\n      gate:\n        target: nobody-anywhere\n        summary: \"Handler check before close\"\n",
+    "ok": false,
+    "issues": [
+      {
+        "code": "gate_target_unresolved",
+        "field": "workflow.steps[1].gate.target",
+        "message": "step \"checkpoint\" gates on \"nobody-anywhere\" which is neither a human seat session (human@kernel form) nor a role declared in workflow.roles. Declare the handler role or use a human seat session.",
+        "severity": "error"
+      }
+    ]
+  }
+]

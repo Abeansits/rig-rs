@@ -64,7 +64,6 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
         cancel.clone(),
         home.clone(),
     );
-    *app.queue.lock().await = loaded;
     let max_cursor = {
         let reading = Arc::clone(&app.store);
         tokio::task::spawn_blocking(move || reading.read(crewmux_store::max_receipt_cursor))
@@ -75,6 +74,7 @@ async fn serve(home: std::path::PathBuf, store: Arc<Store>) -> Result<(), Error>
     app.launch_workers().await;
     crate::compaction::load(&app).await?;
     crate::compaction::drain_spools(&app).await?;
+    crate::workflow::boot(&app, loaded).await?;
     reconcile(&app).await?;
     let sock = crewmux_api::daemon_socket(&home);
     let pid = home.join("run/daemon.pid");

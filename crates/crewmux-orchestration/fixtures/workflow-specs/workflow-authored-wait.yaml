@@ -1,0 +1,18 @@
+workflow:
+  id: authored-wait
+  version: 1
+  entry:
+    role: worker
+  roles:
+    worker:
+      preferred_targets: [worker@rig]
+    next:
+      preferred_targets: [next@rig]
+  steps:
+    - id: work
+      actor_role: worker
+      allowed_exits: [handoff, waiting, failed]
+      re_present_after_seconds: 60
+    - id: follow
+      actor_role: next
+      allowed_exits: [waiting, done, failed]

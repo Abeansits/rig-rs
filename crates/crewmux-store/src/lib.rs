@@ -14,6 +14,7 @@ mod queue;
 mod repo;
 mod store;
 mod token;
+mod workflow;
 
 pub use attempt::{AttemptRow, delete_attempt, get_attempt, list_attempts, upsert_attempt};
 pub use durability::{
@@ -41,3 +42,4 @@ pub use repo::{Db, clear_rig};
 pub use rusqlite::Connection;
 pub use store::Store;
 pub use token::{put_seat_token, seat_token};
+pub use workflow::{SeatCoord, commit_projection, list_seat_coords, load_workflow_document};

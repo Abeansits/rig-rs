@@ -178,6 +178,13 @@ const LINEAGE_START: &str = "
 ALTER TABLE pane_lineage ADD COLUMN started_ticks INTEGER;
 ";
 
+const WORKFLOW: &str = "
+CREATE TABLE workflow_documents (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    doc TEXT NOT NULL
+);
+";
+
 const DURABILITY: &str = "
 CREATE TABLE seat_restore (
     seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
@@ -232,9 +239,12 @@ CREATE TABLE compaction_attempts (
 CREATE INDEX idx_compaction_attempts_seat ON compaction_attempts (seat_key);
 ";
 
-/// Rig tables, the queue, chat, snapshot/restore, health, pane lineage, then attempts.
+/// Rig tables, the queue, chat, snapshot/restore, health, pane lineage,
+/// the workflow document, then compaction attempts.
 ///
-/// Migrations 1–7 match a database written by main. Compaction attempts are migration 8.
+/// Migrations 1–8 match a database written by main. Compaction attempts are
+/// migration 9. A database this branch wrote when compaction was migration 8
+/// (no `workflow_documents` table) fails closed on open.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
@@ -244,9 +254,10 @@ pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
         M::up(HEALTH),
         M::up(LINEAGE),
         M::up(LINEAGE_START),
+        M::up(WORKFLOW),
         M::up(COMPACTION),
     ]),
-    len: 8,
+    len: 9,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

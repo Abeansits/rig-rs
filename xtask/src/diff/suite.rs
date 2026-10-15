@@ -26,6 +26,12 @@ fn self_one(case: &LoadedCase, bin: &Path) -> Result<CaseReport, Error> {
     if let Some(reason) = &case.needs {
         return Ok(ignored(&case.case.id, reason));
     }
+    if chains_response(&case.case) {
+        return Ok(ignored(
+            &case.case.id,
+            "the previous command's JSON, which the self-mode stub does not return",
+        ));
+    }
     let left = execute_rs(case, bin)?;
     let right = execute_rs(case, bin)?;
     // expected_diff names a TypeScript-versus-rig difference. Both sides here are
@@ -94,6 +100,18 @@ fn scope_for(case: &LoadedCase, snaps: &Path) -> Result<Option<ExpectedScope>, E
         covers: case.case.covers.clone(),
         rust_snapshot,
     }))
+}
+
+fn chains_response(case: &super::types::DiffCase) -> bool {
+    case.steps.iter().any(|step| match step {
+        super::types::Step::Cli { argv } => argv.iter().any(|arg| arg.contains("{{")),
+        super::types::Step::Http { .. }
+        | super::types::Step::ReadFile(_)
+        | super::types::Step::WriteFile { .. }
+        | super::types::Step::TmuxCalls
+        | super::types::Step::McpTools
+        | super::types::Step::EnsureRig { .. } => false,
+    })
 }
 
 fn ignored(id: &str, reason: &str) -> CaseReport {
