@@ -702,7 +702,9 @@ name = "crewmux-orchestration"
 version = "0.0.0"
 dependencies = [
  "crewmux-core",
+ "crewmux-messaging",
  "crewmux-spec",
+ "crewmux-types",
  "rustix",
  "serde",
  "serde_json",

@@ -145,6 +145,8 @@ pub enum Step {
         path: String,
         /// JSON body, when the verb carries one.
         body: Option<Value>,
+        /// When false, the call only proves the daemon is up. Its body is not observed.
+        record: bool,
     },
     /// Read a file relative to the hermetic `HOME`.
     ReadFile(PathBuf),
@@ -159,6 +161,15 @@ pub enum Step {
     TmuxCalls,
     /// Speak `initialize` and `tools/list` to the side's MCP stdio server.
     McpTools,
+    /// Register `name` so a canonical `member@name` destination is admitted.
+    ///
+    /// The response is not observed. TypeScript creates the rig by name.
+    /// rig-rs inserts that rig plus a `witness` seat that is not a workflow
+    /// target, so both sides report the same missing-member advisories.
+    EnsureRig {
+        /// Rig name, such as `acme-flow`.
+        name: String,
+    },
 }
 
 /// HTTP verb used by [`Step::Http`].
@@ -237,8 +248,13 @@ impl Observation {
 pub enum NormRule {
     /// Crockford base32 [`ULID`](https://github.com/ulid/spec) (26 characters).
     Ulid,
-    /// RFC 3339 timestamps.
+    /// RFC 3339 timestamps. The same instant keeps one placeholder.
     Timestamp,
+    /// RFC 3339 timestamps, numbered by occurrence.
+    ///
+    /// Two calls in one millisecond stay distinct, so a side that reuses an
+    /// instant does not shift the later placeholders.
+    TimestampEach,
     /// Absolute paths under the scratch root or a system temp directory.
     AbsPath,
     /// TCP ports in `host:port` form (`127.0.0.1`, `localhost`, `::1`).
@@ -248,6 +264,10 @@ pub enum NormRule {
     /// dash's `getcwd() failed` line, including the JSON-escaped `\\n` form.
     /// Stub cases opt in; other cases keep the line so a real error is visible.
     Getcwd,
+    /// Re-serialize each JSON line with sorted object keys.
+    JsonCanon,
+    /// `qitem-<ULID>` and `qitem-<14 digits>-<8 hex>`. Apply before [`Self::Ulid`].
+    Qitem,
     /// Caller-supplied replacement. Every match becomes the static string.
     Custom(Regex, &'static str),
 }

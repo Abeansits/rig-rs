@@ -28,6 +28,7 @@ mod slice4;
 mod slice8;
 mod spawn;
 mod tui_cmd;
+mod workflow;
 
 pub use error::Error;
 pub use output::{error_line, print_stderr, print_stdout};
@@ -161,6 +162,8 @@ enum Commands {
     Checkpoint(slice8::CheckpointArgs),
     /// Browse, compose, and deliver context packs.
     Context(context_cmd::ContextArgs),
+    /// Declarative workflow runtime. run runs, watch watches, neither advances.
+    Workflow(workflow::WorkflowArgs),
 }
 
 /// Run one CLI invocation. The process exit code is the `Ok` value, or [`Error::code`].
@@ -212,6 +215,7 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::CrashCart(args) => slice8::crash_cart(&args),
         Commands::Checkpoint(args) => slice8::checkpoint(&args),
         Commands::Context(args) => context_cmd::run(&args),
+        Commands::Workflow(args) => workflow::run(&args),
     }
 }
 

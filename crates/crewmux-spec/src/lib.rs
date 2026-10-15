@@ -5,10 +5,12 @@
 pub mod context;
 mod error;
 mod model;
+pub mod workflow;
 pub mod yaml;
 
 pub use error::SpecError;
 pub use model::{LaunchBudgetSpec, RigSpec, SeatSpec};
+pub use workflow::{WorkflowParseError, WorkflowSpec, parse_workflow};
 
 use std::collections::BTreeSet;
 use std::path::Path;

@@ -22,11 +22,13 @@ struct Patterns {
     socket: Regex,
     port: Regex,
     temp: Regex,
+    qitem: Regex,
 }
 
 #[derive(Default)]
 struct Masks {
     ulid: BTreeMap<String, String>,
+    qitem: BTreeMap<String, String>,
     timestamp: BTreeMap<String, String>,
     path: BTreeMap<String, String>,
     port: BTreeMap<String, String>,
@@ -188,9 +190,12 @@ fn apply_one(
     match rule {
         NormRule::Ulid => replace_ulid(&patterns.ulid, text, &mut masks.ulid),
         NormRule::Timestamp => replace_whole(&patterns.timestamp, text, &mut masks.timestamp, "TS"),
+        NormRule::TimestampEach => replace_each(&patterns.timestamp, text, "TS"),
         NormRule::SocketPath => replace_whole(&patterns.socket, text, &mut masks.socket, "SOCK"),
         NormRule::Port => replace_ports(&patterns.port, text, masks),
         NormRule::Getcwd => strip_dash_getcwd(text),
+        NormRule::JsonCanon => json_canon(text),
+        NormRule::Qitem => replace_whole(&patterns.qitem, text, &mut masks.qitem, "QITEM"),
         NormRule::AbsPath => {
             let with_roots = replace_roots(text, roots, masks);
             replace_whole(&patterns.temp, &with_roots, &mut masks.path, "PATH")
@@ -230,6 +235,16 @@ fn is_ulid_char(ch: char) -> bool {
         ch.to_ascii_uppercase(),
         '0'..='9' | 'A'..='H' | 'J' | 'K' | 'M' | 'N' | 'P'..='T' | 'V'..='Z'
     )
+}
+
+fn replace_each(regex: &Regex, text: &str, prefix: &str) -> String {
+    let mut n = 0u32;
+    regex
+        .replace_all(text, |_caps: &Captures<'_>| {
+            n = n.saturating_add(1);
+            format!("<{prefix}:{n}>")
+        })
+        .into_owned()
 }
 
 fn replace_whole(
@@ -303,8 +318,28 @@ impl Patterns {
             socket: compile_re(SOCKET_RE)?,
             port: compile_re(PORT_RE)?,
             temp: compile_re(TEMP_RE)?,
+            qitem: compile_re(r"(?i)qitem-(?:[0-9A-HJKMNP-TV-Z]{26}|\d{14}-[0-9a-f]{8})")?,
         })
     }
+}
+
+fn json_canon(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        let newline = line.ends_with('\n');
+        let trimmed = line.trim_end_matches('\n');
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed)
+            && let Ok(encoded) = serde_json::to_string(&value)
+        {
+            out.push_str(&encoded);
+            if newline {
+                out.push('\n');
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 fn compile_re(pattern: &str) -> Result<Regex, Error> {
