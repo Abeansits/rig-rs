@@ -50,3 +50,7 @@ AC1–AC8 pass, the workflow ledger rows are closed (no `todo`), and notice head
 
 ## Dependencies
 After PR #1. **Needs slices 0, 1 and 4** (queue transaction API, nudges, watchdog/events). **Not** 2/3. Slices 15–19 depend on this one (TS order: workflow first).
+
+## AC note: runtime timer firing (added 2026-10-15, PM ruling)
+
+Slice 14 arms and disarms deadline, keepalive and owner-wake watchdog jobs but does not fire them at runtime; those ledger rows stay `todo`. Firing is owned by the slice 4 wake ladder (watchdog outbox loop), per Architect. Since slice 4 is already merged without it, it is tracked as a slice 4 follow-up in #30, together with the slice 12 todo rows.
