@@ -110,6 +110,16 @@ fn release_one(runtime: &mut Runtime, session: &str) -> bool {
     true
 }
 
+/// A failed compact left the prep stopped. The next one may start.
+fn stopped_failure(runtime: &Runtime, session: &str, prep: &PreparationState) -> bool {
+    prep.active
+        && prep.status == PrepStatus::Stopped
+        && runtime
+            .enforcer
+            .manual_stage(session)
+            .is_some_and(|stage| !stage.is_open())
+}
+
 fn terminal_stage(runtime: &Runtime, attempt_id: &str) -> Option<ManualCompactionStage> {
     runtime.book.attempts().iter().rev().find_map(|attempt| {
         if attempt.id.as_str() != attempt_id {
@@ -157,6 +167,10 @@ pub(super) fn expire_preps(runtime: &mut Runtime, now: u64) {
             )
         ) && let Some(prep) = runtime.preps.get_mut(&session)
         {
+            // The attempt failed. Leaving it active makes the next compact
+            // return `preparation_stopped` instead of starting again.
+            prep.active = false;
+            prep.attempt_id.clear();
             prep.status = PrepStatus::Stopped;
             prep.reason = Some(
                 EnforcerSkipReason::PreparationIncomplete
@@ -207,7 +221,14 @@ struct Step {
 async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
     let mut guard = app.compaction.lock().await;
     let session = seat.name.as_str();
-    let prep = guard.prep(session);
+    let stored = guard.prep(session);
+    // A stopped prep whose manual stage already failed must not block the next
+    // compact, and must not resume into `/compact`.
+    let prep = if stopped_failure(&guard, session, &stored) {
+        PreparationState::idle()
+    } else {
+        stored
+    };
     let attempt_id = if !prep.active || prep.attempt_id.is_empty() {
         guard.book.next_manual_id(&seat.id.to_string()).0
     } else {
@@ -414,9 +435,8 @@ fn remember(
             prep.active = true;
             prep.status = PrepStatus::Waiting;
             prep.map_complete = skip_map;
-            if prep.deadline_ms.is_none() {
-                prep.deadline_ms = Some(now_ms().saturating_add(wait_ms()));
-            }
+            prep.reason = None;
+            prep.deadline_ms = Some(now_ms().saturating_add(wait_ms()));
         }
         EnforcerOutcome::SendCompact(_) => {
             prep.active = true;
@@ -427,11 +447,15 @@ fn remember(
             prep.active = true;
             prep.status = PrepStatus::Waiting;
         }
+        // An in-flight compact stays `CompactSent`. Marking it stopped is what
+        // made the following compact return `preparation_stopped`.
+        EnforcerOutcome::Skip(EnforcerSkipReason::AlreadyInProgress)
+        | EnforcerOutcome::SendRestore(_) => {}
         EnforcerOutcome::Skip(_) => {
-            prep.active = true;
+            prep.active = false;
+            prep.attempt_id.clear();
             prep.status = PrepStatus::Stopped;
         }
-        EnforcerOutcome::SendRestore(_) => {}
     }
     runtime.set_prep(session, prep);
 }

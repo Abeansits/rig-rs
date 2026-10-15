@@ -37,6 +37,43 @@ async fn compact_after_abort_sends_again() {
 }
 
 #[tokio::test]
+async fn compact_after_send_failed_then_incomplete_sends_again() {
+    let rig = boot("failed-prep", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    rig.mux
+        .set_capture(Capture::new("booting\n".to_owned(), (0, 0)))
+        .await;
+    let body = br#"{"seat":"claude"}"#;
+    let first = trigger(&rig.app, body).await.expect("send while not ready");
+    assert_eq!(first["reason"], "send_failed", "{first}");
+    {
+        let mut guard = rig.app.compaction.lock().await;
+        let prep = guard.preps.get_mut("claude").expect("prep");
+        assert!(prep.active);
+        prep.deadline_ms = Some(0);
+    }
+    let failed = trigger(&rig.app, body).await;
+    let message = failed.expect_err("deadline").to_string();
+    assert!(message.contains("preparation_incomplete"), "{message}");
+    let rule = "─".repeat(40);
+    rig.mux
+        .set_capture(Capture::new(
+            format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"),
+            (0, 0),
+        ))
+        .await;
+    let second = trigger(&rig.app, br#"{"seat":"claude","skip_map":true}"#)
+        .await
+        .expect("compact after a failed prep");
+    assert_eq!(second["compact_sent"], true, "{second}");
+    assert!(
+        !second.to_string().contains("preparation_stopped"),
+        "{second}"
+    );
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
 async fn compact_after_cancel_sends_again() {
     let rig = boot("cancel", Duration::from_millis(800)).await;
     watch(Arc::clone(&rig.mux), rig.transcript.clone());

@@ -129,17 +129,40 @@ fn trust_ok(folder: Option<&std::path::PathBuf>, seat: &SeatContext<'_>) -> bool
     if same_dir(seat.cwd, seat.home) {
         return false;
     }
-    folder.is_some_and(|folder| same_dir(folder, seat.cwd))
+    folder
+        .map(|folder| expand_tilde(folder, seat.home))
+        .is_some_and(|folder| same_dir(&folder, seat.cwd))
 }
 
-/// Lexical directory equality. Trailing slashes are ignored.
+/// `~` and `~/…` use the seat home. `~user` is left alone, so it cannot match.
+fn expand_tilde(folder: &Path, home: &Path) -> std::path::PathBuf {
+    let text = trim_dir(&folder.display().to_string());
+    if text == "~" {
+        return home.to_path_buf();
+    }
+    let Some(rest) = text.strip_prefix("~/") else {
+        return std::path::PathBuf::from(text);
+    };
+    let mut expanded = home.to_path_buf();
+    if !rest.is_empty() {
+        expanded.push(rest);
+    }
+    expanded
+}
+
+/// Lexical directory equality. Trailing slashes and a trailing U+FFFD are ignored.
 #[must_use]
 pub fn same_dir(left: &Path, right: &Path) -> bool {
     trim_dir(&left.display().to_string()) == trim_dir(&right.display().to_string())
 }
 
 fn trim_dir(path: &str) -> String {
-    let trimmed = path.trim().trim_end_matches('/');
+    let trimmed = path
+        .trim()
+        .trim_matches('\u{a0}')
+        .trim()
+        .trim_end_matches(['/', '\u{FFFD}'])
+        .trim();
     if trimmed.is_empty() {
         "/".to_owned()
     } else {
