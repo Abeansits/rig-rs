@@ -33,10 +33,26 @@ Rule for this recovery: only verbatim text was restored. Nothing here was rewrit
 | File | Source agent | Original upload | sha256 |
 | --- | --- | --- | --- |
 | `design/acceptance/slice-19-context-packs.md` | `bc-d347d75b-ce1d-5530-a13a-df8a828847ff` (slice 19). Unpaged `read_file` result, totalLines 49, no range shortening; four identical reads. | `uploads/slice-19-context-packs_16c6.md` | `d458b4d27d4aa793e7e3beecd20288dc98753ae1b698cf94a51a62dac5be99a1` |
+| `design/acceptance/slice-12-health.md` | `bc-0f0706c1-914d-5a14-a086-8f3bd8b62` | `uploads/slice-12-health_610e.md` | `2483eb27aca56220ab0860b85172e757d039da84b499e3dbe2063ea8d34abc32` |
+| `design/acceptance/slice-14-workflow-engine.md` | `bc-48561a2a-5bbb-55b1-8aa2-d3e45ff80` | `uploads/slice-14-workflow-engine_a6fd.md` | `7a89bf7303e18d0e952bcae7f467e51981e5fc4c4f72819bce33d7d549242266` |
+| `design/acceptance/slice-6-mcp-server.md` | `bc-75957a1a-e26e-51c6-916d-4153c4aad` | `uploads/slice-6-mcp-server_ba31.md` | `d00d5f24c281d715462c1f08452d4f428efdd002e8604c61319da1ce2b071a6d` |
+| `design/acceptance/slice-8-snapshots-restore.md` | `bc-9009dbde-ae9c-55a0-97f9-3af0f4211` | `uploads/slice-8-snapshots-restore_7354.md` | `40f5d946dae5a5fc5c115a4129102313ce6b7337faead9d73f98dda5d8a9b505` |
+| `design/acceptance/slice-9-claude-compaction.md` | `bc-2d249ad1-43bd-59f1-b851-6a24e876c` | `uploads/slice-9-claude-compaction_3059.md` | `3ccba29eca3db4d31cee519f151e257e91ad40e0ed111d57bba20e75e923a990` |
+| `design/PORTING-MAP.md` | `bc-7033a4bc-580f-567f-9b09-bc1de4d77` | `uploads/PORTING-MAP_1983.md` | `2f81cdf95ad9ec8a09b442cb430dfb34fb2f02473279bec7295ba37a9b7c9e95` |
+| `design/recovery/parity-exceptions-2026-10-11.md` | `bc-a02f7af2-f2d7-5992-a2f6-61129c0dc` | `uploads/parity-exceptions_42b1.md` | `91569313e9019da8760a076cf6b9e2a48a7c64fd30a80c1edef7443a6d12a024` |
+| `design/recovery/slice-2-claude-seat-2026-10-11.md` | `bc-761a6396-af76-5ef6-b2b8-e5cd34f7f` | `uploads/slice-2-claude-seat_3cec.md` | `77ebb2f6e478cdd03f038c1cbd1b4210f6d6b4127b0e2eb35d4b4a4feba47195` |
+| `design/recovery/slice-3-codex-seat-2026-10-11.md` | `bc-a02f7af2-f2d7-5992-a2f6-61129c0dc` | `uploads/slice-3-codex-seat_8751.md` | `c04f206b2af1405d6265ca33d4eb521fa37a44144aa9411ed5953d539ef48500` |
+
+These are single unpaged `read_file` results with the full line count (`totalLines`) and no shortening flags. Where an agent read a file more than once, every complete read had the same sha256. The PORTING-MAP text is identical in the transcripts of four agents (bc-7033a4bc, bc-30b3f737, bc-07c60799 and bc-7e7e5910).
+
+`design/recovery/` holds older uploaded copies that differ from `main`. `main` stays canonical for these. They are kept for history only.
+Agent ids above are cut short to the prefix of the transcript file name.
+
+Uploads that matched `main` byte for byte, so nothing new was added: `0009-delivery-identity` (bc-a02f7af2 and bc-761a6396) and `2026-10-11-slices-2-3` (both agents).
 
 The slice 19 agent was also given `uploads/parity-exceptions.md`, but it never read that upload; it read only the repo copy. So no older copy of the register was recovered.
 
-Transcripts of the slice 14, 9, 6, 8, 12, 0, 1, 7, 13 and PR #25 agents were not dumped in this pass: the recovering agent had no CloudAgent tool. Their spec text may still be in those transcripts.
+All rig-rs agent transcripts were dumped on 2026-10-15 and searched.
 
 ## Parity exceptions held on open PR branches (not merged here)
 
@@ -52,13 +68,15 @@ These entries exist verbatim, but only on their slice branches. Each one lands w
 
 On `main`: PE-001-PE-009, PE-011-PE-017, PE-019 (lineage) and PE-020 (MCP routes); PE-016 is the MCP tool rename. There is no PE-010 heading in any branch.
 
-## Not recovered (no verbatim copy found anywhere)
+## Not recovered (no complete verbatim copy found anywhere)
 
-- `design/README.md` (the original design index). The `README.md` in this directory is a new file index, not the lost original.
-- `design/PLAN.md` (the workspace plan)
-- `design/adr/0001` - `0004`, `0006` - `0008` (ADR-0002, 0003, 0004 and 0008 are cited in PR bodies, but their text is not there)
-- `design/acceptance/` for slices 0, 0b, 1, 1b, 6, 7, 8, 9, 10, 11, 12, 13, 14 and 18
-- `qa/STATUS.md` and `spikes/` (QA Bot is to rebuild STATUS)
+- `design/README.md`, the original. Agents bc-a02f7af2 and bc-761a6396 read `uploads/README_*.md`, but their transcripts don't keep those results.
+- `design/PLAN.md`, the workspace plan. No upload read found.
+- `design/adr/0001` - `0004` and `0006` - `0008`. No upload read found. The `0010` upload reads (5 agents) have no stored results, but `main` already has 0010.
+- `design/acceptance/` for slices 0, 0b, 1, 1b, 7, 10, 11, 13 and 18. No upload read found.
+- `RUST-AGENT-GUIDE.md`: partial only. The 330-line file survives only as paged reads (bc-07c60799, bc-7033a4bc and bc-30b3f737) with no offsets recorded and overlapping page edges, so it can't be reassembled with confidence.
+- The other agents' `parity-exceptions` uploads (bc-761a6396, bc-75957a1a, bc-2d249ad1, bc-0f0706c1, bc-9009dbde and bc-48561a2a) have no stored results.
+- `spikes/`.
 
 ## Possible further sources
 
