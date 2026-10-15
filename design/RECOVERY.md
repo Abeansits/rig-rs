@@ -28,6 +28,16 @@ Rule for this recovery: only verbatim text was restored. Nothing here was rewrit
 | `design/parity-exceptions.md` | `main`. This is the single PE register (ADR-0010), and xtask checks it against the ledger. |
 | `docs/qa/PLAN.md` | `main` (the QA parity plan, not the design workspace `PLAN.md`) |
 
+## Recovered from cloud-agent transcripts (verbatim tool results of file reads)
+
+| File | Source agent | Original upload | sha256 |
+| --- | --- | --- | --- |
+| `design/acceptance/slice-19-context-packs.md` | `bc-d347d75b-ce1d-5530-a13a-df8a828847ff` (slice 19). Unpaged `read_file` result, totalLines 49, no range shortening; four identical reads. | `uploads/slice-19-context-packs_16c6.md` | `d458b4d27d4aa793e7e3beecd20288dc98753ae1b698cf94a51a62dac5be99a1` |
+
+The slice 19 agent was also given `uploads/parity-exceptions.md`, but it never read that upload; it read only the repo copy. So no older copy of the register was recovered.
+
+Transcripts of the slice 14, 9, 6, 8, 12, 0, 1, 7, 13 and PR #25 agents were not dumped in this pass: the recovering agent had no CloudAgent tool. Their spec text may still be in those transcripts.
+
 ## Parity exceptions held on open PR branches (not merged here)
 
 These entries exist verbatim, but only on their slice branches. Each one lands with its PR. Copying them to `main` early would claim exceptions for code that hasn't merged, would fail the xtask PE/ledger checks, and would make the three PRs conflict.
@@ -47,7 +57,7 @@ On `main`: PE-001-PE-009, PE-011-PE-017, PE-019 (lineage) and PE-020 (MCP routes
 - `design/README.md` (the original design index). The `README.md` in this directory is a new file index, not the lost original.
 - `design/PLAN.md` (the workspace plan)
 - `design/adr/0001` - `0004`, `0006` - `0008` (ADR-0002, 0003, 0004 and 0008 are cited in PR bodies, but their text is not there)
-- `design/acceptance/` for slices 0, 0b, 1, 1b, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18 and 19
+- `design/acceptance/` for slices 0, 0b, 1, 1b, 6, 7, 8, 9, 10, 11, 12, 13, 14 and 18
 - `qa/STATUS.md` and `spikes/` (QA Bot is to rebuild STATUS)
 
 ## Possible further sources
