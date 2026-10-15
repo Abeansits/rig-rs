@@ -1,7 +1,7 @@
 //! Boot sweep and the paired queue/workflow commit.
 //!
-//! The two in-memory documents swap while both locks are held. The locks are
-//! dropped before the store write is awaited.
+//! Workflow is locked before the queue. That pair stays locked until the
+//! writer has committed the same epoch.
 
 use std::sync::Arc;
 
@@ -9,13 +9,35 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use crewmux_messaging::QueueBook;
-use crewmux_orchestration::{Engine, World, boot_sweep, frontier_block, install_builtins};
+use crewmux_orchestration::{Engine, World, boot_sweep, install_builtins};
 use serde_json::{Value, json};
+use tokio::sync::MutexGuard;
 
 use crate::error::Error;
 use crate::http::fail;
 use crate::launch::now_ts;
 use crate::state::{App, join_err};
+
+/// Both documents, locked workflow-then-queue.
+pub(crate) struct PairGuard<'a> {
+    /// Workflow document.
+    pub engine: MutexGuard<'a, Engine>,
+    /// Queue book that shares this epoch.
+    pub book: MutexGuard<'a, QueueBook>,
+}
+
+/// Lock the workflow, then the queue.
+pub(crate) async fn lock_pair(app: &App) -> PairGuard<'_> {
+    let engine = app.workflow.lock().await;
+    let book = app.queue.lock().await;
+    PairGuard { engine, book }
+}
+
+/// Clone both documents while both locks are held.
+pub(crate) async fn read_pair(app: &App) -> (Engine, QueueBook) {
+    let pair = lock_pair(app).await;
+    (pair.engine.clone(), pair.book.clone())
+}
 
 /// Logged when a restart finds no live instance.
 pub(crate) const BOOT_EMPTY: &str = "workflow boot sweep: 0 in-flight instances (no-op)";
@@ -38,47 +60,42 @@ pub(crate) async fn boot(app: &App, mut book: QueueBook) -> Result<(), Error> {
     };
     let now = now_ts();
     install_builtins(&mut engine, now);
-    let sweep = boot_sweep(&mut engine, &mut book, &World::default(), now);
+    let seats = world(app).await;
+    let sweep = boot_sweep(&mut engine, &mut book, &seats, now);
     if sweep.visited == 0 {
         tracing::info!("{BOOT_EMPTY}");
     }
     let doc = serde_json::to_string(&engine).map_err(|err| Error::Message(err.to_string()))?;
-    swap_pair(app, book.clone(), engine).await;
+    let mut pair = lock_pair(app).await;
+    *pair.book = book.clone();
+    *pair.engine = engine;
     app.commit_documented(book, Some(doc)).await
 }
 
-/// Refuse a terminal close of a live frontier packet.
-pub(crate) async fn guard_close(app: &App, qitem: &str, next: &str) -> Option<Response> {
-    let engine = app.workflow.lock().await.clone();
-    frontier_block(&engine, qitem, next).map(rejected)
-}
-
 /// Run `f` on a consistent pair and publish both documents.
+///
+/// The pair lock is held through the commit, so a later epoch cannot be
+/// stored with this epoch's document.
 pub(crate) async fn mutate_pair<T>(
     app: &App,
     f: impl FnOnce(&Engine, &QueueBook) -> Result<(Engine, QueueBook, T), crewmux_orchestration::Error>,
 ) -> Result<T, Box<Response>> {
-    let (previous_book, previous_engine, next_book, doc, epoch, value) = loop {
-        if let (Ok(mut queue), Ok(mut engine)) = (app.queue.try_lock(), app.workflow.try_lock()) {
-            let previous_book = queue.clone();
-            let previous_engine = engine.clone();
-            let (next_engine, next_book, value) = match f(&engine, &queue) {
-                Ok(triple) => triple,
-                Err(err) => return Err(Box::new(rejected(err))),
-            };
-            let doc = match serde_json::to_string(&next_engine) {
-                Ok(doc) => doc,
-                Err(err) => return Err(Box::new(fail(Error::Message(err.to_string())))),
-            };
-            let epoch = next_book.epoch();
-            *queue = next_book.clone();
-            *engine = next_engine;
-            break (previous_book, previous_engine, next_book, doc, epoch, value);
-        }
-        tokio::task::yield_now().await;
+    let mut pair = lock_pair(app).await;
+    let previous_book = pair.book.clone();
+    let previous_engine = pair.engine.clone();
+    let (next_engine, next_book, value) = match f(&pair.engine, &pair.book) {
+        Ok(triple) => triple,
+        Err(err) => return Err(Box::new(rejected(err))),
     };
+    let doc = match serde_json::to_string(&next_engine) {
+        Ok(doc) => doc,
+        Err(err) => return Err(Box::new(fail(Error::Message(err.to_string())))),
+    };
+    *pair.book = next_book.clone();
+    *pair.engine = next_engine;
     if let Err(err) = app.commit_documented(next_book, Some(doc)).await {
-        restore(app, epoch, previous_book, previous_engine).await;
+        *pair.book = previous_book;
+        *pair.engine = previous_engine;
         return Err(Box::new(fail(err)));
     }
     Ok(value)
@@ -167,28 +184,4 @@ pub(crate) fn missing_field(name: &str) -> Response {
 
 pub(crate) fn json_status(status: StatusCode, value: Value) -> Response {
     (status, Json(value)).into_response()
-}
-
-async fn swap_pair(app: &App, book: QueueBook, engine: Engine) {
-    loop {
-        if let (Ok(mut queue), Ok(mut slot)) = (app.queue.try_lock(), app.workflow.try_lock()) {
-            *queue = book;
-            *slot = engine;
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-}
-
-async fn restore(app: &App, epoch: u64, book: QueueBook, engine: Engine) {
-    loop {
-        if let (Ok(mut queue), Ok(mut slot)) = (app.queue.try_lock(), app.workflow.try_lock()) {
-            if queue.epoch() == epoch {
-                *queue = book;
-                *slot = engine;
-            }
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
 }

@@ -7,7 +7,8 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use crewmux_orchestration::{
     Engine, Exit, InstantiateRequest, ProjectCtx, ProjectRequest, Runtime, deadline_for,
-    guidance_lines, instance_json, instantiate_spec_json, project_json, spec_row_json, trail_json,
+    guidance_lines, inspect, instance_json, instantiate_spec_json, project_json, spec_row_json,
+    trail_json,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -204,16 +205,29 @@ async fn show(State(app): State<App>, Path(id): Path<String>) -> axum::response:
         return unknown(&id);
     };
     let deadline = deadline_for(&engine, &book, &id, now_ts());
+    let inspected = match inspect(&engine, &book, &id, now_ts()) {
+        Ok(inspected) => inspected,
+        Err(err) => return rejected(err),
+    };
     let mut body = instance_json(instance, deadline.as_ref());
     if let Value::Object(map) = &mut body {
         map.insert(
             "guidance".to_owned(),
             json!({"lines": guidance_lines(&engine, &id)}),
         );
-        map.insert("frontierPackets".to_owned(), json!([]));
-        map.insert("failureOccurrences".to_owned(), json!([]));
-        map.insert("unknowns".to_owned(), json!([]));
-        map.insert("boundaryObligations".to_owned(), json!([]));
+        map.insert(
+            "frontierPackets".to_owned(),
+            Value::Array(inspected.frontier),
+        );
+        map.insert(
+            "failureOccurrences".to_owned(),
+            Value::Array(inspected.failures),
+        );
+        map.insert("unknowns".to_owned(), json!(inspected.unknowns));
+        map.insert(
+            "boundaryObligations".to_owned(),
+            Value::Array(inspected.boundary_obligations),
+        );
     }
     json_status(StatusCode::OK, body)
 }
@@ -407,6 +421,10 @@ async fn read_view(app: &App, id: &str) -> axum::response::Response {
         return unknown(id);
     };
     let deadline = deadline_for(&engine, &book, id, now_ts());
+    let inspected = match inspect(&engine, &book, id, now_ts()) {
+        Ok(inspected) => inspected,
+        Err(err) => return rejected(err),
+    };
     let trail = engine
         .trails
         .iter()
@@ -419,18 +437,16 @@ async fn read_view(app: &App, id: &str) -> axum::response::Response {
             "instance": instance_json(instance, deadline.as_ref()),
             "trail": trail,
             "guidance": {"lines": guidance_lines(&engine, id)},
-            "frontier": [],
-            "failures": [],
-            "unknowns": [],
-            "boundaryObligations": [],
+            "frontier": inspected.frontier,
+            "failures": inspected.failures,
+            "unknowns": inspected.unknowns,
+            "boundaryObligations": inspected.boundary_obligations,
         }),
     )
 }
 
 async fn snapshot(app: &App) -> (Engine, crewmux_messaging::QueueBook) {
-    let engine = app.workflow.lock().await.clone();
-    let book = app.queue.lock().await.clone();
-    (engine, book)
+    crate::workflow::read_pair(app).await
 }
 
 fn unknown(id: &str) -> axum::response::Response {

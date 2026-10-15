@@ -164,6 +164,8 @@ PE-016 covers the renamed tool list only. These are the route, body, and flag di
 - **TS behaviour:** `workflow-human-destination.ts` resolves a human seat through the gateway human registry (`addHumanFragment`, Slack connector bindings, `address: name@external`). Delivery of that destination goes out through the Slack/gateway path.
 - **Rust behaviour:** `human_only` exception routing and a human gate use the operator seat `human@kernel` (`OPERATOR_SEAT` in `crewmux-orchestration::dial`). That seat is the operator surface: the TUI attention view and the CLI inbox. There is no Slack connector and no gateway human registry. A stuck-overdue exception item is addressed to that seat.
 - **Required test:** `crewmux_orchestration::dial::tests::human_only_is_the_operator_seat`.
+- **Unresolved role:** an entry step or a next step with no `preferred_targets` and no explicit owner is HTTP 400. Instantiate reports `entry_owner_unresolved`. Project reports `next_owner_unresolved`. That is the TypeScript status on the unbound no-target path. Matching it is the behaviour; a note that treated 400 as a miss is retired.
+- **Required test:** `unresolved_owner_does_not_mutate_and_graph_project_is_refused` asserts status 400.
 
 ## Status of real-login testing
 

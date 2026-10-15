@@ -166,7 +166,7 @@ fn decision_json(decision: &Decision) -> Value {
     })
 }
 
-fn verdict_json(verdict: &Verdict) -> Value {
+pub(crate) fn verdict_json(verdict: &Verdict) -> Value {
     json!({
         "state": verdict.state,
         "evidence": verdict.evidence.as_ref().map(evidence_json),

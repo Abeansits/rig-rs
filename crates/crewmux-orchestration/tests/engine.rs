@@ -325,6 +325,7 @@ fn unresolved_owner_does_not_mutate_and_graph_project_is_refused() {
         err,
         crewmux_orchestration::Error::Rejected {
             code: "entry_owner_unresolved",
+            status: 400,
             ..
         }
     ));

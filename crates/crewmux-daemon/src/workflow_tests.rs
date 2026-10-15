@@ -229,3 +229,62 @@ async fn live_frontier_close_is_refused_and_project_advances() {
     let rows: Value = serde_json::from_str(&listed).expect("list");
     assert!(rows.as_array().is_some_and(|rows| rows.len() == 1));
 }
+
+#[tokio::test]
+async fn show_and_continue_report_the_live_frontier_packet() {
+    let harness = boot_app().await;
+    let spec = harness.dir.join("linear.yaml");
+    std::fs::write(
+        &spec,
+        "workflow:\n  id: mini\n  version: 1\n  roles:\n    planner:\n      preferred_targets: [a@rig]\n  steps:\n    - id: one\n      actor_role: planner\n",
+    )
+    .expect("spec");
+    let body = serde_json::to_vec(&json!({
+        "specPath": spec.display().to_string(),
+        "rootObjective": "ship",
+        "createdBySession": "orch@rig",
+    }))
+    .expect("json");
+    let (status, text) = call(
+        &harness.sock,
+        "POST",
+        "/api/workflow/instantiate",
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, 201, "{text}");
+    let created: Value = serde_json::from_str(&text).expect("created");
+    let packet = created["entryQitemId"].as_str().expect("packet");
+    let instance = created["instance"]["instanceId"].as_str().expect("id");
+    let (status, shown) = call(
+        &harness.sock,
+        "GET",
+        &format!("/api/workflow/{instance}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{shown}");
+    let shown: Value = serde_json::from_str(&shown).expect("show");
+    assert_eq!(shown["frontierPackets"][0]["packetId"], packet);
+    assert_eq!(shown["frontierPackets"][0]["stepId"], "one");
+    assert_eq!(shown["frontierPackets"][0]["ownerSession"], "a@rig");
+    assert_eq!(shown["frontierPackets"][0]["queueState"], "pending");
+    assert_eq!(shown["frontierPackets"][0]["targetedAction"], "project");
+    assert_eq!(shown["unknowns"], json!([]));
+    assert_eq!(shown["failureOccurrences"], json!([]));
+    assert_eq!(shown["boundaryObligations"], json!([]));
+    let (status, continued) = call(
+        &harness.sock,
+        "POST",
+        &format!("/api/workflow/{instance}/continue"),
+        Some(b"{}"),
+    )
+    .await;
+    assert_eq!(status, 200, "{continued}");
+    let continued: Value = serde_json::from_str(&continued).expect("continue");
+    assert_eq!(continued["frontier"][0]["packetId"], packet);
+    assert_eq!(continued["frontier"][0]["ownerSession"], "a@rig");
+    assert_eq!(continued["failures"], json!([]));
+    assert_eq!(continued["unknowns"], json!([]));
+    assert_eq!(continued["boundaryObligations"], json!([]));
+}
