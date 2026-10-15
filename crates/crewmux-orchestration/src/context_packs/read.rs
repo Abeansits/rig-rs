@@ -127,6 +127,21 @@ fn base_for(
     })
 }
 
+fn symlink_read_fail(refer: &str, kind: SourceKind, abs: &Path) -> ReadFail {
+    if std::fs::metadata(abs).is_err() {
+        return ReadFail::Failed(format!(
+            "source ref '{refer}' ({}) is a DANGLING symlink: {} exists but its target does not",
+            kind.as_str(),
+            abs.display()
+        ));
+    }
+    ReadFail::Failed(format!(
+        "source ref '{refer}' ({}) refuses to follow symlink {}",
+        kind.as_str(),
+        abs.display()
+    ))
+}
+
 fn source_walk_error(
     refer: &str,
     kind: SourceKind,
@@ -135,11 +150,7 @@ fn source_walk_error(
     err: super::nofollow::WalkFail,
 ) -> ReadFail {
     match err {
-        super::nofollow::WalkFail::Symlink => ReadFail::Failed(format!(
-            "source ref '{refer}' ({}) refuses to follow symlink {}",
-            kind.as_str(),
-            abs.display()
-        )),
+        super::nofollow::WalkFail::Symlink => symlink_read_fail(refer, kind, abs),
         super::nofollow::WalkFail::Hardlink => ReadFail::Failed(format!(
             "source ref '{refer}' ({}) has more than one link at {}",
             kind.as_str(),

@@ -3,9 +3,21 @@
 
 //! Durable compose and removal. Safety checks run before any mutation.
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
+
+type MemberWriter = fn(&Path, &[u8]) -> std::io::Result<()>;
+
+thread_local! {
+    static MEMBER_WRITER: Cell<Option<MemberWriter>> = const { Cell::new(None) };
+}
+
+/// Replace member writes for one thread. Production leaves this unset.
+pub fn set_compose_member_writer_for_tests(writer: Option<MemberWriter>) {
+    MEMBER_WRITER.with(|cell| cell.set(writer));
+}
 
 use super::assemble::{PlainFileStat, PlainInput, assemble_plain};
 use super::entry::{PackEntry, SourceType};
@@ -21,6 +33,7 @@ pub struct ComposeFile {
 }
 
 /// What `compose_from_files` wrote and the plain projection of those bytes.
+#[derive(Debug)]
 pub struct ComposeOutcome {
     /// Durable ref.
     pub refer: String,
@@ -68,7 +81,7 @@ impl Library {
         }
         let missing: Vec<String> = sources
             .iter()
-            .filter(|source| !source.path.is_file())
+            .filter(|source| !source.path.exists())
             .map(|source| source.path.display().to_string())
             .collect();
         if !missing.is_empty() {
@@ -438,7 +451,7 @@ fn write_members(target: &Path, members: &[(String, String, Vec<u8>)]) -> Result
                 )
             })?;
         }
-        std::fs::write(&dest, content).map_err(|err| {
+        write_member_bytes(&dest, content).map_err(|err| {
             PackError::new(
                 PackCode::PackWriteFailed,
                 format!("failed to write context pack: {err}"),
@@ -446,6 +459,15 @@ fn write_members(target: &Path, members: &[(String, String, Vec<u8>)]) -> Result
         })?;
     }
     Ok(())
+}
+
+fn write_member_bytes(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let hooked = MEMBER_WRITER.with(|cell| cell.get());
+    if let Some(writer) = hooked {
+        writer(path, content)
+    } else {
+        std::fs::write(path, content)
+    }
 }
 
 fn write_failed(refer: &str, target: &Path, err: &std::io::Error) -> PackError {

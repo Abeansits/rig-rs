@@ -29,11 +29,12 @@ pub use library::{Library, Root, ScanError, SyncReport};
 pub use probe::{CompiledProbes, compile_atom_probes};
 pub use read::{ReadFail, SourceRead, SourceRoots, read_source};
 pub use recap::{
-    ContractFinding, RECAP_FILENAME, RecapError, list_recap_chain, validate_recap_contract,
+    ContractFinding, RECAP_FILENAME, RecapError, RecapFault, RecapPointer, list_recap_chain,
+    resolve_authored_recap_pointer, set_recap_fault_for_tests, validate_recap_contract,
     write_seat_recap,
 };
 pub use tokens::{estimate_tokens, estimate_tokens_from_bytes};
-pub use write::{ComposeFile, ComposeOutcome, RemoveOutcome};
+pub use write::{ComposeFile, ComposeOutcome, RemoveOutcome, set_compose_member_writer_for_tests};
 
 /// Home roots in TypeScript startup order: builtin, then the user store, then
 /// the overlapping `system` root. Workspace roots are added by the daemon.

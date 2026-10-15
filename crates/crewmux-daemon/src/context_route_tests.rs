@@ -9,10 +9,10 @@ use serde_json::{Value, json};
 use crate::flow::harness_with;
 use crate::state::App;
 
-struct Harness {
-    app: App,
-    sock: PathBuf,
-    dir: PathBuf,
+pub(crate) struct Harness {
+    pub(crate) app: App,
+    pub(crate) sock: PathBuf,
+    pub(crate) dir: PathBuf,
 }
 
 impl Drop for Harness {
@@ -23,7 +23,7 @@ impl Drop for Harness {
     }
 }
 
-async fn boot() -> Harness {
+pub(crate) async fn boot() -> Harness {
     static N: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
         "rig-ctx-{}-{}",
@@ -46,7 +46,12 @@ async fn boot() -> Harness {
     Harness { app, sock, dir }
 }
 
-async fn call(sock: &Path, method: &str, path: &str, body: Option<Vec<u8>>) -> (u16, Value) {
+pub(crate) async fn call(
+    sock: &Path,
+    method: &str,
+    path: &str,
+    body: Option<Vec<u8>>,
+) -> (u16, Value) {
     let sock = sock.to_path_buf();
     let method = method.to_owned();
     let path = path.to_owned();
@@ -61,7 +66,7 @@ async fn call(sock: &Path, method: &str, path: &str, body: Option<Vec<u8>>) -> (
     (response.status, value)
 }
 
-fn write_pack(root: &Path, refer: &str, manifest: &str, files: &[(&str, &str)]) {
+pub(crate) fn write_pack(root: &Path, refer: &str, manifest: &str, files: &[(&str, &str)]) {
     let dir = root.join(refer);
     std::fs::create_dir_all(&dir).expect("pack");
     std::fs::write(dir.join("manifest.yaml"), manifest).expect("manifest");
@@ -74,7 +79,7 @@ fn write_pack(root: &Path, refer: &str, manifest: &str, files: &[(&str, &str)]) 
     }
 }
 
-const WORLD: &str = "
+pub(crate) const WORLD: &str = "
 name: world-install
 version: \"1\"
 taxonomy: world
@@ -236,7 +241,7 @@ fn ids(body: &Value) -> Vec<String> {
         .collect()
 }
 
-fn sha256_hex(text: &str) -> String {
+pub(crate) fn sha256_hex(text: &str) -> String {
     use sha2::{Digest, Sha256};
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let digest = Sha256::digest(text.as_bytes());

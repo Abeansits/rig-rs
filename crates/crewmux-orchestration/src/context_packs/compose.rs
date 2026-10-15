@@ -125,6 +125,8 @@ impl ContextAtoms {
 
 /// Compose the legacy situation walk.
 ///
+/// `source_kind_for` overrides the address-derived label. `None` uses the address prefix.
+///
 /// # Errors
 ///
 /// Returns [`ComposeError`] when the closure cannot close or a piece cannot resolve.
@@ -134,12 +136,20 @@ pub fn compose_profile(
     runtime: ProfileRuntime,
     budget_tokens: Option<u32>,
     read_file: &mut dyn FnMut(&str) -> Result<String, ReadFail>,
+    source_kind_for: Option<&dyn Fn(&Atom) -> String>,
 ) -> Result<ComposedProfile, ComposeError> {
     let selected = select(atoms, situation, runtime)?;
     let mut walk: Vec<&Atom> = selected.values().copied().collect();
     walk.sort_by(|left, right| left.order.cmp(&right.order).then(left.id.cmp(&right.id)));
     let mut skipped = Vec::new();
-    let pieces = resolve_pieces(&walk, situation, read_file, None, &mut skipped)?;
+    let pieces = resolve_pieces(
+        &walk,
+        situation,
+        read_file,
+        None,
+        &mut skipped,
+        source_kind_for,
+    )?;
     Ok(finish(Done {
         situation,
         runtime,
@@ -274,7 +284,14 @@ fn one_phase(
         }
         ("context", selected, sources)
     };
-    let pieces = resolve_pieces(&selected, situation, read_file, Some(&phase.id), skipped)?;
+    let pieces = resolve_pieces(
+        &selected,
+        situation,
+        read_file,
+        Some(&phase.id),
+        skipped,
+        None,
+    )?;
     let estimated_tokens = pieces.iter().fold(0u32, |sum, piece| {
         sum.saturating_add(piece.estimated_tokens)
     });
@@ -352,10 +369,18 @@ fn resolve_pieces(
     read_file: &mut dyn FnMut(&str) -> Result<String, ReadFail>,
     phase_id: Option<&str>,
     skipped: &mut Vec<(String, String)>,
+    source_kind_for: Option<&dyn Fn(&Atom) -> String>,
 ) -> Result<Vec<ComposedPiece>, ComposeError> {
     let mut pieces = Vec::new();
     for atom in atoms {
-        if let Some(piece) = one_piece(atom, situation, read_file, phase_id, skipped)? {
+        if let Some(piece) = one_piece(
+            atom,
+            situation,
+            read_file,
+            phase_id,
+            skipped,
+            source_kind_for,
+        )? {
             pieces.push(piece);
         }
     }
@@ -368,6 +393,7 @@ fn one_piece(
     read_file: &mut dyn FnMut(&str) -> Result<String, ReadFail>,
     phase_id: Option<&str>,
     skipped: &mut Vec<(String, String)>,
+    source_kind_for: Option<&dyn Fn(&Atom) -> String>,
 ) -> Result<Option<ComposedPiece>, ComposeError> {
     let parsed = parse_address(&atom.address).map_err(|err| fail(err.message))?;
     let file_text = match read_file(&parsed.refer) {
@@ -400,9 +426,12 @@ fn one_piece(
                 ))
             })?
     };
-    let source_kind = match source_kind_for_address(&atom.address) {
-        Ok(kind) => kind.as_str().to_owned(),
-        Err(_) => "library".to_owned(),
+    let source_kind = match source_kind_for {
+        Some(label) => label(atom),
+        None => match source_kind_for_address(&atom.address) {
+            Ok(kind) => kind.as_str().to_owned(),
+            Err(_) => "library".to_owned(),
+        },
     };
     Ok(Some(ComposedPiece {
         atom_id: atom.id.clone(),

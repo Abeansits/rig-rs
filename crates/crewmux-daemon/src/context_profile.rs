@@ -143,7 +143,14 @@ fn compose_notes(mut job: Job<'_>) -> Result<Value, RouteError> {
             &mut read,
         )
     } else {
-        compose_profile(job.atoms, job.situation, job.runtime, job.budget, &mut read)
+        compose_profile(
+            job.atoms,
+            job.situation,
+            job.runtime,
+            job.budget,
+            &mut read,
+            None,
+        )
     }
     .map_err(|err| RouteError::named(422, "profile_compose_failed", err.message))?;
     if !composed.skipped.is_empty() {

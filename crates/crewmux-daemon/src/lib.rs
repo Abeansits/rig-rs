@@ -57,6 +57,12 @@ pub use serve::run;
 #[cfg(test)]
 mod context_deliver_tests;
 #[cfg(test)]
+mod context_pack_route_cases;
+#[cfg(test)]
+mod context_profile_route_cases;
+#[cfg(test)]
+mod context_profile_world_cases;
+#[cfg(test)]
 mod context_race_tests;
 #[cfg(test)]
 mod context_route_tests;

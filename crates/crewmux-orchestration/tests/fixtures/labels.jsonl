@@ -1,1 +1,6 @@
 {"file":"compose-plain.txt","sha256":"2e96b431058c45c5646233dc9e3cfc3780a5a66349ab99b26dafa0f799b98e69","source":"OpenRig v0.6.9 4b48ca21 packages/daemon/test/context-pack-compose.test.ts members a.md, c.yaml, and b.data joined by PLAIN_COMPOSE_SEPARATOR"}
+{"file":"compose-newline-0","sha256":"13c8c841fb53ad9953fbadbc2bcf1608d590d32828d3e5bc117b0f39f6c33679","source":"OpenRig v0.6.9 4b48ca21 context-pack-compose.test.ts preserves EOF-newline bytes A + B"}
+{"file":"compose-newline-1","sha256":"8b79c77a6d657380a5c5c2cde52b9510dc14a20246772119e7112b3ff45daa43","source":"OpenRig v0.6.9 4b48ca21 context-pack-compose.test.ts preserves EOF-newline bytes A\\n + B"}
+{"file":"compose-newline-2","sha256":"c410bfd99c846b9dc84431c34ca7044a1e3e4e33146a8fa105b25577e6188768","source":"OpenRig v0.6.9 4b48ca21 context-pack-compose.test.ts preserves EOF-newline bytes A + B\\n"}
+{"file":"compose-newline-3","sha256":"0bab4f3ce82f994d1a7728edc0a5651564a3f779b88e8e21a86dd969f7788189","source":"OpenRig v0.6.9 4b48ca21 context-pack-compose.test.ts preserves EOF-newline bytes A\\n + B\\n"}
+{"file":"good-recap","sha256":"2697ba952f276342151bc752b10bb8294422bcfc3ef69b535cac5ddd5d37501b","source":"OpenRig v0.6.9 4b48ca21 seat-recap-store.test.ts GOOD_RECAP bytes"}

@@ -34,6 +34,7 @@ pub struct PlainAssembly {
 }
 
 /// One present member's size.
+#[derive(Debug)]
 pub struct PlainFileStat {
     /// Path.
     pub path: String,
