@@ -152,8 +152,10 @@ pub(crate) async fn update_item(State(app): State<App>, body: Bytes) -> Response
         Ok(parsed) => parsed,
         Err(err) => return fail(Error::Message(err.to_string())),
     };
+    let id_text = parsed.id.clone();
+    let next = parsed.state.clone().unwrap_or_default();
     let now = now_ts();
-    let transition = mutate(&app, move |book| {
+    let transition = match mutate_open(&app, &id_text, &next, move |book| {
         let id = qid(&parsed.id)?;
         let actor = SessionRef::new(parsed.actor)?;
         let state = match parsed.state {
@@ -183,24 +185,24 @@ pub(crate) async fn update_item(State(app): State<App>, body: Bytes) -> Response
             now,
         )
     })
+    .await
+    {
+        Ok(transition) => transition,
+        Err(OpenFail::Blocked(response)) => return *response,
+        Err(OpenFail::Failed(err)) => return fail(err),
+    };
+    emit(
+        &app,
+        DomainEvent::QueueChanged {
+            qitem: transition.qitem.clone(),
+            state: transition.to.as_str().to_owned(),
+            at: now_ts(),
+        },
+    )
     .await;
-    match transition {
-        Ok(transition) => {
-            emit(
-                &app,
-                DomainEvent::QueueChanged {
-                    qitem: transition.qitem.clone(),
-                    state: transition.to.as_str().to_owned(),
-                    at: now_ts(),
-                },
-            )
-            .await;
-            match serde_json::to_value(&transition) {
-                Ok(value) => ok(json!({"transition": value})),
-                Err(err) => fail(Error::Message(err.to_string())),
-            }
-        }
-        Err(err) => fail(err),
+    match serde_json::to_value(&transition) {
+        Ok(value) => ok(json!({"transition": value})),
+        Err(err) => fail(Error::Message(err.to_string())),
     }
 }
 
@@ -209,36 +211,36 @@ async fn handoff_with(app: &App, body: &[u8], complete: bool) -> Response {
         Ok(parsed) => parsed,
         Err(err) => return fail(Error::Message(err.to_string())),
     };
+    let id_text = parsed.id.clone();
     let now = now_ts();
-    let pair = mutate(app, move |book| {
+    let pair = match mutate_open(app, &id_text, "handed-off", move |book| {
         let id = qid(&parsed.id)?;
         let to = SessionRef::new(parsed.to)?;
         let actor = SessionRef::new(parsed.actor)?;
         book.handoff(&id, &to, &actor, now, complete)
     })
+    .await
+    {
+        Ok(pair) => pair,
+        Err(OpenFail::Blocked(response)) => return *response,
+        Err(OpenFail::Failed(err)) => return fail(err),
+    };
+    let (closed, successor) = pair;
+    emit(
+        app,
+        DomainEvent::QueueChanged {
+            qitem: successor.id.clone(),
+            state: successor.state.as_str().to_owned(),
+            at: now_ts(),
+        },
+    )
     .await;
-    match pair {
-        Ok((closed, successor)) => {
-            emit(
-                app,
-                DomainEvent::QueueChanged {
-                    qitem: successor.id.clone(),
-                    state: successor.state.as_str().to_owned(),
-                    at: now_ts(),
-                },
-            )
-            .await;
-            match (
-                serde_json::to_value(&closed),
-                serde_json::to_value(&successor),
-            ) {
-                (Ok(closed), Ok(successor)) => {
-                    ok(json!({"closed": closed, "successor": successor}))
-                }
-                (Err(err), _) | (_, Err(err)) => fail(Error::Message(err.to_string())),
-            }
-        }
-        Err(err) => fail(err),
+    match (
+        serde_json::to_value(&closed),
+        serde_json::to_value(&successor),
+    ) {
+        (Ok(closed), Ok(successor)) => ok(json!({"closed": closed, "successor": successor})),
+        (Err(err), _) | (_, Err(err)) => fail(Error::Message(err.to_string())),
     }
 }
 
@@ -263,23 +265,49 @@ async fn finish_item(app: &App, item: Result<crewmux_messaging::QueueItem, Error
     }
 }
 
+enum OpenFail {
+    Blocked(Box<Response>),
+    Failed(Error),
+}
+
 async fn mutate<T>(
     app: &App,
     f: impl FnOnce(&mut crewmux_messaging::QueueBook) -> Result<T, crewmux_messaging::Error>,
 ) -> Result<T, Error> {
-    let (value, previous, snap) = {
-        let mut book = app.queue.lock().await;
-        let previous = book.clone();
-        let value = f(&mut book).map_err(|err| Error::Message(err.to_string()))?;
-        let snap = book.clone();
-        (value, previous, snap)
-    };
-    let epoch = snap.epoch();
+    let _engine = app.workflow.lock().await;
+    let mut book = app.queue.lock().await;
+    let previous = book.clone();
+    let value = f(&mut book).map_err(|err| Error::Message(err.to_string()))?;
+    commit_held(app, &mut book, previous, value).await
+}
+
+async fn mutate_open<T>(
+    app: &App,
+    qitem: &str,
+    next: &str,
+    f: impl FnOnce(&mut crewmux_messaging::QueueBook) -> Result<T, crewmux_messaging::Error>,
+) -> Result<T, OpenFail> {
+    let engine = app.workflow.lock().await;
+    let mut book = app.queue.lock().await;
+    if let Some(err) = crewmux_orchestration::frontier_block(&engine, qitem, next) {
+        return Err(OpenFail::Blocked(Box::new(crate::workflow::rejected(err))));
+    }
+    let previous = book.clone();
+    let value = f(&mut book).map_err(|err| OpenFail::Failed(Error::Message(err.to_string())))?;
+    commit_held(app, &mut book, previous, value)
+        .await
+        .map_err(OpenFail::Failed)
+}
+
+async fn commit_held<T>(
+    app: &App,
+    book: &mut crewmux_messaging::QueueBook,
+    previous: crewmux_messaging::QueueBook,
+    value: T,
+) -> Result<T, Error> {
+    let snap = book.clone();
     if let Err(err) = app.commit_queue(snap).await {
-        let mut book = app.queue.lock().await;
-        if book.epoch() == epoch {
-            *book = previous;
-        }
+        *book = previous;
         return Err(err);
     }
     Ok(value)

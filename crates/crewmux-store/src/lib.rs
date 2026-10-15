@@ -13,6 +13,7 @@ mod queue;
 mod repo;
 mod store;
 mod token;
+mod workflow;
 
 pub use durability::{
     CheckpointRow, DirectRow, EdgeRow, SeatRestoreRow, insert_checkpoint, insert_direct,
@@ -39,3 +40,4 @@ pub use repo::{Db, clear_rig};
 pub use rusqlite::Connection;
 pub use store::Store;
 pub use token::{put_seat_token, seat_token};
+pub use workflow::{SeatCoord, commit_projection, list_seat_coords, load_workflow_document};

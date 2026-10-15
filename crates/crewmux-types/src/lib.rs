@@ -14,6 +14,7 @@ mod readiness;
 mod runtime;
 mod snapshot;
 mod ui;
+mod workflow;
 
 pub mod tmux_version;
 
@@ -31,6 +32,7 @@ pub use runtime::{ForkSource, LaunchPosture, RuntimeKind};
 pub use snapshot::{DeliveryId, SnapshotId};
 pub use tmux_version::{Version, parse_version};
 pub use ui::{LauncherKind, PodName, SeatKey, TmuxSession};
+pub use workflow::{NameId, RoleId, SpecId, StepId, WorkflowInstanceId};
 
 /// A key delivered with `send-keys`.
 ///

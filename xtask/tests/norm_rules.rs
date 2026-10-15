@@ -40,6 +40,13 @@ fn timestamp_reuses_one_placeholder_for_the_same_value() {
 }
 
 #[test]
+fn timestamp_each_numbers_every_occurrence() {
+    let text = "2024-10-11T10:38:00Z 2024-10-11T10:38:00.000Z";
+    let out = normalize_text(text, &[NormRule::TimestampEach], &[]).unwrap();
+    assert_eq!(out, "<TS:1> <TS:2>");
+}
+
+#[test]
 fn abspath_masks_scratch_roots_and_temp_dirs() {
     let root = PathBuf::from("/tmp/scratch-root");
     let text = "/tmp/scratch-root/home/a /tmp/scratch-root/home/a /tmp/other/file";
@@ -71,6 +78,14 @@ fn custom_rule_replaces_every_match_with_the_static_string() {
     let rule = NormRule::Custom(regex::Regex::new(r"secret-\d+").unwrap(), "<SECRET>");
     let out = normalize_text("secret-1 and secret-2", &[rule], &[]).unwrap();
     assert_eq!(out, "<SECRET> and <SECRET>");
+}
+
+#[test]
+fn abspath_masks_a_checkout_root_outside_tmp() {
+    let root = PathBuf::from("/home/runner/work/rig-rs/rig-rs/openrig");
+    let text = "\"sourcePath\":\"/home/runner/work/rig-rs/rig-rs/openrig/packages/daemon/dist/builtins/workflow-specs/linear-build.yaml\"";
+    let out = normalize_text(text, &[NormRule::AbsPath], &[root]).unwrap();
+    assert_eq!(out, "\"sourcePath\":\"<PATH:1>\"");
 }
 
 #[test]

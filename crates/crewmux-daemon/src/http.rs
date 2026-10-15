@@ -56,6 +56,7 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/outbox", post(crate::inbox_http::outbox))
         .merge(crate::chat::routes())
         .merge(crate::health_http::routes())
+        .merge(crate::workflow_http::routes())
         .merge(crate::stream_http::routes())
         .layer(map_response(connection_close))
         .with_state(app)

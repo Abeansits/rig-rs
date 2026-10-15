@@ -178,6 +178,13 @@ const LINEAGE_START: &str = "
 ALTER TABLE pane_lineage ADD COLUMN started_ticks INTEGER;
 ";
 
+const WORKFLOW: &str = "
+CREATE TABLE workflow_documents (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    doc TEXT NOT NULL
+);
+";
+
 const DURABILITY: &str = "
 CREATE TABLE seat_restore (
     seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
@@ -223,7 +230,7 @@ CREATE TABLE rig_kernel (
 ";
 
 /// Rig tables, the queue, chat, then the snapshot tables main already ships,
-/// then health and the pane lineage recorded at launch.
+/// then health, the pane lineage recorded at launch, and the workflow document.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
@@ -233,8 +240,9 @@ pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
         M::up(HEALTH),
         M::up(LINEAGE),
         M::up(LINEAGE_START),
+        M::up(WORKFLOW),
     ]),
-    len: 7,
+    len: 8,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {
