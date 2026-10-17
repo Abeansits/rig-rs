@@ -5,5 +5,5 @@
 mod seat;
 mod trust;
 
-pub use seat::{ClaudeSeatFiles, ClaudeSeatSettings, McpServerEntry};
+pub use seat::{ClaudeSeatFiles, ClaudeSeatSettings, McpServerEntry, RunHooks};
 pub use trust::{ClaudeTrust, FileStamp, ProcessProbe, TrustOutcome, user_config_basename};

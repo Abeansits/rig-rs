@@ -103,7 +103,7 @@ impl AgentAdapter for ClaudeAdapter {
         Capabilities {
             structured_input: false,
             hooks: true,
-            compaction_control: false,
+            compaction_control: true,
             fork: false,
             usage_telemetry: false,
         }

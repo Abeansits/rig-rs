@@ -125,7 +125,7 @@ fn snapshot_list_and_show_json() {
     );
     assert_eq!(code, 0, "{err}");
     let mut shown: Value = serde_json::from_str(shown.trim()).expect("json");
-    assert_eq!(shown.get("schema_version").and_then(Value::as_u64), Some(8));
+    assert_eq!(shown.get("schema_version").and_then(Value::as_u64), Some(9));
     redact(&mut shown);
     insta::assert_snapshot!("show", serde_json::to_string_pretty(&shown).unwrap());
 }

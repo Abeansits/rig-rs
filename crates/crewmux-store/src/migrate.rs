@@ -229,8 +229,22 @@ CREATE TABLE rig_kernel (
 );
 ";
 
-/// Rig tables, the queue, chat, then the snapshot tables main already ships,
-/// then health, the pane lineage recorded at launch, and the workflow document.
+const COMPACTION: &str = "
+CREATE TABLE compaction_attempts (
+    id TEXT PRIMARY KEY NOT NULL,
+    seat_key TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE INDEX idx_compaction_attempts_seat ON compaction_attempts (seat_key);
+";
+
+/// Rig tables, the queue, chat, snapshot/restore, health, pane lineage,
+/// the workflow document, then compaction attempts.
+///
+/// Migrations 1–8 match a database written by main. Compaction attempts are
+/// migration 9. A database this branch wrote when compaction was migration 8
+/// (no `workflow_documents` table) fails closed on open.
 pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
     inner: Migrations::new(vec![
         M::up(SCHEMA),
@@ -241,8 +255,9 @@ pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
         M::up(LINEAGE),
         M::up(LINEAGE_START),
         M::up(WORKFLOW),
+        M::up(COMPACTION),
     ]),
-    len: 8,
+    len: 9,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

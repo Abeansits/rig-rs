@@ -1,8 +1,8 @@
-//! Health, lease, and classification failures.
+//! Health, lease, classification, and compaction failures.
 
 use thiserror::Error;
 
-/// A detector, policy, lease, or classification failure.
+/// A detector, policy, lease, classification, or compaction failure.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error {
     /// The policy document cannot be trusted, so the query stops.
@@ -41,4 +41,10 @@ pub enum Error {
     /// A classification decision failed validation.
     #[error("{0}")]
     Classify(String),
+    /// Hook stdin was not a JSON value.
+    #[error("hook json: {0}")]
+    Hook(String),
+    /// A marker or prompt could not be encoded.
+    #[error("{0}")]
+    Message(String),
 }

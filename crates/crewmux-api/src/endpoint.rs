@@ -196,3 +196,36 @@ impl Endpoint for Whoami {
     const METHOD: &'static str = "GET";
     const PATH: &'static str = "/api/whoami";
 }
+
+/// `POST /api/compaction/trigger`.
+#[derive(Debug)]
+pub struct CompactTrigger;
+
+impl Endpoint for CompactTrigger {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/compaction/trigger";
+}
+
+/// `POST /api/compaction/cancel`.
+#[derive(Debug)]
+pub struct CompactCancel;
+
+impl Endpoint for CompactCancel {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/compaction/cancel";
+}
+
+/// `POST /api/compaction/status`.
+#[derive(Debug)]
+pub struct CompactStatus;
+
+impl Endpoint for CompactStatus {
+    const METHOD: &'static str = "POST";
+    const PATH: &'static str = "/api/compaction/status";
+}
+
+/// Path for `POST /api/seats/{key}/hooks`.
+#[must_use]
+pub fn seat_hook_path(seat_key: &str) -> String {
+    format!("/api/seats/{seat_key}/hooks")
+}

@@ -1,4 +1,10 @@
-//! Claude screen corpus. Files are byte copies of the spike and `OpenRig` captures.
+//! Claude screen corpus.
+//!
+//! `2.1.286` and `2.1.289` are byte copies of the spike captures. `2.1.287`
+//! is the trust dialog from the 2.1.287 `TrustDialog` layout: the cursor is
+//! already on "Yes, I trust this folder", and the folder row is hard-wrapped,
+//! padded, and marked with the U+FFFD `xn` appends. The Mac pane was not
+//! saved; the chrome is the 2.1.286 trust screen.
 #![expect(
     clippy::expect_used,
     clippy::panic,
@@ -18,7 +24,7 @@ mod support;
 
 #[test]
 fn every_corpus_file_is_labelled() {
-    for version in ["2.1.286", "2.1.289"] {
+    for version in ["2.1.286", "2.1.287", "2.1.289"] {
         check_corpus(&support::fixtures().join(version));
     }
 }
@@ -228,6 +234,16 @@ fn assert_label(screen: &ClaudeScreen, label: &Value, name: &str) {
         }
         other => panic!("{name} screen {other:?}"),
     }
+}
+
+#[test]
+fn scrollback_interrupt_is_not_the_live_region() {
+    let rule = "─".repeat(40);
+    let scrollback =
+        format!("esc to interrupt\nold answer\n{rule}\n❯ \n{rule}\n  ? for shortcuts\n");
+    assert!(classify_text(&scrollback).is_ready(), "{scrollback}");
+    let live = format!("{rule}\n❯ \n{rule}\n  esc to interrupt\n");
+    assert!(matches!(classify_text(&live), ClaudeScreen::Busy), "{live}");
 }
 
 fn assert_dialog(dialog: &ClassifiedDialog, label: &Value, name: &str) {

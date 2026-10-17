@@ -1,5 +1,6 @@
 //! SQLite persistence: schema, a single writer, and the core repository ports.
 
+mod attempt;
 mod chat;
 mod durability;
 mod error;
@@ -15,6 +16,7 @@ mod store;
 mod token;
 mod workflow;
 
+pub use attempt::{AttemptRow, delete_attempt, get_attempt, list_attempts, upsert_attempt};
 pub use durability::{
     CheckpointRow, DirectRow, EdgeRow, SeatRestoreRow, insert_checkpoint, insert_direct,
     list_checkpoints, list_direct, list_edges, load_seat_restore, mark_kernel, put_edge,

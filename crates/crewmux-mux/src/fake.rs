@@ -46,6 +46,7 @@ struct FakeInner {
     guard_reads: u32,
     hooks: ScriptHooks,
     hub: Hub,
+    last_paste: Option<String>,
 }
 
 struct ScriptHooks {
@@ -107,6 +108,7 @@ impl FakeMux {
                     swallow: false,
                 },
                 hub: Hub::default(),
+                last_paste: None,
             })),
             events,
             own_write,
@@ -205,6 +207,11 @@ impl FakeMux {
                 }
             }
         });
+    }
+
+    /// Text of the most recent [`paste`](Multiplexer::paste).
+    pub async fn last_paste(&self) -> Option<String> {
+        self.inner.lock().await.last_paste.clone()
     }
 
     /// Argv recorded so far, including `tmux -L <socket> -f /dev/null`.
@@ -363,7 +370,8 @@ impl Multiplexer for FakeMux {
         let script = scripted_plan(&guard, spec);
         if let Some(plan) = &script {
             let text = if plan.ready_after_ms == 0 {
-                crate::fake_script::render_stub(plan)
+                let script = spec.env.get("RIG_STUB_SCRIPT").map(String::as_str);
+                crate::fake_script::session_screen(plan, script)
             } else {
                 crate::fake_script::banner().to_owned()
             };
@@ -424,20 +432,8 @@ impl Multiplexer for FakeMux {
         if keys.iter().any(|key| matches!(key, Key::CtrlU)) && guard.replay.is_empty() {
             clear_composer(&mut guard, pane);
         }
-        if guard.script_stubs && keys.iter().any(|key| matches!(key, Key::Enter)) {
-            let session = canonical_session_name(&pane.session);
-            if let Some(screen) = guard.screens.get(&session).cloned() {
-                let mut text = screen.text;
-                if !text.ends_with("stub> \n") {
-                    if !text.ends_with('\n') {
-                        text.push('\n');
-                    }
-                    text.push_str("stub> \n");
-                }
-                let next = Capture::new(text, (0, 0));
-                guard.capture = next.clone();
-                guard.screens.insert(session, next);
-            }
+        if keys.iter().any(|key| matches!(key, Key::Enter)) {
+            on_enter(&mut guard, pane);
         }
         if guard.replay.len() > 1 {
             guard.replay.pop_front();
@@ -453,6 +449,11 @@ impl Multiplexer for FakeMux {
         text: &str,
         opts: PasteOpts,
     ) -> Result<PasteReceipt, MuxError> {
+        {
+            let mut guard = self.inner.lock().await;
+            guard.last_paste = Some(text.to_owned());
+        }
+        crate::fake_script::echo_paste(text);
         let exec = RecordingExec {
             inner: Arc::clone(&self.inner),
         };
@@ -568,6 +569,42 @@ impl Multiplexer for FakeMux {
     fn attach_program(&self) -> (String, String) {
         ("tmux".to_owned(), format!("/tmp/rig-fake-{}", self.label))
     }
+}
+
+/// Enter clears a `❯` composer when nothing is replaying, and puts a stub prompt back.
+fn on_enter(guard: &mut FakeInner, pane: &PaneRef) {
+    if guard.replay.is_empty() {
+        clear_chevron_composer(guard, pane);
+    }
+    if !guard.script_stubs {
+        return;
+    }
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get(&session) else {
+        return;
+    };
+    let Some(text) = crate::fake_script::restore_stub_prompt(&screen.text) else {
+        return;
+    };
+    let next = Capture::new(text, (0, 0));
+    guard.capture = next.clone();
+    guard.screens.insert(session, next);
+}
+
+/// Enter clears a `❯` composer so the next paste is not a draft. A `stub>` screen stays.
+fn clear_chevron_composer(guard: &mut FakeInner, pane: &PaneRef) {
+    if guard.capture.text.contains('❯') {
+        guard.capture = clear_prompt(&guard.capture);
+    }
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get(&session) else {
+        return;
+    };
+    if !screen.text.contains('❯') {
+        return;
+    }
+    let cleared = clear_prompt(screen);
+    guard.screens.insert(session, cleared);
 }
 
 /// `C-u` restores an empty Claude composer on the capture and the session screen.

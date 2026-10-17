@@ -22,7 +22,7 @@ pub(crate) async fn submit_text(app: &App, name: &str, text: &str) -> Result<Val
     Ok(json!({"seat": name, "bytes": receipt.bytes}))
 }
 
-fn binding_for(seat: &Seat) -> Result<crewmux_adapters::NodeBinding, Error> {
+pub(crate) fn binding_for(seat: &Seat) -> Result<crewmux_adapters::NodeBinding, Error> {
     let Some(session) = seat.tmux_session.clone() else {
         return Err(Error::Message(format!(
             "seat {} has no session",

@@ -37,8 +37,11 @@ pub(crate) async fn drive(
         match act(&mux, pane, cwd, home, auto_trust, &capture).await {
             Act::Ready | Act::Stop => return DriveOutcome { force: None },
             Act::Answered => watch.gate_at = Some(Instant::now()),
-            Act::Poll { inconclusive } => {
-                if let Some(code) = watch.note(&capture, budget, inconclusive) {
+            Act::Poll {
+                inconclusive,
+                interrupt,
+            } => {
+                if let Some(code) = watch.note(&capture, budget, inconclusive, interrupt) {
                     return DriveOutcome { force: Some(code) };
                 }
             }
@@ -51,9 +54,11 @@ enum Act {
     Ready,
     Stop,
     Answered,
-    /// `inconclusive` is false while the pane is busy (`esc to interrupt`).
+    /// `interrupt` is an `esc to interrupt` row in the live region and no spinner.
+    /// That wait uses [`LaunchBudget::inconclusive_stable`] and ignores scrollback.
     Poll {
         inconclusive: bool,
+        interrupt: bool,
     },
 }
 
@@ -69,8 +74,12 @@ async fn act(
         ClaudeScreen::Ready(_) => Act::Ready,
         ClaudeScreen::Busy => Act::Poll {
             inconclusive: false,
+            interrupt: crate::claude::screen::bounded_interrupt(&capture.text),
         },
-        ClaudeScreen::Inconclusive => Act::Poll { inconclusive: true },
+        ClaudeScreen::Inconclusive => Act::Poll {
+            inconclusive: true,
+            interrupt: false,
+        },
         ClaudeScreen::Login(_) | ClaudeScreen::UnknownMenu { .. } | ClaudeScreen::Draft => {
             Act::Stop
         }
@@ -133,6 +142,7 @@ impl Watch {
         capture: &Capture,
         budget: LaunchBudget,
         inconclusive: bool,
+        interrupt: bool,
     ) -> Option<ReadinessCode> {
         let now = Instant::now();
         if self.last_hash != Some(capture.hash) {
@@ -143,7 +153,8 @@ impl Watch {
             return Some(ReadinessCode::UnrecognisedScreen);
         }
         let stable = now.saturating_duration_since(self.stable_since);
-        if inconclusive && !capture.text.trim().is_empty() && stable >= budget.inconclusive_stable {
+        let stalled = !capture.text.trim().is_empty() && stable >= budget.inconclusive_stable;
+        if stalled && (inconclusive || interrupt) {
             return Some(ReadinessCode::UnrecognisedScreen);
         }
         let past_gate = self.gate_at.is_some_and(|gate| {
@@ -153,5 +164,44 @@ impl Watch {
             return Some(ReadinessCode::UnrecognisedScreen);
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use crewmux_mux::{Capture, FakeMux, PaneRef};
+    use crewmux_types::ReadinessCode;
+
+    use super::drive;
+    use crate::budget::LaunchBudget;
+
+    #[tokio::test]
+    async fn interrupt_wait_uses_the_inconclusive_budget() {
+        let mux = Arc::new(FakeMux::new());
+        mux.set_capture(Capture::new("esc to interrupt\n".to_owned(), (0, 0)))
+            .await;
+        let budget = LaunchBudget {
+            first_screen: Duration::from_secs(5),
+            ready_after_last_gate: Duration::from_secs(5),
+            inconclusive_stable: Duration::from_millis(40),
+            overall: Duration::from_secs(5),
+            poll: Duration::from_millis(5),
+        };
+        let started = Instant::now();
+        let outcome = drive(
+            mux,
+            &PaneRef::session("seat"),
+            Path::new("/work"),
+            Path::new("/home"),
+            false,
+            budget,
+        )
+        .await;
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(outcome.force, Some(ReadinessCode::UnrecognisedScreen));
     }
 }

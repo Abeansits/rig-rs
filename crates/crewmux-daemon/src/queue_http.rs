@@ -18,10 +18,18 @@ use crate::state::App;
 
 pub(crate) async fn list(State(app): State<App>) -> Response {
     app.touch();
-    let book = app.queue.lock().await;
-    match serde_json::to_value(book.items()) {
-        Ok(items) => ok(json!({"items": items})),
-        Err(err) => fail(Error::Message(err.to_string())),
+    let items = {
+        let book = app.queue.lock().await;
+        match serde_json::to_value(book.items()) {
+            Ok(items) => items,
+            Err(err) => return fail(Error::Message(err.to_string())),
+        }
+    };
+    let compaction = crate::compaction::summaries(&app).await;
+    if compaction.is_empty() {
+        ok(json!({"items": items}))
+    } else {
+        ok(json!({"items": items, "compaction": compaction}))
     }
 }
 

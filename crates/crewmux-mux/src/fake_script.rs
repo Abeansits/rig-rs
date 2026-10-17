@@ -43,3 +43,85 @@ pub(crate) fn render_stub(plan: &StubPlan) -> String {
 pub(crate) fn banner() -> &'static str {
     "stub-agent\n"
 }
+
+/// Stub script wins. Otherwise a debug `RIG_FAKE_CAPTURE` can show a Claude pane.
+pub(crate) fn session_screen(plan: &StubPlan, stub_script: Option<&str>) -> String {
+    if stub_script.is_none()
+        && let Some(text) = debug_capture_override()
+    {
+        return text;
+    }
+    render_stub(plan)
+}
+
+/// Append `text` to `RIG_PASTE_SINK` when that path is set.
+///
+/// Debug builds only. The product confirm path still reads the Claude jsonl.
+/// A test copies the echoed paste into that file; it does not skip the check.
+/// Callers must not run this on a tokio worker thread.
+pub(crate) fn echo_paste(text: &str) {
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var_os("RIG_PASTE_SINK").is_none() {
+            return;
+        }
+        let owned = text.to_owned();
+        drop(tokio::task::spawn_blocking(move || note_paste(&owned)));
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = text;
+    }
+}
+
+fn note_paste(text: &str) {
+    let Ok(path) = std::env::var("RIG_PASTE_SINK") else {
+        return;
+    };
+    let mut record = Vec::new();
+    record.extend(text.len().to_string().into_bytes());
+    record.push(b'\n');
+    record.extend(text.as_bytes());
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    drop(std::io::Write::write_all(&mut file, &record));
+}
+
+/// After Enter, rewrite a stub screen so the prompt is showing again.
+///
+/// A Claude composer has no `stub>` marker, so it stays as it is.
+pub(crate) fn restore_stub_prompt(text: &str) -> Option<String> {
+    if !text.contains("stub>") {
+        return None;
+    }
+    if text.ends_with("stub> \n") {
+        return Some(text.to_owned());
+    }
+    let mut next = text.to_owned();
+    if !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str("stub> \n");
+    Some(next)
+}
+
+fn debug_capture_override() -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        let raw = std::env::var("RIG_FAKE_CAPTURE").ok()?;
+        if raw == "claude-ready" {
+            let rule = "─".repeat(40);
+            return Some(format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"));
+        }
+        Some(raw)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}

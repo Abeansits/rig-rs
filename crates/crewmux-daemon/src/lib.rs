@@ -5,6 +5,7 @@ mod cart;
 mod chat;
 mod check_run;
 mod checkpoint;
+mod compaction;
 mod composer;
 mod context_address;
 mod context_deliver;

@@ -19,6 +19,7 @@ crewmux-durability.workspace = true
 crewmux-transcript.workspace = true
 crewmux-orchestration.workspace = true
 crewmux-health.workspace = true
+crewmux-provider.workspace = true
 crewmux-integrations.workspace = true
 crewmux-mux.workspace = true
 async-trait.workspace = true
