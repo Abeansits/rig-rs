@@ -77,6 +77,8 @@ pub(crate) struct App {
     cart_state: Arc<AtomicU64>,
     /// The next `restore_rig` raises the crash-cart cancel flag and still finishes.
     cancel_on_restore: Arc<AtomicBool>,
+    /// In-memory context-pack library. Materialized on the first context route.
+    pub context: Arc<crate::context_hold::ContextHold>,
 }
 
 const CART_IDLE: u64 = 0;
@@ -119,6 +121,7 @@ impl App {
         home: PathBuf,
     ) -> Self {
         let (persist_tx, queue_rx) = mpsc::unbounded_channel();
+        let context = Arc::new(crate::context_hold::ContextHold::from_env(home.clone()));
         Self {
             store,
             mux,
@@ -146,6 +149,7 @@ impl App {
             direct_phase: Arc::new(tokio::sync::Mutex::new(None)),
             cart_state: Arc::new(AtomicU64::new(cart_pack(0, CART_IDLE))),
             cancel_on_restore: Arc::new(AtomicBool::new(false)),
+            context,
         }
     }
 

@@ -33,6 +33,9 @@ tokio-util.workspace = true
 tracing.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
 tokio-stream.workspace = true
+parking_lot.workspace = true
+# Profile pieces carry the TypeScript sha256 of their composed bytes.
+sha2.workspace = true
 
 [dev-dependencies]
 # In-process MCP client for the replaced-pane send test. Dev-only; the MCP crate
@@ -41,8 +44,6 @@ crewmux-mcp.workspace = true
 crewmux-transcript.workspace = true
 rmcp.workspace = true
 rusqlite.workspace = true
-# Hash the Claude Code 2.1.286 fd capture. Already in the workspace lockfile.
-sha2.workspace = true
 
 [features]
 # In-memory multiplexer for debug test builds. Release binaries leave this off

@@ -1,1 +1,4 @@
 target/
+# Resume tokens are `$RIG_HOME/resume`. A daemon whose home is the crate dir
+# must not leave them in the tree.
+crates/crewmux-daemon/resume/

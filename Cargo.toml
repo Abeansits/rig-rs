@@ -26,9 +26,13 @@ ulid = { version = "3.0.0", features = ["serde"] }
 # The mux crate uses `process` for the Linux SIGCHLD reap nudge.
 # Provider tests use `process` to reap leftover tmux sockets.
 # The stub agent uses `termios` so `C-u` reaches the process instead of the line discipline.
+# crewmux-orchestration uses `fs` so pack and profile reads walk with `openat` /
+# `openat2` (`O_NOFOLLOW`, `RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH`) and never
+# follow a swapped directory. No new crate; rustix was already in the workspace.
 # `cargo add -p crewmux-daemon rustix --features fs,process`
 # `cargo add -p crewmux-cli rustix --features fs`
 # `cargo add -p crewmux-provider --dev rustix --features process`
+# `cargo add -p crewmux-orchestration rustix --features fs`
 rustix = "1.1.5"
 crewmux-types = { path = "crates/crewmux-types" }
 crewmux-spec = { path = "crates/crewmux-spec" }

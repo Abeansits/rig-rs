@@ -7,6 +7,11 @@ mod autostart;
 mod chatroom;
 mod command;
 mod compact;
+mod context_add;
+mod context_call;
+mod context_cmd;
+mod context_trace;
+mod context_view;
 mod doctor_cmd;
 mod doctor_eval;
 mod doctor_facts;
@@ -171,6 +176,8 @@ enum Commands {
     CrashCart(slice8::CrashCartArgs),
     /// Agent checkpoints.
     Checkpoint(slice8::CheckpointArgs),
+    /// Browse, compose, and deliver context packs.
+    Context(context_cmd::ContextArgs),
     /// Declarative workflow runtime. run runs, watch watches, neither advances.
     Workflow(workflow::WorkflowArgs),
 }
@@ -225,6 +232,7 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::RestoreCheck(args) => slice8::restore_check(&args),
         Commands::CrashCart(args) => slice8::crash_cart(&args),
         Commands::Checkpoint(args) => slice8::checkpoint(&args),
+        Commands::Context(args) => context_cmd::run(&args),
         Commands::Workflow(args) => workflow::run(&args),
     }
 }

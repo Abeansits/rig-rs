@@ -67,11 +67,13 @@ impl AgentAdapter for StubAdapter {
 
     async fn deliver_startup(
         &self,
-        _files: &[ResolvedStartupFile],
+        files: &[ResolvedStartupFile],
         _binding: &NodeBinding,
         _io: &dyn SeatIo,
     ) -> Result<StartupDeliveryResult, Error> {
-        Ok(StartupDeliveryResult::default())
+        Ok(StartupDeliveryResult {
+            delivered: files.len(),
+        })
     }
 
     async fn launch(

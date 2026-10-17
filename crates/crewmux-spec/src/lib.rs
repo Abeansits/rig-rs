@@ -2,6 +2,7 @@
 //!
 //! [`yaml`] is the only module that names the YAML crate.
 
+pub mod context;
 mod error;
 mod model;
 pub mod workflow;

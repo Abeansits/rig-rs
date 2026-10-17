@@ -5,6 +5,7 @@
 //! `cargo xtask lint-mux` rejects a human-client signal built from attachment.
 //! `cargo xtask lint` checks provider config writers.
 
+mod context_packs;
 mod error;
 mod lint;
 mod lint_enter;
@@ -16,6 +17,7 @@ pub mod diff;
 pub mod ledger;
 pub mod record_tui;
 
+pub use context_packs::generate as generate_context_packs;
 pub use error::{Error, io_err};
 pub use lint::{lint_claude_json, lint_window_size};
 pub use lint_enter::lint_blind_enter;

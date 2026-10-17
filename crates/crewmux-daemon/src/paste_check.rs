@@ -87,20 +87,25 @@ fn flat_region(parser: ComposerParser, screen: &str, width: Option<usize>) -> St
     flatten_at(&text, width)
 }
 
+/// History rows for one capture. A 64 KiB line on a 90-column pane fits.
+const HISTORY_CAP: u32 = 1024;
+
 /// Scrollback for `capture-pane -J -S -<n>`.
 ///
-/// `-S -<n>` is `n` raw grid rows of history plus the visible pane. Wrapped
-/// rows count toward `n`. `len / 20` overestimates a 90-column wrap; it is a
-/// window, not a paste limit. The window is clamped to 500 history rows. A
-/// paste whose prompt no longer fits fails closed: the payload is not found
-/// and Enter is not sent. A 20_000-character line on a 90-column pane is about
-/// 230 wrapped rows and still fits.
+/// `-S -<n>` is `n` raw grid rows plus the visible pane. A 64 KiB line on a
+/// 90-column pane is about 730 wrapped rows. [`HISTORY_CAP`] plus the visible
+/// pane covers that paste. A taller paste still fails closed: the prompt
+/// scrolls out of the window, the payload is not found, and Enter is not sent.
+/// `len / 20` overestimates a 90-column wrap; it is a window, not a second
+/// paste limit.
 #[must_use]
 pub(crate) fn history_range(payload: &str) -> CaptureRange {
     let wraps = payload.len() / 20;
     let breaks = payload.lines().count();
     let rows = wraps.saturating_add(breaks).saturating_add(32);
-    let rows = u32::try_from(rows).unwrap_or(400).clamp(48, 500);
+    let rows = u32::try_from(rows)
+        .unwrap_or(HISTORY_CAP)
+        .clamp(48, HISTORY_CAP);
     CaptureRange::JoinedHistory(rows)
 }
 
@@ -524,13 +529,13 @@ mod tests {
     }
 
     #[test]
-    fn history_range_clamps_at_500_rows() {
-        let wide = "W".repeat(20_000);
-        assert_eq!(history_range(&wide), CaptureRange::JoinedHistory(500));
+    fn history_range_covers_a_64kib_line() {
+        let wide = "W".repeat(64 * 1024);
+        assert_eq!(history_range(&wide), CaptureRange::JoinedHistory(1024));
         let modest = "W".repeat(100);
         assert!(matches!(
             history_range(&modest),
-            CaptureRange::JoinedHistory(rows) if (48..500).contains(&rows)
+            CaptureRange::JoinedHistory(rows) if (48..1024).contains(&rows)
         ));
     }
 

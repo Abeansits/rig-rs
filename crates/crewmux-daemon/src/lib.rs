@@ -7,6 +7,14 @@ mod check_run;
 mod checkpoint;
 mod compaction;
 mod composer;
+mod context_address;
+mod context_deliver;
+mod context_hold;
+mod context_http;
+mod context_legacy;
+mod context_ops;
+mod context_profile;
+mod context_recap;
 mod db;
 mod death;
 mod deliver;
@@ -49,6 +57,20 @@ mod workflow_http;
 pub use error::Error;
 pub use serve::run;
 
+#[cfg(test)]
+mod context_deliver_tests;
+#[cfg(test)]
+mod context_pack_route_cases;
+#[cfg(test)]
+mod context_profile_route_cases;
+#[cfg(test)]
+mod context_profile_world_cases;
+#[cfg(test)]
+mod context_race_tests;
+#[cfg(test)]
+mod context_route_tests;
+#[cfg(test)]
+mod context_symlink_tests;
 #[cfg(test)]
 mod flow;
 #[cfg(test)]

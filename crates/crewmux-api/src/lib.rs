@@ -6,6 +6,7 @@
 
 mod chat;
 mod client;
+mod context;
 mod dirs;
 mod endpoint;
 mod error;
@@ -20,6 +21,11 @@ pub use chat::{
 pub use client::{
     Client, HttpStream, MAX_SUN_PATH_BYTES, Response, daemon_bind_path, daemon_socket, path_bytes,
     rig_home, tui_socket, tui_socket_path,
+};
+pub use context::{
+    ContextAddress, ContextByRef, ContextCompose, ContextDeliver, ContextLibrary, ContextPieces,
+    ContextPreview, ContextProfile, ContextRecap, ContextSync, STATE_DIR_NAME,
+    ensure_openrig_compat, legacy_context_dir, workspace_context_dir,
 };
 pub use crewmux_core::SeatState;
 pub use crewmux_types::{
