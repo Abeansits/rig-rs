@@ -1,0 +1,10 @@
+---
+audience: dev
+---
+A
+
+
+audience: dev
+
+
+B-without-newline

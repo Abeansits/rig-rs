@@ -45,6 +45,9 @@ pub(crate) fn apply(plan: &SetupPlan, ctx: &ApplyCtx<'_>) -> Result<(), Error> {
     for step in &plan.steps {
         apply_step(step, ctx)?;
     }
+    if let Some(workspace) = std::env::var_os("RIG_WORKSPACE").filter(|value| !value.is_empty()) {
+        crewmux_api::ensure_openrig_compat(Path::new(&workspace))?;
+    }
     Ok(())
 }
 

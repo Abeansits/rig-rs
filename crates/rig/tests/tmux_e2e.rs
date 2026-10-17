@@ -84,6 +84,16 @@ mod live {
         }
 
         #[test]
+        fn context_pack_64kib_delivers_on_real_tmux() {
+            super::context_pack_64kib_delivers_on_real_tmux();
+        }
+
+        #[test]
+        fn context_pack_past_the_history_window_exits_nonzero() {
+            super::context_pack_past_the_history_window_exits_nonzero();
+        }
+
+        #[test]
         fn tall_buffer_paste_recovers_the_prompt() {
             super::tall_buffer_paste_recovers_the_prompt();
         }
@@ -449,15 +459,87 @@ mod live {
         assert!(history(&live, "one__pair").contains(body));
     }
 
+    fn context_pack_64kib_delivers_on_real_tmux() {
+        let live = boot(None);
+        assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
+        let body = format!("PACK64-{}", "W".repeat(64 * 1024 - 7));
+        assert_eq!(body.len(), 64 * 1024);
+        write_pack(&live, "bulk", &body);
+        let (code, value, err) = send(
+            &live,
+            &[
+                "context", "deliver", "--ref", "bulk", "--seat", "one", "--mode", "paste", "--json",
+            ],
+        );
+        assert_eq!(code, 0, "{err} {value} {}", log(&live));
+        assert_eq!(
+            value.pointer("/delivery/status").and_then(Value::as_str),
+            Some("ok"),
+            "{value}"
+        );
+        assert_eq!(
+            value
+                .pointer("/delivery/receipts/0/outcome")
+                .and_then(Value::as_str),
+            Some("delivered"),
+            "{value}"
+        );
+        let flat: String = history(&live, "one__pair")
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect();
+        assert!(flat.contains("PACK64-"), "64 KiB pack was not delivered");
+    }
+
+    fn context_pack_past_the_history_window_exits_nonzero() {
+        let live = boot(Some("buffer=1"));
+        assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
+        let body = "W".repeat(1200 * 90);
+        write_pack(&live, "huge", &body);
+        let (code, value, err) = send(
+            &live,
+            &[
+                "context", "deliver", "--ref", "huge", "--seat", "one", "--mode", "paste", "--json",
+            ],
+        );
+        assert_ne!(code, 0, "{err} {value} {}", log(&live));
+        assert_ne!(
+            value
+                .pointer("/delivery/receipts/0/outcome")
+                .and_then(Value::as_str),
+            Some("delivered"),
+            "{value}"
+        );
+        let shot = history(&live, "one__pair");
+        assert!(
+            !shot.contains("SUBMIT"),
+            "history window submitted the paste: {shot}"
+        );
+    }
+
+    fn write_pack(live: &Live, refer: &str, body: &str) {
+        let dir = live.rig_home.join("context").join(refer);
+        std::fs::create_dir_all(&dir).expect("pack");
+        std::fs::write(
+            dir.join("manifest.yaml"),
+            format!(
+                "name: {refer}\nversion: \"1\"\ntaxonomy: mission\nfiles:\n  - path: body.txt\n    role: source\n"
+            ),
+        )
+        .expect("manifest");
+        std::fs::write(dir.join("body.txt"), body).expect("body");
+    }
+
     fn history_cap_fails_closed_without_submit() {
         // `buffer=1` prints SUBMIT when Enter lands. Without it the check below
         // cannot fail, because the plain stub never writes that word.
         let live = boot(Some("buffer=1"));
         assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
-        // 600 rows at 90 columns is past `capture-pane -S -500` plus the visible
-        // pane. The verdict-time prompt scrolls out of the window, so the check
-        // fails closed and must not press Enter.
-        let body = "W".repeat(600 * 90);
+        // 1200 rows at 90 columns is past `capture-pane -S -1024` plus the
+        // visible pane. The verdict-time prompt scrolls out of the window, so
+        // the check fails closed and must not press Enter. A 64 KiB line
+        // (about 730 rows) still fits.
+        let body = "W".repeat(1200 * 90);
         let (code, value, err) = send(&live, &["send", "--to", "one@pair", &body, "--json"]);
         assert_ne!(
             outcome(&value),
@@ -476,7 +558,7 @@ mod live {
     fn tall_buffer_paste_recovers_the_prompt() {
         let live = boot(Some("buffer=1"));
         assert_eq!(pane_size(&live).as_deref(), Some("90x27"));
-        let body = vec!["W"; 600].join("\n");
+        let body = vec!["W"; 1200].join("\n");
         let (code, value, err) = send(&live, &["send", "--to", "one@pair", &body, "--json"]);
         assert_ne!(
             outcome(&value),

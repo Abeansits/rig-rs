@@ -3,6 +3,9 @@
 //! The runtime is pure. It clones a queue book and an [`Engine`], mutates the
 //! clones, and returns them. Callers publish the pair once. SQLite lives in
 //! `crewmux-store`. This crate does not start a runtime or spawn a process.
+//! Context packs live in [`context_packs`].
+
+pub mod context_packs;
 
 mod boot;
 mod builtin;
