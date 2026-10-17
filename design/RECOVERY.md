@@ -82,3 +82,31 @@ On `main`: PE-001-PE-009, PE-011-PE-017, PE-019 (lineage) and PE-020 (MCP routes
 
 - The cloud agents for slices 9, 14 and 19 (PRs #18, #28, #27) may still have the uploaded specs in their own workspaces.
 - Architect, for any spec that has to be rewritten. A rewritten spec must be marked as a rewrite, not a recovery.
+
+## Architect rewrites (added 2026-10-15)
+
+These files are **rewrites, not recoveries**. Each one keeps its `REWRITE` header line. Source: `/workspace/openrig-port/design/rewrites/`.
+
+- ADRs: `0001-async-runtime`, `0002-mcp-crate`, `0003-sqlite-layer`, `0004-tui-crate`, `0006-daemon-ipc`, `0007-yaml`, `0008-provider-config-writes`
+- Acceptance specs: `slice-0-skeleton`, `slice-0b-diff-harness-ledger`, `slice-1-stub-seat`, `slice-1b-tmux-core`, `slice-7-provider-setup-doctor`, `slice-10-opencode-seat`, `slice-11-herdr-ghostty`, `slice-13-tui-v1`, `slice-18-mission-control`
+
+Caveats:
+- In slice 1b, AC1-AC15 are **renumbered**. The original AC numbers are lost, so AC references in older PRs and QA notes may not match.
+- Slice 18's CLI shape is **reconstructed**. No original text or merged code backs it.
+
+### Corrections made against the code on main (`1a9b193`) before committing
+
+- **MSRV:** the rewrite already says 1.99.0 (`rust-version = "1.99"`, `rust-toolchain.toml` channel `1.99.0`). No change.
+- **ADR-0003:** the rewrite left the migration runner open. The code uses `rusqlite_migration` (`crewmux-store/src/migrate.rs`), so the text now says so.
+- **ADR-0006:** the rewrite said "hyper/axum server, hyper client". The server is axum. The client (`crewmux-api::client`) is a hand-written blocking HTTP/1.1 client over `std::os::unix::net::UnixStream` with no hyper dependency, so the text was fixed to say that.
+- **ADR-0008:**
+  - The backup was `<file>.rig-rs.bak`; the code writes `$RIG_HOME/backups/<file-id>/first-touch.orig` (`crewmux-provider/src/backup.rs`), so the text was fixed.
+  - The marker was `# >>> rig-rs >>>`; the code uses `# >>> rig-rs managed >>>` / `# <<< rig-rs managed <<<` (`codex_block.rs`, `tmux_conf.rs`), so the text was fixed.
+- **Slice 0, AC8:** there is no `check-headers` xtask on main, so the text now says AC8 is still open.
+
+## Still missing (as of 2026-10-15)
+
+- `PLAN.md`
+- `spikes/`
+- `RUST-AGENT-GUIDE.md`
+- acceptance specs for slices 15, 16, 17 and 20
