@@ -134,7 +134,10 @@ async fn paste_mismatch_fails_the_prep_and_the_next_compact_sends_again() {
             (0, 0),
         ))
         .await;
-    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    // The missed paste is already in `last_paste`. Recording it as well as the
+    // next prep makes two user turns, and confirm waits out the budget.
+    let already = rig.mux.last_paste().await.unwrap_or_default();
+    watch_after(Arc::clone(&rig.mux), rig.transcript.clone(), already);
     let second = trigger(&rig.app, body)
         .await
         .expect("compact after a missed paste");
@@ -321,8 +324,13 @@ async fn boot(label: &str, wait: Duration) -> Boot {
 }
 
 fn watch(mux: Arc<FakeMux>, path: PathBuf) {
+    watch_after(mux, path, String::new());
+}
+
+/// Append later pastes. `seen` is a paste that already happened and must not count.
+fn watch_after(mux: Arc<FakeMux>, path: PathBuf, seen: String) {
     tokio::spawn(async move {
-        let mut seen = String::new();
+        let mut seen = seen;
         for _ in 0..2_000 {
             if let Some(text) = mux.last_paste().await
                 && text != seen
