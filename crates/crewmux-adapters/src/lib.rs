@@ -2,6 +2,7 @@
 
 mod adapter;
 mod budget;
+mod classify;
 pub mod claude;
 pub mod codex;
 pub mod dialog;
@@ -13,13 +14,14 @@ mod types;
 
 pub use adapter::{AgentAdapter, SeatIo};
 pub use budget::{BudgetOverrides, LaunchBudget};
+pub use classify::{classify_runtime, runtime_composer};
 pub use claude::ClaudeAdapter;
 pub use codex::{CODEX_DIALOGS, CodexAdapter};
 pub use dialog::{AnswerPolicy, DialogDriver, DriveOutcome, EscalateReason, MuxPane, SeatContext};
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};
 pub use registry::AdapterRegistry;
-pub use stub::{StubAdapter, StubScript, binding_for, classify, parse_script, run_stub_agent};
+pub use stub::{StubAdapter, StubScript, binding_for, parse_script, run_stub_agent};
 pub use types::{
     AppliedLaunch, Capabilities, DeliveryReceipt, InstalledResource, LaunchOpts, LaunchOutcome,
     NodeBinding, ProjectionPlan, ProjectionResult, Readiness, Recovery, ResolvedStartupFile,

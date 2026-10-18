@@ -198,12 +198,18 @@ async fn drive(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Resul
                 compact_sent = true;
                 break;
             }
-            Some(text) => {
-                submit_text(app, seat.name.as_str(), &text).await?;
-                if !body.skip_map {
-                    break;
+            Some(text) => match submit_text(app, seat.name.as_str(), &text).await {
+                Ok(_) => {
+                    if !body.skip_map {
+                        break;
+                    }
                 }
-            }
+                Err(err) if before_enter(&err) => {
+                    release_failed_prep(app, seat, &err).await?;
+                    return Err(err);
+                }
+                Err(err) => return Err(err),
+            },
             None => return finish_skip(app, seat, step.reason).await,
         }
     }
@@ -384,6 +390,58 @@ fn compact_landed(result: Result<Value, Error>, session: &str) -> bool {
             false
         }
     }
+}
+
+/// Paste and readiness failures happen before Enter. `NotVerified` and
+/// `Contaminated` mean Enter already landed.
+fn before_enter(err: &Error) -> bool {
+    !matches!(
+        err,
+        Error::Adapter(
+            crewmux_adapters::Error::NotVerified | crewmux_adapters::Error::Contaminated
+        )
+    )
+}
+
+fn prep_fail_reason(err: &Error) -> &'static str {
+    match err {
+        Error::Adapter(crewmux_adapters::Error::PasteMismatch) => "paste_mismatch",
+        Error::Store(_)
+        | Error::Domain(_)
+        | Error::Mux(_)
+        | Error::Adapter(_)
+        | Error::Spec(_)
+        | Error::Io(_)
+        | Error::Message(_) => "send_failed",
+    }
+}
+
+/// The prep paste never landed. Drop it so the next compact is not `preparation_pending`.
+async fn release_failed_prep(app: &App, seat: &Seat, err: &Error) -> Result<(), Error> {
+    let session = seat.name.as_str();
+    let reason = prep_fail_reason(err);
+    {
+        let mut guard = app.compaction.lock().await;
+        let attempt_id = guard.prep(session).attempt_id;
+        if let Some(prep) = guard.preps.get_mut(session) {
+            prep.active = false;
+            prep.status = PrepStatus::Stopped;
+            prep.reason = Some(reason.to_owned());
+            prep.attempt_id.clear();
+        }
+        if !attempt_id.is_empty() {
+            guard.book.fail_unsent(
+                &seat.id.to_string(),
+                AttemptId(attempt_id),
+                reason,
+                now_ms(),
+            );
+        }
+        guard
+            .enforcer
+            .note_settled(session, ManualCompactionStage::Failed);
+    }
+    save(app).await
 }
 
 fn compact_entered(err: &crewmux_adapters::Error) -> bool {

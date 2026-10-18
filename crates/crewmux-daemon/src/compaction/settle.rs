@@ -13,7 +13,7 @@ use crewmux_mux::{Capture, FakeMux, Multiplexer};
 use crewmux_types::{RigId, RigName, RuntimeKind, SeatId, SeatName};
 use tokio_util::sync::CancellationToken;
 
-use super::trigger::{cancel, release_finished, trigger};
+use super::trigger::{cancel, release_finished, status, trigger};
 use crate::db::write;
 use crate::state::App;
 
@@ -70,6 +70,83 @@ async fn compact_after_send_failed_then_incomplete_sends_again() {
         !second.to_string().contains("preparation_stopped"),
         "{second}"
     );
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[test]
+fn live_compact_captures_are_the_pre_fix_failures() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/pr18");
+    for (name, sha) in [
+        (
+            "compact1.json",
+            "afc32c63ed2941337c1f120fe064fe4cfc621212d30338862776ce99a7b2fab5",
+        ),
+        (
+            "compact3.json",
+            "ae6063510105afb8dfd04e7cf1d72d703badd4c2b1cff6a52280322fb00979e6",
+        ),
+        (
+            "compact-status-late.json",
+            "3d4bc81324adf1e7604c53bc8d3b09ed8285c868c1666e4653163ffebf18dafd",
+        ),
+    ] {
+        let text = std::fs::read_to_string(dir.join(name)).expect(name);
+        assert!(!text.contains("/Users/"), "{name}");
+        assert_eq!(crewmux_transcript::fingerprint_raw(&text), sha, "{name}");
+    }
+    let pending = std::fs::read_to_string(dir.join("compact3.json")).expect("compact3");
+    assert!(pending.contains("preparation_pending"), "{pending}");
+}
+
+#[tokio::test]
+async fn paste_mismatch_fails_the_prep_and_the_next_compact_sends_again() {
+    let rig = boot("paste-miss", Duration::from_millis(800)).await;
+    rig.mux
+        .set_capture_after_paste(Capture::new("nope\n".to_owned(), (0, 0)))
+        .await;
+    let body = br#"{"seat":"claude"}"#;
+    let failed = trigger(&rig.app, body)
+        .await
+        .expect_err("paste did not land");
+    let message = failed.to_string();
+    assert!(
+        message.contains("composer did not show the paste"),
+        "{message}"
+    );
+    let reported = status(&rig.app, body).await.expect("status");
+    assert_eq!(reported["stage"], "failed", "{reported}");
+    let attempt = &reported["attempts"][0];
+    assert_eq!(attempt["state"], "failed", "{reported}");
+    assert_eq!(attempt["abort_reason"], "paste_mismatch", "{reported}");
+    let first_id = attempt["attempt_id"]
+        .as_str()
+        .expect("attempt id")
+        .to_owned();
+    assert!(
+        !reported.to_string().contains("preparation_pending"),
+        "{reported}"
+    );
+
+    let rule = "─".repeat(40);
+    rig.mux
+        .set_capture(Capture::new(
+            format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"),
+            (0, 0),
+        ))
+        .await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let second = trigger(&rig.app, body)
+        .await
+        .expect("compact after a missed paste");
+    let again = second.to_string();
+    assert!(!again.contains("preparation_pending"), "{second}");
+    let pasted = rig.mux.last_paste().await.expect("second paste");
+    assert!(pasted.contains("OpenRig manual compaction"), "{pasted}");
+    let guard = rig.app.compaction.lock().await;
+    let prep = guard.prep("claude");
+    assert!(prep.active, "{prep:?}");
+    assert_ne!(prep.attempt_id, first_id);
+    drop(guard);
     drop(std::fs::remove_dir_all(&rig.root));
 }
 

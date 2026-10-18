@@ -286,6 +286,32 @@ impl Book {
         }
     }
 
+    /// A prep paste failed before `/compact`. The row is `Failed` even when
+    /// [`Self::request`] never opened it.
+    pub fn fail_unsent(&mut self, seat_key: &str, id: AttemptId, reason: &str, now_ms: u64) {
+        if let Some(attempt) = self.by_id_mut(&id) {
+            attempt.state = AttemptState::Failed(reason.to_owned());
+            return;
+        }
+        self.attempts.push(Attempt {
+            id,
+            seat_key: seat_key.to_owned(),
+            trigger: CompactTrigger::Manual,
+            managed: true,
+            state: AttemptState::Failed(reason.to_owned()),
+            session_id: None,
+            saw_compact_start: false,
+            saw_post_compact: false,
+            summary_sha: None,
+            summary_len: None,
+            opened_ms: now_ms,
+            precompact_ms: None,
+            completed_ms: None,
+            transcript_path: PathBuf::new(),
+            cwd: PathBuf::new(),
+        });
+    }
+
     /// Enter already happened and the transcript check failed. Do not resend.
     pub fn mark_failed(&mut self, id: &AttemptId, reason: &str) {
         if let Some(attempt) = self.by_id_mut(id)
@@ -469,13 +495,13 @@ impl AbortReason {
 pub fn summary_value(attempt: &Attempt) -> serde_json::Value {
     let abort_reason = match attempt.state {
         AttemptState::Aborted(reason) => Some(reason.as_str()),
+        AttemptState::Failed(ref reason) => Some(reason.as_str()),
         AttemptState::Requested
         | AttemptState::PreCompactSeen { .. }
         | AttemptState::Completed { .. }
         | AttemptState::RestoreSent
         | AttemptState::Done
-        | AttemptState::Cancelled
-        | AttemptState::Failed(_) => None,
+        | AttemptState::Cancelled => None,
     };
     let confirmed = matches!(
         attempt.state,

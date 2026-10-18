@@ -272,7 +272,7 @@ impl CodexAdapter {
         };
         let io = MuxPane::new(Arc::clone(&self.mux), binding.pane.clone());
         if !matches!(
-            DialogDriver::default()
+            DialogDriver::live()
                 .drive(&io, CODEX_DIALOGS, policy, &seat)
                 .await?,
             DriveOutcome::Answered { .. }
@@ -650,7 +650,7 @@ fn failed_cwd(cwd: &Path) -> LaunchOutcome {
     }
 }
 
-fn to_readiness(screen: CodexScreen) -> Readiness {
+pub(crate) fn to_readiness(screen: CodexScreen) -> Readiness {
     match screen {
         CodexScreen::Ready(_) => Readiness::Ready,
         CodexScreen::Draft { .. } | CodexScreen::Inconclusive => Readiness::Inconclusive,

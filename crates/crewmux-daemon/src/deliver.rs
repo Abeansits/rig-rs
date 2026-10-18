@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime};
 
-use crewmux_adapters::{Readiness, classify};
+use crewmux_adapters::Readiness;
 use crewmux_core::DomainEvent;
 use crewmux_messaging::{
     DeliveryOutcome, DeliveryReceipt, OutboxRecord, PasteDisplay, SessionRef,
@@ -16,7 +16,7 @@ use crewmux_mux::{
 use crewmux_types::{ReadinessCode, RuntimeKind};
 use serde_json::{Value, json};
 
-use crate::composer::{ComposerParser, classify_stub, stub_drafting};
+use crate::composer::{classify_runtime, runtime_drafting};
 use crate::error::Error;
 use crate::launch::now_ts;
 use crate::notify::emit;
@@ -153,7 +153,8 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
         runtime,
     };
     let shot = app.mux.capture(&pane, CaptureRange::Visible).await?;
-    let readiness = classify(&shot.text);
+    // The seat's own classifier. The stub one is Ready only on `stub> ` (issue #34).
+    let readiness = readiness_of(app, runtime, &shot.text);
     if readiness != Readiness::Ready {
         return not_ready(app, outbound, &address, &pane, &readiness, shown).await;
     }
@@ -205,11 +206,11 @@ async fn guarded(
     shown: Shown,
 ) -> Result<Value, Error> {
     let now = Instant::now();
-    let first = verdict(app, address, pane, now).await?;
+    let first = verdict(app, address, pane, now, shown.runtime).await?;
     if !matches!(first.0.verdict, GuardVerdict::Deliver) {
         return receipt_row(app, outbound, address, &first.0, None).await;
     }
-    let second = verdict(app, address, pane, Instant::now()).await?;
+    let second = verdict(app, address, pane, Instant::now(), shown.runtime).await?;
     if !matches!(second.0.verdict, GuardVerdict::Deliver) {
         return receipt_row(app, outbound, address, &second.0, None).await;
     }
@@ -231,11 +232,19 @@ async fn guarded(
     .await
 }
 
+fn readiness_of(app: &App, runtime: RuntimeKind, text: &str) -> Readiness {
+    match app.registry.get(runtime) {
+        Some(adapter) => adapter.classify_text(text),
+        None => crewmux_adapters::classify_runtime(runtime, text),
+    }
+}
+
 async fn verdict(
     app: &App,
     address: &str,
     pane: &crewmux_mux::PaneRef,
     now: Instant,
+    runtime: RuntimeKind,
 ) -> Result<(crewmux_mux::Evaluated, String), Error> {
     let mut inputs = app.mux.guard_inputs(pane, 40).await?;
     inputs.last_human_keystroke_tap = app
@@ -244,9 +253,9 @@ async fn verdict(
         .or_else(|| app.taps.last(seat_name(address)));
     let age = app
         .drafts
-        .observe(address, stub_drafting(&inputs.tail.text), now)
+        .observe(address, runtime_drafting(runtime, &inputs.tail.text), now)
         .await;
-    let composer = classify_stub(&inputs.tail.text, age);
+    let composer = classify_runtime(runtime, &inputs.tail.text, age);
     let cfg = GuardConfig {
         quiet: Duration::from_secs(3),
         max_defer: Duration::from_secs(30),
@@ -339,7 +348,8 @@ async fn finish_paste(
     pane: &crewmux_mux::PaneRef,
     view: PasteView<'_>,
 ) -> Result<(DeliveryOutcome, bool), Error> {
-    let mut degraded = ComposerParser::Stub.state(view.before, None) == ComposerState::Unknown;
+    let mut degraded =
+        classify_runtime(view.route.runtime, view.before, None) == ComposerState::Unknown;
     let lines = view.payload.lines().count();
     let outcome = match classify_for(view.route.display, view.before, view.after, view.payload) {
         PasteHit::Clean => {

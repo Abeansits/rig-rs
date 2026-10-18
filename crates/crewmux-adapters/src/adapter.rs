@@ -94,6 +94,13 @@ pub trait AgentAdapter: Send + Sync + 'static {
     /// Returns [`Error`] when capture fails.
     async fn check_ready(&self, binding: &NodeBinding) -> Result<Readiness, Error>;
 
+    /// Classify text this runtime already captured.
+    ///
+    /// Send uses this instead of the stub classifier (issue #34).
+    fn classify_text(&self, text: &str) -> Readiness {
+        crate::classify_runtime(self.runtime(), text)
+    }
+
     /// How long a launch may stay open before the daemon marks it timed out.
     ///
     /// The stub keeps the shared default. Codex uses its shorter overall budget.

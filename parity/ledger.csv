@@ -1511,7 +1511,7 @@
 "packages/daemon/test/session-source-roundtrip.test.ts","","todo","","",""
 "packages/daemon/test/session-transport-cutover.test.ts","","todo","","",""
 "packages/daemon/test/session-transport-stage-timing.test.ts","","todo","","",""
-"packages/daemon/test/session-transport.test.ts","4","todo","","","interactive refusal sentence is send_refuses_an_interactive_gate; Codex screen cases are not ported"
+"packages/daemon/test/session-transport.test.ts","4","todo","","","interactive refusal sentence is send_refuses_an_interactive_gate; Codex screen cases are not ported; a bare [Pasted text #N] for a newline-free paste longer than 31 bytes is PE-024"
 "packages/daemon/test/sessions-routes.test.ts","","todo","","",""
 "packages/daemon/test/settings-browser.test.ts","","todo","","",""
 "packages/daemon/test/settings-reset-failure.test.ts","","todo","","",""

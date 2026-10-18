@@ -1,10 +1,11 @@
 //! Claude screen corpus.
 //!
 //! `2.1.286` and `2.1.289` are byte copies of the spike captures. `2.1.287`
-//! is the trust dialog from the 2.1.287 `TrustDialog` layout: the cursor is
-//! already on "Yes, I trust this folder", and the folder row is hard-wrapped,
-//! padded, and marked with the U+FFFD `xn` appends. The Mac pane was not
-//! saved; the chrome is the 2.1.286 trust screen.
+//! holds the 2026-10-18 Claude Code 2.1.287 panes: the trust cursor starts on
+//! "No, exit" and the folder is one line. `claude-trust.txt` is synthetic
+//! (cursor already on Yes, hard-wrapped folder, U+FFFD). Sanitized copies
+//! rewrite `/Users/sebas/` to `/tmp/rig-qa1/`; `labels.jsonl` records both
+//! hashes.
 #![expect(
     clippy::expect_used,
     clippy::panic,

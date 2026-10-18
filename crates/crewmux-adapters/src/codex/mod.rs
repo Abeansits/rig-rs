@@ -15,6 +15,7 @@ mod submit;
 mod tools;
 
 pub use adapter::CodexAdapter;
+pub(crate) use adapter::to_readiness;
 pub use argv::{CodexLaunchPlan, codex_launch_argv};
 pub use budget::LaunchBudget;
 pub use dialogs::CODEX_DIALOGS;

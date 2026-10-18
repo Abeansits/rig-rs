@@ -34,7 +34,13 @@ pub(crate) async fn drive(
         let Ok(capture) = mux.capture(pane, CaptureRange::Visible).await else {
             return blocked();
         };
-        match act(&mux, pane, cwd, home, auto_trust, &capture).await {
+        let ctx = AnswerCtx {
+            cwd,
+            home,
+            auto_trust,
+            budget,
+        };
+        match act(&mux, pane, &ctx, &capture).await {
             Act::Ready | Act::Stop => return DriveOutcome { force: None },
             Act::Answered => watch.gate_at = Some(Instant::now()),
             Act::Poll {
@@ -62,12 +68,17 @@ enum Act {
     },
 }
 
+struct AnswerCtx<'a> {
+    cwd: &'a Path,
+    home: &'a Path,
+    auto_trust: bool,
+    budget: LaunchBudget,
+}
+
 async fn act(
     mux: &Arc<dyn Multiplexer>,
     pane: &PaneRef,
-    cwd: &Path,
-    home: &Path,
-    auto_trust: bool,
+    ctx: &AnswerCtx<'_>,
     capture: &Capture,
 ) -> Act {
     match classify(capture) {
@@ -83,29 +94,36 @@ async fn act(
         ClaudeScreen::Login(_) | ClaudeScreen::UnknownMenu { .. } | ClaudeScreen::Draft => {
             Act::Stop
         }
-        ClaudeScreen::Dialog(_) => answer(mux, pane, cwd, home, auto_trust).await,
+        ClaudeScreen::Dialog(_) => answer(mux, pane, ctx).await,
     }
 }
 
-async fn answer(
-    mux: &Arc<dyn Multiplexer>,
-    pane: &PaneRef,
-    cwd: &Path,
-    home: &Path,
-    auto_trust: bool,
-) -> Act {
+async fn answer(mux: &Arc<dyn Multiplexer>, pane: &PaneRef, ctx: &AnswerCtx<'_>) -> Act {
     let io = MuxPane::new(Arc::clone(mux), pane.clone());
     let policy = AnswerPolicy {
-        auto_trust,
+        auto_trust: ctx.auto_trust,
         auto_approve_rig_tools: false,
     };
-    let seat = SeatContext { cwd, home };
-    match DialogDriver::default()
+    let seat = SeatContext {
+        cwd: ctx.cwd,
+        home: ctx.home,
+    };
+    match dialog_driver(ctx.budget)
         .drive(&io, CLAUDE_DIALOGS, policy, &seat)
         .await
     {
         Ok(DialogDrive::Answered { .. }) => Act::Answered,
         Ok(DialogDrive::Escalated { .. } | DialogDrive::NotADialog) | Err(_) => Act::Stop,
+    }
+}
+
+/// A launch budget under 5s is the test budget. Wall waits would spend it.
+/// The two-capture rule still runs. A live launch uses the 1s / 400ms pace.
+fn dialog_driver(budget: LaunchBudget) -> DialogDriver {
+    if budget.overall < std::time::Duration::from_secs(5) {
+        DialogDriver::default()
+    } else {
+        DialogDriver::live()
     }
 }
 

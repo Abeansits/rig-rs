@@ -1,0 +1,27 @@
+
+ ▐▛███▛█   Claude Code v2.1.287              
+▝▜██████▀  Sonnet 5.5 · Claude Team          
+ ▝▝   ▝▝   ~/openrig-spikes-scratch/rig-rs/w18r2b032943                                   
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         Update available! Run: brew upgrade claude-code  
+──────────────────────────────────────────────────────────────────────────────────────────
+❯ PROBE line 1 of 1 do not submit            
+──────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)                                                    

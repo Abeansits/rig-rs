@@ -19,7 +19,33 @@ const TRUST_SHA: &str = "aba7d2dd9c877940d91879169099b512625956f36086be82cb4bd75
 const FOLDER: &str = "/tmp/rig-trust/project-with-a-long-directory-name/src/app";
 
 #[tokio::test]
-async fn wrapped_padded_trust_screen_sends_enter_when_the_folder_is_the_cwd() {
+async fn real_trust_dialog_downs_from_no_then_enters_yes() {
+    let no = screen("2.1.287/claude-2.1.287-trust-navprobe-initial-no.txt");
+    let yes = screen("2.1.287/claude-2.1.287-trust-after-down-yes.txt");
+    let ready = screen("2.1.287/claude-2.1.287-ready-after-trust.txt");
+    let mux = Arc::new(FakeMux::new());
+    mux.replay_screens(vec![
+        support::capture(&no),
+        support::capture(&yes),
+        support::capture(&ready),
+    ])
+    .await;
+    let adapter = adapter(Arc::clone(&mux));
+    let cwd = PathBuf::from("/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18probe032913");
+    let binding = bound(cwd);
+    drop(adapter.launch(&binding, opts(true)).await.expect("launch"));
+    let calls = mux.recorded().await;
+    assert!(sent_down(&calls), "{calls:?}");
+    assert!(support::sent_enter(&calls), "{calls:?}");
+    assert!(down_before_enter(&calls), "{calls:?}");
+    assert_eq!(
+        adapter.check_ready(&binding).await.expect("ready"),
+        Readiness::Ready
+    );
+}
+
+#[tokio::test]
+async fn synthetic_wrapped_trust_enters_when_the_cursor_is_already_on_yes() {
     let trust = trust_screen();
     assert_eq!(crewmux_transcript::fingerprint_raw(&trust), TRUST_SHA);
     let ready = support::read(&support::fixtures().join("2.1.286/claude-020-ready.txt"));
@@ -31,6 +57,7 @@ async fn wrapped_padded_trust_screen_sends_enter_when_the_folder_is_the_cwd() {
     drop(adapter.launch(&binding, opts(true)).await.expect("launch"));
     let calls = mux.recorded().await;
     assert!(support::sent_enter(&calls), "{calls:?}");
+    assert!(!sent_down(&calls), "{calls:?}");
     assert_eq!(
         adapter.check_ready(&binding).await.expect("ready"),
         Readiness::Ready
@@ -38,10 +65,10 @@ async fn wrapped_padded_trust_screen_sends_enter_when_the_folder_is_the_cwd() {
 }
 
 #[tokio::test]
-async fn wrapped_trust_screen_refuses_a_prefix_and_a_different_folder() {
-    let trust = trust_screen();
+async fn real_trust_dialog_refuses_a_prefix_and_a_different_folder() {
+    let trust = screen("2.1.287/claude-2.1.287-trust-cursor-no.txt");
     for cwd in [
-        "/tmp/rig-trust/project-with-a-long-directory-name",
+        "/tmp/rig-qa1/openrig-spikes-scratch/rig-rs",
         "/tmp/not-the-folder",
     ] {
         let mux = replay(&trust).await;
@@ -83,8 +110,58 @@ async fn tilde_folder_matches_only_under_the_seat_home() {
     );
 }
 
+#[tokio::test]
+async fn settled_yes_enters_when_the_folder_matches() {
+    let yes = screen("2.1.287/claude-2.1.287-trust-settled-yes.txt");
+    let ready = screen("2.1.287/claude-2.1.287-ready-after-trust.txt");
+    let mux = Arc::new(FakeMux::new());
+    mux.replay_screens(vec![support::capture(&yes), support::capture(&ready)])
+        .await;
+    let adapter = adapter(Arc::clone(&mux));
+    let cwd = PathBuf::from("/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r2b032943");
+    let binding = bound(cwd);
+    drop(adapter.launch(&binding, opts(true)).await.expect("launch"));
+    assert!(support::sent_enter(&mux.recorded().await));
+    assert_eq!(
+        adapter.check_ready(&binding).await.expect("ready"),
+        Readiness::Ready
+    );
+}
+
+#[tokio::test]
+async fn cursor_no_folder_matches_the_sanitized_trust_pane() {
+    let no = screen("2.1.287/claude-2.1.287-trust-cursor-no.txt");
+    let yes = screen("2.1.287/claude-2.1.287-trust-settled-yes.txt");
+    assert!(
+        !no.contains("/Users/"),
+        "sanitized fixtures must not contain a home path"
+    );
+    assert!(!yes.contains("/Users/"));
+}
+
+fn screen(name: &str) -> String {
+    support::read(&support::fixtures().join(name))
+}
+
 fn trust_screen() -> String {
     support::read(&support::fixtures().join("2.1.287/claude-trust.txt"))
+}
+
+fn sent_down(calls: &[Vec<String>]) -> bool {
+    calls.iter().flatten().any(|arg| arg == "Down")
+}
+
+fn down_before_enter(calls: &[Vec<String>]) -> bool {
+    let mut saw_down = false;
+    for arg in calls.iter().flatten() {
+        if arg == "Down" {
+            saw_down = true;
+        }
+        if arg == "Enter" {
+            return saw_down;
+        }
+    }
+    false
 }
 
 fn tilde_screen(folder: &str) -> String {

@@ -7,6 +7,10 @@
 //! `split('\n')`). A 24-character prefix of a longer payload is not a match.
 //! Several tokens still need the residual suffix to land on an exact
 //! source-line boundary.
+//!
+//! Claude Code 2.1.287 also collapses a newline-free paste longer than
+//! [`INLINE_SINGLE_LINE`] to a bare `[Pasted text #N]` with no `+X lines`.
+//! v0.6.9 `hasExpectedStagedText` does not accept that form (PE-024).
 
 /// The composer shows `payload`, or Claude's collapsed paste of it.
 #[must_use]
@@ -20,6 +24,9 @@ pub(crate) fn staged_matches(screen: &str, payload: &str) -> bool {
     let flat = collapse_ws(&region);
     let counts = placeholder_counts(&flat);
     if counts.is_empty() {
+        if bare_long_paste(&flat, payload) {
+            return true;
+        }
         let piece = squash_ws(payload);
         return !piece.is_empty() && squash_ws(&region).contains(&piece);
     }
@@ -83,8 +90,52 @@ fn is_rule(line: &str) -> bool {
             .all(|ch| ch == '─' || ch == '═' || ch == '-')
 }
 
+/// The 2.1.287 probe rendered this many bytes of a newline-free paste inline.
+///
+/// A longer newline-free paste became `❯ [Pasted text #N]` plus
+/// `paste again to expand`, with no `+X lines` suffix.
+const INLINE_SINGLE_LINE: usize = 31;
+
 fn line_count(payload: &str) -> usize {
     payload.matches('\n').count()
+}
+
+/// One bare `[Pasted text #N]` stands in for a long paste that has no newlines.
+fn bare_long_paste(flat: &str, payload: &str) -> bool {
+    !payload.contains('\n') && payload.len() > INLINE_SINGLE_LINE && bare_token_count(flat) == 1
+}
+
+fn bare_token_count(flat: &str) -> usize {
+    let marker = "[Pasted text #";
+    let mut rest = flat;
+    let mut count = 0usize;
+    while let Some(start) = rest.find(marker) {
+        let Some(after) = rest.get(start.saturating_add(marker.len())..) else {
+            break;
+        };
+        let id_len = after.chars().take_while(char::is_ascii_digit).count();
+        if id_len == 0 {
+            rest = after.get(1..).unwrap_or("");
+            continue;
+        }
+        let Some(id) = after.get(..id_len) else {
+            break;
+        };
+        let Ok(value) = id.parse::<u64>() else {
+            rest = after.get(1..).unwrap_or("");
+            continue;
+        };
+        let Some(tail) = after.get(id_len..) else {
+            break;
+        };
+        if value >= 1 && tail.starts_with(']') {
+            count = count.saturating_add(1);
+            rest = tail.get(1..).unwrap_or("");
+        } else {
+            rest = after.get(1..).unwrap_or("");
+        }
+    }
+    count
 }
 
 fn collapse_ws(text: &str) -> String {
@@ -328,5 +379,55 @@ mod tests {
   paste again to expand
 "
         )
+    }
+
+    #[test]
+    fn bare_pasted_token_matches_a_long_single_line() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/screens/claude/2.1.287");
+        let bare = std::fs::read_to_string(dir.join("claude-2.1.287-pasted-no-linecount.txt"))
+            .expect("bare fixture");
+        assert_eq!(
+            crewmux_transcript::fingerprint_raw(&bare),
+            "800d674da697d33b78535d3b96ae959d5e14774072dde745ea1c208996bc49b8"
+        );
+        let long = "OpenRig manual compaction preparation ".repeat(8);
+        assert!(long.len() > 31);
+        assert!(!long.contains('\n'));
+        assert!(
+            staged_matches(&bare, &long),
+            "bare #N for a long single line"
+        );
+        assert!(
+            !staged_matches(&bare, "PROBE line 1 of 1 do not submit"),
+            "31 bytes stays inline"
+        );
+        let multi = format!("{long}\n{long}");
+        assert!(
+            !staged_matches(&bare, &multi),
+            "a bare token is not multi-line"
+        );
+
+        let plus = std::fs::read_to_string(dir.join("claude-2.1.287-pasted-plus11-lines.txt"))
+            .expect("+11");
+        let payload = std::fs::read_to_string(
+            dir.join("payloads/claude-2.1.287-pasted-plus11-lines.payload.txt"),
+        )
+        .expect("payload");
+        assert_eq!(payload.matches('\n').count(), 11);
+        assert!(staged_matches(&plus, &payload), "+11 lines");
+
+        let inline = std::fs::read_to_string(dir.join("claude-2.1.287-pasted-single-line.txt"))
+            .expect("inline");
+        let short = std::fs::read_to_string(
+            dir.join("payloads/claude-2.1.287-pasted-single-line.payload.txt"),
+        )
+        .expect("short");
+        assert_eq!(short.len(), 31);
+        assert!(staged_matches(&inline, &short), "31-byte line is inline");
+        assert!(
+            !staged_matches(&inline, &long),
+            "the inline screen is not the long paste"
+        );
     }
 }

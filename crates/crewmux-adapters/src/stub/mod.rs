@@ -6,7 +6,7 @@ mod screen;
 mod script;
 
 pub use run::run_stub_agent;
-pub use screen::classify;
+pub(crate) use screen::classify;
 pub use script::{StubScript, parse_script};
 
 use std::sync::Arc;

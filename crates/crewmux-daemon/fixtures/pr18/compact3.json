@@ -1,0 +1,1 @@
+{"attempts":[{"abort_reason":null,"attempt_id":"manual-01M578ZEBE33MKWMK7WM936803-2","confirmed":false,"managed":true,"seat_key":"01M578ZEBE33MKWMK7WM936803","state":"preparing","summary_len":null,"summary_sha":null,"trigger":"manual"}],"reason":"preparation_pending","seat":"cl","seat_key":"01M578ZEBE33MKWMK7WM936803","stage":"waiting_map"}
