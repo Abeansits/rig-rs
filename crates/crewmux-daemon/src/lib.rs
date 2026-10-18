@@ -80,6 +80,8 @@ mod health_tests;
 #[cfg(all(test, feature = "tmux-it"))]
 mod lineage_it;
 #[cfg(test)]
+mod pr18_run5;
+#[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]
 mod reply_hint_tests;

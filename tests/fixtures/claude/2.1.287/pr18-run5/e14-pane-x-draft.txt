@@ -1,0 +1,27 @@
+  remaining when this request was constructed, not guaranteed remaining on receipt.       
+  Delivery time, writing the complete restore map, and becoming idle share this deadline. 
+  This is an operator-authorized normal user-channel preparation request before OpenRig   
+  sends /compact. This preparation turn does not guarantee /compact: an incomplete map,   
+  deadline, cancellation or later target check can stop the attempt. The completed map    
+  remains useful if that happens. Write this attempt's complete restore map to            
+  "/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4e064350/.openrig/compaction/preparatio 
+  n/cl/manual-01M57M27WYBJ041HA21FZH25BB-4/RESTORE-MAP.md.tmp", using your ordinary       
+  file-edit tool. Append the exact completion marker below as its LAST line, then finish  
+  and close the file. OpenRig will atomically publish it to                               
+  "/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4e064350/.openrig/compaction/preparatio 
+  n/cl/manual-01M57M27WYBJ041HA21FZH25BB-4/RESTORE-MAP.md"; do not run a shell command to 
+  rename or publish it. Never write the final file incrementally. Completion marker:      
+  <!-- openrig-compaction-complete {"attemptId":"manual-01M57M27WYBJ041HA21FZH25BB-4","se 
+  ssion":"cl","occupantGeneration":null} --> The marker identifies this attempt and       
+  occupant; it does not certify the map's quality. Keep the normal ranked restore-map     
+  content. OpenRig will wait for this exact completed map before managed /compact. Normal 
+  work and messages remain available. rig compact <session> --cancel ends preparation;    
+  --skip-map explicitly skips this prerequisite once.                                     
+                                                                                          
+· Incubating… (4s · ↓ 286 tokens)            
+                                         Update available! Run: brew upgrade claude-code  
+──────────────────────────────────────────────────────────────────────────────────────────
+❯ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+  xxxxxxxxxxxxxx                                                                          
+──────────────────────────────────────────────────────────────────────────────────────────
+  paste again to expand                                                                   

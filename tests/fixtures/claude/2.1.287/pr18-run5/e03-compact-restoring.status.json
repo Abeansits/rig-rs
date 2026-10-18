@@ -1,0 +1,1 @@
+{"attempts":[{"abort_reason":null,"attempt_id":"manual-01M57FK9VMY0DPF1YSJ1MTHMQW-1","confirmed":true,"managed":true,"seat_key":"01M57FK9VMY0DPF1YSJ1MTHMQW","state":"completed","summary_len":4046,"summary_sha":"5c032f689e3091299d3a8b34f2683368f9c6dfc1883c5e1a40d1391ee78cc4c6","trigger":"manual"}],"seat":"cl","seat_key":"01M57FK9VMY0DPF1YSJ1MTHMQW","stage":"restoring"}

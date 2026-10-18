@@ -1,0 +1,27 @@
+
+ ▐▛███▛█   Claude Code v2.1.287              
+▝▜██████▀  Sonnet 5.5 · Claude Team          
+ ▝▝   ▝▝   ~/openrig-spikes-scratch/rig-rs/w18r3052546                                    
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                      ◐ medium · /effort  
+──────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "edit <filepath> to..."                
+──────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                        

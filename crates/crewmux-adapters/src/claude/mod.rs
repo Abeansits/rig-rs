@@ -17,3 +17,6 @@ pub use screen::{
 };
 pub use staged::staged_matches;
 pub use submit::ClaudeIo;
+
+#[cfg(test)]
+mod run5_fixtures;

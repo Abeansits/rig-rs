@@ -133,6 +133,18 @@ mod tests {
     use super::compact_exit;
 
     #[test]
+    fn captured_preparing_body_is_exit_4() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/claude/2.1.287/pr18-run5/e01-compact-preparing.rig.json");
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("{err}"));
+        let value: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(value["stage"], "preparing");
+        assert_eq!(value["compact_sent"], false);
+        assert_eq!(compact_exit(&value), 4);
+    }
+
+    #[test]
     fn exit_is_zero_only_after_compact_is_submitted() {
         assert_eq!(compact_exit(&json!({"compact_sent": true})), 0);
         assert_eq!(

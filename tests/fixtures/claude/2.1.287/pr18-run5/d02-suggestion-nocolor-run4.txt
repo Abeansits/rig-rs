@@ -1,0 +1,27 @@
+                                                                                          
+
+⏺ restored from packet at /tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4062938/.openrig/
+  compaction/preparation/cl/manual-01M57K88ZSA0VWTMJ85EGMMW7B-1/RESTORE-MAP.md; resumed at
+  step 4 (no pending tasks, so I'm waiting for further operator instructions).            
+
+✻ Crunched for 4s · done 6:30 AM             
+
+❯ From: operator@host 
+  To: cl@pr18                                                                             
+  ---                                                                                     
+  LIVE18-RECALL What is the codeword from earlier? Answer with the codeword only. Do not  
+  use tools or read files.                                                                
+  ---                                                                                     
+  ↩ Reply: rig send operator@host "..."                                                   
+
+⏺ I don't have the codeword. My compacted context only says the LIVE18-T1 message         
+  contained one. It doesn't include the word itself, and I left it out of the restore map 
+  on purpose. You told me not to use tools or read files, so I haven't looked in the      
+  transcript. If you want me to look there, tell me.                                      
+
+✻ Crunched for 2s · done 6:31 AM                                                          
+                                         Update available! Run: brew upgrade claude-code  
+──────────────────────────────────────────────────────────────────────────────────────────
+❯ Read the transcript and tell me the codeword                                            
+──────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                        

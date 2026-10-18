@@ -158,14 +158,16 @@ fn classify_plain(text: &str) -> ClaudeScreen {
     if let Some(kind) = login_kind(view) {
         return ClaudeScreen::Login(kind);
     }
-    if has_interrupt(text) || pane_is_busy(text, anchor.as_ref()) {
-        return ClaudeScreen::Busy;
-    }
+    // A filled composer is a draft even while a spinner is still above the box.
+    // The 2.1.287 x-draft pane shows `· Incubating…` over a two-row draft.
     if let Some(anchor) = anchor.as_ref()
         && !dim_suggestion(text, anchor)
         && (has_continuation(text, anchor) || !is_idle_body(&anchor.body))
     {
         return ClaudeScreen::Draft;
+    }
+    if has_interrupt(text) || pane_is_busy(text, anchor.as_ref()) {
+        return ClaudeScreen::Busy;
     }
     if is_option_menu(&parse_menu(view)) {
         return ClaudeScreen::UnknownMenu {

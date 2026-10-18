@@ -1,0 +1,1 @@
+{"attempts":[{"abort_reason":null,"attempt_id":"manual-01M57M27WYBJ041HA21FZH25BB-4","confirmed":true,"managed":true,"seat_key":"01M57M27WYBJ041HA21FZH25BB","state":"done","summary_len":3715,"summary_sha":"0e2528a42ebcfb3d6144d9c77348b62d3c6d2b0cf17bc5d8294f04ec76eea7bb","trigger":"manual"}],"seat":"cl","seat_key":"01M57M27WYBJ041HA21FZH25BB","stage":"failed"}
