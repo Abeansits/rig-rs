@@ -50,6 +50,7 @@ fn project(event: &DomainEvent) -> (StreamKind, Option<StreamPayload>) {
         DomainEvent::SeatDied {
             seat,
             exit_status,
+            signal,
             capture,
             ..
         } => (
@@ -57,6 +58,7 @@ fn project(event: &DomainEvent) -> (StreamKind, Option<StreamPayload>) {
             Some(StreamPayload {
                 seat: Some(seat.to_string()),
                 exit_status: *exit_status,
+                signal: signal.clone(),
                 capture: capture.clone(),
                 ..StreamPayload::default()
             }),

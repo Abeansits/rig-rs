@@ -1,6 +1,7 @@
 //! `rig compact`: prep, then `/compact`, only through submit when the seat is `Ready`.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crewmux_core::Seat;
 use crewmux_health::compaction::{
@@ -56,6 +57,16 @@ pub(crate) async fn cancel(app: &App, body: &[u8]) -> Result<Value, Error> {
         let mut guard = app.compaction.lock().await;
         guard.book.cancel(&key);
         guard.enforcer.cancel(&session);
+        let leftover = guard
+            .preps
+            .get(&session)
+            .map(|prep| prep.attempt_id.clone())
+            .unwrap_or_default();
+        if !leftover.is_empty() {
+            guard
+                .book
+                .cancel_unsent(&key, AttemptId(leftover), now_ms());
+        }
         if let Some(prep) = guard.preps.get_mut(&session) {
             prep.active = false;
             prep.attempt_id.clear();
@@ -188,12 +199,23 @@ async fn drive(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Resul
         match step.text {
             Some(text) if step.compact => {
                 save(app).await?;
+                // The map wait is skipped. The idle wait still runs, as in
+                // claude-compaction-enforcer.ts `waitUntilIdle` before
+                // `sendPreparedCompact`.
+                if !wait_until_idle(app, seat).await {
+                    settle_failed_prep(app, seat, "send_failed").await?;
+                    return Err(Error::Adapter(crewmux_adapters::Error::NotReady));
+                }
                 // `/compact` is not a user turn, so the transcript cannot confirm it.
                 // Enter still happened: NotVerified and Contaminated count as sent.
                 match submit_text(app, seat.name.as_str(), &text).await {
                     Ok(_) => {}
                     Err(Error::Adapter(err)) if compact_entered(&err) => {}
-                    Err(err) => return Err(err),
+                    Err(err) => {
+                        let reason = prep_fail_reason(&err);
+                        settle_failed_prep(app, seat, reason).await?;
+                        return Err(err);
+                    }
                 }
                 compact_sent = true;
                 break;
@@ -241,11 +263,8 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
     } else {
         stored
     };
-    let attempt_id = if !prep.active || prep.attempt_id.is_empty() {
-        guard.book.next_manual_id(&seat.id.to_string()).0
-    } else {
-        prep.attempt_id.clone()
-    };
+    let seat_key = seat.id.to_string();
+    let (fresh, attempt_id) = minted_id(&mut guard, &seat_key, &prep);
     let home = app.home.clone();
     let input = EnforcerInput {
         seat: seat.id,
@@ -274,7 +293,7 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
         EnforcerOutcome::Skip(EnforcerSkipReason::SendFailed)
     ) {
         guard.book.fail_unsent(
-            &seat.id.to_string(),
+            &seat_key,
             AttemptId(attempt_id.clone()),
             "send_failed",
             now_ms(),
@@ -286,11 +305,9 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
     let text = gated_submit(ready, &outcome);
     let compact = matches!(outcome, EnforcerOutcome::SendCompact(_));
     if compact {
-        guard.book.request(
-            &seat.id.to_string(),
-            AttemptId(attempt_id.clone()),
-            now_ms(),
-        );
+        guard
+            .book
+            .request(&seat_key, AttemptId(attempt_id.clone()), now_ms());
     }
     runtime_plan(&mut guard, session, &input);
     remember(
@@ -301,6 +318,7 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
         &prep,
         body.skip_map,
     );
+    release_unused_mint(&mut guard, session, &seat_key, fresh.as_ref());
     Step {
         text,
         compact,
@@ -310,6 +328,35 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
             | EnforcerOutcome::SendCompact(_)
             | EnforcerOutcome::SendRestore(_) => None,
         },
+    }
+}
+
+fn minted_id(
+    guard: &mut Runtime,
+    seat_key: &str,
+    prep: &PreparationState,
+) -> (Option<AttemptId>, String) {
+    if prep.active && !prep.attempt_id.is_empty() {
+        return (None, prep.attempt_id.clone());
+    }
+    let id = guard.book.next_manual_id(seat_key);
+    let text = id.0.clone();
+    (Some(id), text)
+}
+
+fn release_unused_mint(
+    guard: &mut Runtime,
+    session: &str,
+    seat_key: &str,
+    fresh: Option<&AttemptId>,
+) {
+    let Some(id) = fresh else {
+        return;
+    };
+    let on_prep = guard.prep(session).attempt_id == id.0;
+    let in_book = guard.book.attempts().iter().any(|row| &row.id == id);
+    if !on_prep && !in_book {
+        guard.book.release_unused(seat_key, id);
     }
 }
 
@@ -665,4 +712,28 @@ fn manual_input(
 
 fn wait_ms() -> u64 {
     u64::try_from(MANUAL_PREP_WAIT.as_millis()).unwrap_or(0)
+}
+
+/// Poll until the composer is idle or the prep deadline passes.
+///
+/// The lock is not held across the readiness capture.
+async fn wait_until_idle(app: &App, seat: &Seat) -> bool {
+    let deadline = {
+        let guard = app.compaction.lock().await;
+        guard.prep(seat.name.as_str()).deadline_ms
+    };
+    let limit = deadline.unwrap_or_else(|| now_ms().saturating_add(wait_ms()));
+    loop {
+        if super::apply::seat_is_ready(app, seat).await {
+            return true;
+        }
+        if now_ms() >= limit {
+            return false;
+        }
+        let pause = limit.saturating_sub(now_ms()).min(20);
+        if pause == 0 {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(pause)).await;
+    }
 }

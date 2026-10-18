@@ -37,7 +37,12 @@ fn land_paste(capture: &Capture, payload: &str) -> Capture {
 }
 
 fn empty_prompt_line(line: &str) -> bool {
-    let inner = bar_inner(line).unwrap_or(line.trim());
+    // A faint suggestion is not typed text. The paste replaces it.
+    if line.contains("\u{1b}[2m") && strip_prompt_marker(strip_escapes(line).trim()).is_some() {
+        return true;
+    }
+    let plain = strip_escapes(line);
+    let inner = bar_inner(&plain).unwrap_or(plain.trim());
     let Some(body) = strip_prompt_marker(inner) else {
         return false;
     };
@@ -187,9 +192,10 @@ fn spliced_composer(capture: &str, pasted: &str) -> String {
 }
 
 fn rewrite_marker(line: &str, flat: &str) -> String {
-    let trimmed = line.trim_start();
-    let indent_len = line.len().saturating_sub(trimmed.len());
-    let indent = line.get(..indent_len).unwrap_or("");
+    let plain = strip_escapes(line);
+    let trimmed = plain.trim_start();
+    let indent_len = plain.len().saturating_sub(trimmed.len());
+    let indent = plain.get(..indent_len).unwrap_or("");
     let marker = if trimmed.starts_with('❯') {
         "❯"
     } else if trimmed.starts_with('›') {
@@ -217,9 +223,9 @@ fn bar_inner(line: &str) -> Option<&str> {
 pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     let lines = match range {
         CaptureRange::Visible | CaptureRange::VisibleEscapes | CaptureRange::Joined => {
-            return capture;
+            return present(capture, range);
         }
-        CaptureRange::LastLines(n) => usize::from(n),
+        CaptureRange::LastLines(n) | CaptureRange::LastLinesEscapes(n) => usize::from(n),
         CaptureRange::History(n) | CaptureRange::JoinedHistory(n) => {
             usize::try_from(n).unwrap_or(usize::MAX)
         }
@@ -234,7 +240,39 @@ pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     if trailing && skip < count {
         text.push('\n');
     }
-    Capture::new(text, capture.cursor)
+    present(Capture::new(text, capture.cursor), range)
+}
+
+/// A plain capture drops SGR. Code that forgets `-e` then sees a suggestion as a draft.
+fn present(capture: Capture, range: CaptureRange) -> Capture {
+    if range.keeps_escapes() {
+        return capture;
+    }
+    Capture::new(strip_escapes(&capture.text), capture.cursor)
+}
+
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(next) = skip_esc(rest) {
+            rest = next;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        out.push(ch);
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+    }
+    out
+}
+
+fn skip_esc(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('\u{1b}')?;
+    let rest = rest.strip_prefix('[')?;
+    let end = rest.find(|ch: char| ch.is_ascii_alphabetic())?;
+    rest.get(end.saturating_add(1)..)
 }
 
 #[cfg(test)]

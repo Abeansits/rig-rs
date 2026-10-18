@@ -80,7 +80,10 @@ impl SeatIo for ClaudeIo {
     }
 
     async fn snapshot(&self) -> Result<Capture, Error> {
-        Ok(self.mux.capture(&self.pane, CaptureRange::Visible).await?)
+        Ok(self
+            .mux
+            .capture(&self.pane, CaptureRange::VisibleEscapes)
+            .await?)
     }
 }
 

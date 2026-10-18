@@ -108,18 +108,38 @@ pub(crate) fn new_session_args(spec: &SessionSpec) -> Vec<String> {
         args.push("-e".to_owned());
         args.push(format!("{key}={value}"));
     }
-    for key in &spec.clear_env {
-        if key.is_empty() || key.contains('=') {
-            continue;
-        }
-        args.push("-e".to_owned());
-        args.push(key.clone());
-    }
     args.push("-P".to_owned());
     args.push("-F".to_owned());
     args.push("#{pane_id}|#{session_name}".to_owned());
+    // `env -u` runs in the pane. tmux `-e NAME` does not unset a copied variable.
+    push_env_unset(&mut args, &spec.clear_env);
     args.extend(spec.argv.iter().cloned());
     args
+}
+
+fn push_env_unset(args: &mut Vec<String>, keys: &[String]) {
+    let keys: Vec<&str> = keys
+        .iter()
+        .map(String::as_str)
+        .filter(|key| env_name(key))
+        .collect();
+    if keys.is_empty() {
+        return;
+    }
+    args.push("env".to_owned());
+    for key in keys {
+        args.push("-u".to_owned());
+        args.push(key.to_owned());
+    }
+}
+
+fn env_name(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 /// `window-size manual` so a later client cannot resize the window.
@@ -355,6 +375,11 @@ pub(crate) fn capture_args(target: &str, range: CaptureRange) -> Vec<String> {
             args.push("-S".to_owned());
             args.push(format!("-{lines}"));
         }
+        CaptureRange::LastLinesEscapes(lines) => {
+            args.push("-e".to_owned());
+            args.push("-S".to_owned());
+            args.push(format!("-{lines}"));
+        }
         CaptureRange::History(lines) => {
             args.push("-S".to_owned());
             args.push(format!("-{lines}"));
@@ -392,7 +417,7 @@ pub(crate) fn dead_status_args(pane_id: &str) -> Vec<String> {
         "-p".to_owned(),
         "-t".to_owned(),
         pane_id.to_owned(),
-        "#{pane_dead} #{pane_dead_status}".to_owned(),
+        "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}".to_owned(),
     ]
 }
 
@@ -706,25 +731,22 @@ mod tests {
     #[test]
     fn joined_capture_rejoins_wrapped_rows() {
         let args = capture_args("%1", CaptureRange::Joined);
-        assert!(args.iter().any(|arg| arg == "-J"), "{args:?}");
-        assert!(!args.iter().any(|arg| arg == "-S"), "{args:?}");
+        assert!(args.iter().any(|arg| arg == "-J") && !args.iter().any(|arg| arg == "-S"));
         let visible = capture_args("%1", CaptureRange::Visible);
-        assert!(!visible.iter().any(|arg| arg == "-J"));
+        assert!(!visible.iter().any(|arg| arg == "-J" || arg == "-e"));
         assert!(
-            !visible.iter().any(|arg| arg == "-e"),
-            "a plain capture drops escapes: {visible:?}"
+            capture_args("%1", CaptureRange::VisibleEscapes)
+                .iter()
+                .any(|arg| arg == "-e")
         );
-        let escapes = capture_args("%1", CaptureRange::VisibleEscapes);
         assert!(
-            escapes.iter().any(|arg| arg == "-e"),
-            "the suggestion check needs SGR: {escapes:?}"
+            capture_args("%1", CaptureRange::guard_tail(40))
+                .iter()
+                .any(|arg| arg == "-e")
         );
         let history = capture_args("%1", CaptureRange::JoinedHistory(40));
-        assert!(history.iter().any(|arg| arg == "-J"), "{history:?}");
-        assert!(
-            history.windows(2).any(|pair| pair == ["-S", "-40"]),
-            "{history:?}"
-        );
+        assert!(history.iter().any(|arg| arg == "-J"));
+        assert!(history.windows(2).any(|pair| pair == ["-S", "-40"]));
     }
 
     #[test]
@@ -732,24 +754,19 @@ mod tests {
         let mut spec = SessionSpec::new("demo", PathBuf::from("/tmp"));
         spec.env.insert("RIG_HOME".to_owned(), "/h".to_owned());
         spec.clear_env = vec!["NO_COLOR".to_owned(), "FORCE_COLOR".to_owned()];
+        spec.argv = vec!["claude".to_owned()];
         let args = new_session_args(&spec);
-        assert!(
-            args.windows(2).any(|pair| pair == ["-e", "NO_COLOR"]),
-            "{args:?}"
-        );
-        assert!(
-            args.windows(2).any(|pair| pair == ["-e", "FORCE_COLOR"]),
-            "{args:?}"
-        );
-        assert!(
-            !args.iter().any(|arg| arg.starts_with("NO_COLOR=")),
-            "{args:?}"
-        );
-        assert!(
-            args.windows(2)
-                .any(|pair| pair[0] == "-e" && pair[1] == "RIG_HOME=/h"),
-            "{args:?}"
-        );
+        let env_at = args.iter().position(|arg| arg == "env").expect("env");
+        let command_at = args
+            .iter()
+            .position(|arg| arg == "claude")
+            .expect("command");
+        assert!(env_at < command_at);
+        assert!(args.windows(2).any(|pair| pair == ["-u", "NO_COLOR"]));
+        assert!(args.windows(2).any(|pair| pair == ["-u", "FORCE_COLOR"]));
+        assert!(!args.windows(2).any(|pair| pair == ["-e", "NO_COLOR"]));
+        assert!(!args.iter().any(|arg| arg.starts_with("NO_COLOR=")));
+        assert!(args.windows(2).any(|pair| pair == ["-e", "RIG_HOME=/h"]));
     }
 
     #[test]

@@ -42,7 +42,7 @@ pub(crate) async fn reconcile(app: &App) -> Result<(), Error> {
         }
         if incomplete || !alive {
             let capture = crate::death::last_capture(app, &seat).await;
-            mark_dead(app, &seat, None, capture).await?;
+            mark_dead(app, &seat, None, None, capture).await?;
         }
     }
     Ok(())

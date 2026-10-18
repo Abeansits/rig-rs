@@ -100,7 +100,7 @@ fn death_and_down_emit_their_events() {
     let now = Timestamp::from_millis(5);
     let mut plan = LifecycleService::plan_up(&spec, &minted, now).expect("plan");
     let first = plan.seats.first_mut().expect("seat");
-    let died = LifecycleService::mark_dead(first, now, Some(1), Some("❯ \n".to_owned()));
+    let died = LifecycleService::mark_dead(first, now, Some(1), None, Some("❯ \n".to_owned()));
     assert!(matches!(
         died,
         DomainEvent::SeatDied {

@@ -95,6 +95,9 @@ pub struct StreamPayload {
     /// Pane exit status from `seat_died`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_status: Option<i32>,
+    /// `pane_dead_signal` from `seat_died`, when the process was killed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
     /// Last pane capture from `seat_died`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<String>,

@@ -148,7 +148,7 @@ async fn up_relaunches_a_dead_seat_beside_a_ready_one() {
         .expect("seats");
     let one_before = seat(&before, "one").clone();
     let two_before = seat(&before, "two").clone();
-    crate::death::mark_dead(&app, &two_before, None, None)
+    crate::death::mark_dead(&app, &two_before, None, None, None)
         .await
         .expect("dead");
     assert!(mux.has_session("two__pair").await.expect("leftover"));
@@ -344,7 +344,7 @@ async fn down_is_not_overwritten_by_death() {
     let hammer = tokio::spawn(async move {
         for _ in 0..40 {
             for seat in &seats {
-                crate::death::mark_dead(&app_death, seat, None, None)
+                crate::death::mark_dead(&app_death, seat, None, None, None)
                     .await
                     .expect("dead");
             }

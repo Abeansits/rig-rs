@@ -142,6 +142,7 @@ async fn scripted_guard_and_injected_events_round_trip() {
     mux.inject(MuxEvent::PaneDied {
         pane_id: "%1".to_owned(),
         status: Some(7),
+        signal: None,
     })
     .await;
     let event = events.recv().await.expect("event");
@@ -149,7 +150,8 @@ async fn scripted_guard_and_injected_events_round_trip() {
         event,
         MuxEvent::PaneDied {
             pane_id: "%1".to_owned(),
-            status: Some(7)
+            status: Some(7),
+            signal: None,
         }
     );
 }

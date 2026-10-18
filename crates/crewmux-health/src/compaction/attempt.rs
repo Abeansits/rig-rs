@@ -306,6 +306,33 @@ impl Book {
         }
     }
 
+    /// A prep was cancelled before `/compact` opened a row.
+    ///
+    /// The id was already minted. Recording it keeps later numbers contiguous.
+    pub fn cancel_unsent(&mut self, seat_key: &str, id: AttemptId, now_ms: u64) {
+        if self.by_id_mut(&id).is_some() {
+            return;
+        }
+        self.attempts
+            .push(manual_row(seat_key, id, AttemptState::Cancelled, now_ms));
+    }
+
+    /// Drop a minted id that no prep and no row kept, so the next mint reuses it.
+    pub fn release_unused(&mut self, seat_key: &str, id: &AttemptId) {
+        if self.attempts.iter().any(|attempt| &attempt.id == id) {
+            return;
+        }
+        let Some(number) = trailing_seq(id.as_str()) else {
+            return;
+        };
+        let Some(next) = self.seat_seq.get(seat_key).copied() else {
+            return;
+        };
+        if next == number.saturating_add(1) {
+            self.seat_seq.insert(seat_key.to_owned(), number);
+        }
+    }
+
     /// A prep paste failed before `/compact`. The row is `Failed` even when
     /// [`Self::request`] never opened it.
     pub fn fail_unsent(&mut self, seat_key: &str, id: AttemptId, reason: &str, now_ms: u64) {
@@ -313,23 +340,12 @@ impl Book {
             attempt.state = AttemptState::Failed(reason.to_owned());
             return;
         }
-        self.attempts.push(Attempt {
+        self.attempts.push(manual_row(
+            seat_key,
             id,
-            seat_key: seat_key.to_owned(),
-            trigger: CompactTrigger::Manual,
-            managed: true,
-            state: AttemptState::Failed(reason.to_owned()),
-            session_id: None,
-            saw_compact_start: false,
-            saw_post_compact: false,
-            summary_sha: None,
-            summary_len: None,
-            opened_ms: now_ms,
-            precompact_ms: None,
-            completed_ms: None,
-            transcript_path: PathBuf::new(),
-            cwd: PathBuf::new(),
-        });
+            AttemptState::Failed(reason.to_owned()),
+            now_ms,
+        ));
     }
 
     /// Enter already happened and the transcript check failed. Do not resend.
@@ -484,6 +500,26 @@ impl Book {
         self.seat_seq
             .insert(seat_key.to_owned(), next.saturating_add(1));
         AttemptId(format!("{prefix}-{seat_key}-{next}"))
+    }
+}
+
+fn manual_row(seat_key: &str, id: AttemptId, state: AttemptState, now_ms: u64) -> Attempt {
+    Attempt {
+        id,
+        seat_key: seat_key.to_owned(),
+        trigger: CompactTrigger::Manual,
+        managed: true,
+        state,
+        session_id: None,
+        saw_compact_start: false,
+        saw_post_compact: false,
+        summary_sha: None,
+        summary_len: None,
+        opened_ms: now_ms,
+        precompact_ms: None,
+        completed_ms: None,
+        transcript_path: PathBuf::new(),
+        cwd: PathBuf::new(),
     }
 }
 
@@ -721,14 +757,13 @@ fn duration_ms(duration: Duration) -> u64 {
 }
 
 fn seq_after(id: &str) -> u64 {
-    let Some(rest) = id
+    trailing_seq(id).map_or(1, |n| n.saturating_add(1))
+}
+
+fn trailing_seq(id: &str) -> Option<u64> {
+    let rest = id
         .strip_prefix("auto-")
-        .or_else(|| id.strip_prefix("manual-"))
-    else {
-        return 1;
-    };
-    let Some((_, digits)) = rest.rsplit_once('-') else {
-        return 1;
-    };
-    digits.parse::<u64>().map_or(1, |n| n.saturating_add(1))
+        .or_else(|| id.strip_prefix("manual-"))?;
+    let (_, digits) = rest.rsplit_once('-')?;
+    digits.parse().ok()
 }

@@ -87,6 +87,69 @@ mod suite {
         }
 
         #[tokio::test]
+        async fn seat_unsets_no_color_and_force_color() {
+            let server = server_with_env(&[("NO_COLOR", "1"), ("FORCE_COLOR", "0")]).await;
+            let mut spec = SessionSpec::new("color", scratch());
+            spec.clear_env = vec!["NO_COLOR".to_owned(), "FORCE_COLOR".to_owned()];
+            spec.remain_on_exit = true;
+            spec.argv = vec![
+                "sh".into(),
+                "-c".into(),
+                "if [ -n \"${NO_COLOR+x}\" ]; then echo NO_COLOR=set; else echo NO_COLOR=unset; fi; if [ -n \"${FORCE_COLOR+x}\" ]; then echo FORCE_COLOR=set; else echo FORCE_COLOR=unset; fi; sleep 30".into(),
+            ];
+            let pane = server.mux.create_session(&spec).await.expect("create");
+            let text = wait_for_capture(&server, &pane, "NO_COLOR=").await;
+            assert!(
+                text.contains("NO_COLOR=unset"),
+                "NO_COLOR leaked into the pane: {text}"
+            );
+            assert!(
+                text.contains("FORCE_COLOR=unset"),
+                "FORCE_COLOR leaked into the pane: {text}"
+            );
+        }
+
+        async fn server_with_env(pairs: &[(&str, &str)]) -> Server {
+            reap_stale_sockets().await;
+            let socket = next_socket();
+            let mut command = Command::new("tmux");
+            command
+                .args(["-L", &socket, "-f", "/dev/null", "start-server"])
+                .env_remove("TMUX")
+                .env_remove("TMUX_TMPDIR");
+            for (key, value) in pairs {
+                command.env(key, value);
+            }
+            let status = command.status().await.expect("start-server");
+            assert!(status.success(), "start-server {status}");
+            let mux = TmuxMux::connect(TmuxConfig {
+                binary: PathBuf::from("tmux"),
+                socket: socket.clone(),
+                pause_after: false,
+            })
+            .await
+            .expect("connect");
+            Server { socket, mux }
+        }
+
+        async fn wait_for_capture(server: &Server, pane: &PaneRef, needle: &str) -> String {
+            let mut last = String::new();
+            for _ in 0..40 {
+                last = server
+                    .mux
+                    .capture(pane, CaptureRange::Visible)
+                    .await
+                    .expect("capture")
+                    .text;
+                if last.contains(needle) {
+                    return last;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            last
+        }
+
+        #[tokio::test]
         async fn paste_failure_cleans_buffer() {
             let server = Server::boot().await;
             let bogus = PaneRef {
@@ -417,9 +480,14 @@ mod suite {
             drop(std::fs::remove_file(&flag));
             let elapsed = start.elapsed();
             match event {
-                MuxEvent::PaneDied { status, pane_id } => {
+                MuxEvent::PaneDied {
+                    status,
+                    pane_id,
+                    signal,
+                } => {
                     assert_eq!(Some(pane_id).as_ref(), pane.pane_id.as_ref());
                     assert_eq!(status, Some(7), "{elapsed:?}");
+                    assert!(signal.is_none(), "{signal:?}");
                 }
                 event @ (MuxEvent::Output { .. }
                 | MuxEvent::WindowClosed { .. }
@@ -452,7 +520,17 @@ mod suite {
             let mut deaths = server.mux.death_events();
             signal(pane_pid(&server, &pane).await, "KILL");
             let event = wait_death(&mut deaths, Duration::from_secs(3)).await;
-            assert!(matches!(event, MuxEvent::PaneDied { .. }), "{event:?}");
+            match event {
+                MuxEvent::PaneDied { status, signal, .. } => {
+                    assert_eq!(status, None, "kill -9 is not an exit status");
+                    let signal = signal.expect("pane_dead_signal");
+                    assert!(
+                        matches!(signal.as_str(), "9" | "KILL" | "SIGKILL"),
+                        "{signal}"
+                    );
+                }
+                other => panic!("{other:?}"),
+            }
             let second = tokio::time::timeout(Duration::from_millis(1500), deaths.recv()).await;
             assert!(second.is_err(), "duplicate death: {second:?}");
         }

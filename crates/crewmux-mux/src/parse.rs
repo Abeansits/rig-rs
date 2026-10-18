@@ -188,20 +188,41 @@ pub(crate) fn parse_cursor(stdout: &str) -> Result<(u16, u16), MuxError> {
     Ok((x, y))
 }
 
-/// `#{pane_dead} #{pane_dead_status}`.
-pub(crate) fn parse_dead_status(stdout: &str) -> Result<(bool, Option<i32>), MuxError> {
-    let mut parts = stdout.split_whitespace();
+/// One dead-pane read: `#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DeadPane {
+    /// `pane_dead`.
+    pub(crate) dead: bool,
+    /// `pane_dead_status`. Empty when the process was signalled.
+    pub(crate) status: Option<i32>,
+    /// `pane_dead_signal`, as tmux printed it (`9` or `KILL`).
+    pub(crate) signal: Option<String>,
+}
+
+/// `#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}`.
+pub(crate) fn parse_dead_status(stdout: &str) -> Result<DeadPane, MuxError> {
+    let line = stdout.lines().next().unwrap_or("").trim();
+    let mut parts = line.split('|');
     let dead = parts.next().unwrap_or("0") == "1";
     let status = match parts.next() {
-        Some(raw) => Some(parse_i32(raw, "pane_dead_status")?),
-        None => None,
+        Some(raw) if !raw.is_empty() => Some(parse_i32(raw, "pane_dead_status")?),
+        Some(_) | None => None,
     };
-    Ok((dead, status))
+    let signal = parts
+        .next()
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .map(str::to_owned);
+    Ok(DeadPane {
+        dead,
+        status,
+        signal,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pane_line;
+    use super::{parse_dead_status, parse_pane_line};
 
     #[test]
     fn tmux_3_6_sanitised_format_parses() {
@@ -219,6 +240,19 @@ mod tests {
         assert!(!pane.in_mode);
         assert_eq!(pane.current_cmd, "ba_sh");
         assert_eq!(pane.session, "agent|notes");
+    }
+
+    #[test]
+    fn kill_signal_is_separate_from_the_exit_status() {
+        let killed = parse_dead_status("1||9\n").expect("signal");
+        assert!(killed.dead);
+        assert_eq!(killed.status, None);
+        assert_eq!(killed.signal.as_deref(), Some("9"));
+        let named = parse_dead_status("1||KILL\n").expect("name");
+        assert_eq!(named.signal.as_deref(), Some("KILL"));
+        let exited = parse_dead_status("1|7|\n").expect("exit");
+        assert_eq!(exited.status, Some(7));
+        assert_eq!(exited.signal, None);
     }
 
     #[test]

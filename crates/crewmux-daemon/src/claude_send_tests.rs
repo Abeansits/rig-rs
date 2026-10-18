@@ -113,6 +113,48 @@ async fn a_failed_send_clears_each_typed_envelope_line() {
     drop(std::fs::remove_dir_all(&rig.root));
 }
 
+#[tokio::test]
+async fn a_faint_suggestion_is_delivered() {
+    let rig = boot("faint-send", &faint_suggestion()).await;
+    let before = paste_count(&rig.mux).await;
+    let sent = deliver(&rig.app, outbound("ping")).await;
+    let shown = match &sent {
+        Ok(value) => value.to_string(),
+        Err(err) => err.to_string(),
+    };
+    assert!(
+        paste_count(&rig.mux).await > before,
+        "plain capture treated the suggestion as a draft: {shown}"
+    );
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn clear_composer_keeps_a_faint_suggestion_from_reading_as_a_draft() {
+    let screen = faint_suggestion();
+    let rig = boot("faint-clear", &screen).await;
+    let pane = crewmux_mux::PaneRef::session("seat__rig");
+    rig.mux
+        .replay_screens(vec![Capture::new(screen, (0, 0))])
+        .await;
+    let cleared = crate::paste_check::clear_composer(
+        &rig.app,
+        &pane,
+        crewmux_mux::CaptureRange::Visible,
+        1,
+        RuntimeKind::ClaudeCode,
+    )
+    .await
+    .expect("clear");
+    assert!(cleared, "paste check dropped the escapes and saw a draft");
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+fn faint_suggestion() -> String {
+    let rule = "─".repeat(40);
+    format!("{rule}\n\u{1b}[2m❯ allow reading the marker path\u{1b}[22m\n{rule}\n")
+}
+
 fn seat_field(body: &serde_json::Value, field: &str) -> String {
     body.get("rigs")
         .and_then(|rigs| rigs.get(0))

@@ -186,7 +186,9 @@ pub(crate) fn is_idle_body(body: &str) -> bool {
 /// The composer shows `payload` (boxed, inline, or a paste placeholder).
 #[must_use]
 pub(crate) fn composer_matches(screen: &str, payload: &str) -> bool {
-    if let Some(body) = box_body(screen) {
+    // Readiness captures keep SGR. The payload itself is plain text.
+    let plain = strip_csi(screen);
+    if let Some(body) = box_body(&plain) {
         let body = squash(&strip_marker(&body));
         let raw = squash(payload);
         let wrapped = squash(&claude_visible(payload));
@@ -194,7 +196,7 @@ pub(crate) fn composer_matches(screen: &str, payload: &str) -> bool {
             return true;
         }
     }
-    staged_matches(screen, payload)
+    staged_matches(&plain, payload)
 }
 
 /// Multi-line pastes are wrapped. Tabs become four spaces. Single-line text stays.

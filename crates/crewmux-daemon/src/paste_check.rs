@@ -41,7 +41,11 @@ pub(crate) fn classify_for(
     after: &str,
     payload: &str,
 ) -> PasteHit {
-    if display.is_claude() && crewmux_adapters::claude::staged_matches(after, payload) {
+    // A placeholder that was already on screen is not this paste.
+    if display.is_claude()
+        && crewmux_adapters::claude::staged_matches(after, payload)
+        && !crewmux_adapters::claude::staged_matches(before, payload)
+    {
         return PasteHit::Clean;
     }
     if display.is_claude() {
@@ -654,6 +658,22 @@ mod tests {
         );
         assert_eq!(
             classify_for(PasteDisplay::Claude, "idle\n", real, body),
+            PasteHit::Clean
+        );
+    }
+
+    #[test]
+    fn a_placeholder_already_on_screen_is_not_a_new_paste() {
+        let rule = "─".repeat(40);
+        let screen = format!("{rule}\n❯ [Pasted text #1 +5 lines]\n{rule}\n");
+        let payload = "a\nb\nc\nd\ne\nf";
+        assert_eq!(payload.matches('\n').count(), 5);
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, &screen, &screen, payload),
+            PasteHit::Missing
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "idle\n", &screen, payload),
             PasteHit::Clean
         );
     }

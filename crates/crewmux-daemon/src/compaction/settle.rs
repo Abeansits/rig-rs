@@ -2,12 +2,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crewmux_adapters::{AdapterRegistry, ClaudeAdapter};
 use crewmux_core::{Rig, RigRepo, Seat, SeatRepo, SeatState, Timestamp};
 use crewmux_health::compaction::{
-    AttemptState, CompactTrigger, HookEvent, ManualCompactionStage, SessionSource,
+    AttemptState, CompactTrigger, HookEvent, ManualCompactionStage, PrepMode, PrepStatus,
+    PreparationState, SessionSource,
 };
 use crewmux_mux::{Capture, FakeMux, Multiplexer};
 use crewmux_types::{RigId, RigName, RuntimeKind, SeatId, SeatName};
@@ -285,6 +286,157 @@ async fn cancel_during_restore_drops_the_pending_prompt() {
         .expect("compact after a cancelled restore");
     assert_eq!(second["compact_sent"], true, "{second}");
     drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn skip_map_waits_until_the_composer_is_idle() {
+    let rig = boot("idle-wait", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    rig.mux
+        .set_capture_after_enter(Capture::new("booting\n".to_owned(), (0, 0)))
+        .await;
+    let mux = Arc::clone(&rig.mux);
+    let pane = crewmux_mux::PaneRef::session("seat__rig");
+    tokio::spawn(async move {
+        for _ in 0..400 {
+            let shot = mux
+                .capture(&pane, crewmux_mux::CaptureRange::Visible)
+                .await
+                .unwrap_or_else(|_| Capture::new(String::new(), (0, 0)));
+            if shot.text.contains("booting") {
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                let rule = "─".repeat(40);
+                mux.set_capture(Capture::new(
+                    format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"),
+                    (0, 0),
+                ))
+                .await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
+    let value = trigger(&rig.app, br#"{"seat":"claude","skip_map":true}"#)
+        .await
+        .expect("compact after the idle wait");
+    assert_eq!(value["compact_sent"], true, "{value}");
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn skip_map_idle_timeout_fails_the_attempt_so_the_next_compact_sends() {
+    let rig = boot("idle-timeout", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let rule = "─".repeat(40);
+    let ready = Capture::new(format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"), (0, 0));
+    let seat = crate::query::find_seat(&rig.app, "claude")
+        .await
+        .expect("seat");
+    {
+        let mut guard = rig.app.compaction.lock().await;
+        let id = guard.book.next_manual_id(&seat.id.to_string());
+        guard.set_prep(
+            "claude",
+            PreparationState {
+                active: true,
+                attempt_id: id.0,
+                mode: PrepMode::Manual,
+                status: PrepStatus::Waiting,
+                map_complete: true,
+                paste_accepted: true,
+                deadline_ms: Some(crate::state::now_ms().saturating_add(150)),
+                reason: None,
+            },
+        );
+    }
+    rig.mux
+        .script_captures(vec![
+            ready.clone(),
+            Capture::new("booting\n".to_owned(), (0, 0)),
+        ])
+        .await;
+    let started = Instant::now();
+    let body = br#"{"seat":"claude","skip_map":true}"#;
+    let failed = trigger(&rig.app, body)
+        .await
+        .expect_err("idle wait expired");
+    assert!(
+        failed.to_string().contains("seat is not ready for input"),
+        "{failed}"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(70),
+        "compact did not wait for idle: {:?}",
+        started.elapsed()
+    );
+    let reported = status(&rig.app, body).await.expect("status");
+    assert_eq!(reported["stage"], "failed", "{reported}");
+    assert_eq!(reported["attempts"][0]["state"], "failed", "{reported}");
+    assert!(
+        reported["attempts"][0]["attempt_id"]
+            .as_str()
+            .unwrap_or("")
+            .ends_with("-1"),
+        "{reported}"
+    );
+    rig.mux.set_capture(ready).await;
+    let second = trigger(&rig.app, body)
+        .await
+        .expect("compact after the failed idle wait");
+    assert_eq!(second["compact_sent"], true, "{second}");
+    let guard = rig.app.compaction.lock().await;
+    assert!(
+        guard
+            .book
+            .attempts()
+            .iter()
+            .any(|attempt| attempt.id.as_str().ends_with("-2")),
+        "{:?}",
+        guard.book.attempts()
+    );
+    drop(guard);
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn cancelled_preps_keep_contiguous_attempt_numbers() {
+    let rig = boot("numbers", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let body = br#"{"seat":"claude"}"#;
+    for n in 1..=3 {
+        let value = trigger(&rig.app, body).await.expect("prep");
+        assert_eq!(value["compact_sent"], false, "{value}");
+        cancel(&rig.app, body).await.expect("cancel");
+        let reported = status(&rig.app, body).await.expect("status");
+        let attempts = reported["attempts"].as_array().expect("attempts");
+        assert_eq!(attempts.len(), n, "{reported}");
+        let row = attempts.get(n.saturating_sub(1)).expect("row");
+        let id = row["attempt_id"].as_str().unwrap_or("");
+        assert!(id.ends_with(&format!("-{n}")), "{id}");
+        assert_eq!(row["state"], "cancelled", "{reported}");
+    }
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn a_faint_suggestion_is_ready_for_skip_map_compact() {
+    let rig = boot("faint-compact", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    rig.mux
+        .set_capture(Capture::new(faint_suggestion(), (0, 0)))
+        .await;
+    let value = trigger(&rig.app, br#"{"seat":"claude","skip_map":true}"#)
+        .await
+        .expect("faint composer is idle");
+    assert_eq!(value["compact_sent"], true, "{value}");
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+fn faint_suggestion() -> String {
+    let rule = "─".repeat(40);
+    format!(
+        "{rule}\n\u{1b}[2m❯ allow reading the marker path\u{1b}[22m\n{rule}\n  ? for shortcuts\n"
+    )
 }
 
 fn precompact(session: &str) -> HookEvent {

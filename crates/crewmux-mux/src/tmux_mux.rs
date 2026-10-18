@@ -582,7 +582,7 @@ impl Multiplexer for TmuxMux {
             last_human_keystroke_tap: None,
             pane_in_mode: self.pane_in_mode(pane).await?,
             tail: self
-                .capture(pane, CaptureRange::LastLines(tail_lines))
+                .capture(pane, CaptureRange::guard_tail(tail_lines))
                 .await?,
             last_own_write: *self.own_write.borrow(),
         })

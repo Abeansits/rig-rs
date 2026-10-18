@@ -150,13 +150,15 @@ impl LifecycleService {
 
     /// The pane process exited.
     ///
-    /// `exit_status` is tmux `pane_dead_status`. `capture` is the last visible
-    /// pane text. Either may be missing when the multiplexer could not read it.
+    /// `exit_status` is tmux `pane_dead_status`. `signal` is `pane_dead_signal`
+    /// when the process was killed. `capture` is the last pane text. Any of
+    /// them may be missing when the multiplexer could not read it.
     #[must_use]
     pub fn mark_dead(
         seat: &mut Seat,
         now: Timestamp,
         exit_status: Option<i32>,
+        signal: Option<String>,
         capture: Option<String>,
     ) -> DomainEvent {
         seat.state = SeatState::Dead;
@@ -164,6 +166,7 @@ impl LifecycleService {
             seat: seat.id,
             at: now,
             exit_status,
+            signal,
             capture,
         }
     }
