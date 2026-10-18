@@ -13,6 +13,7 @@ mod queue;
 mod repo;
 mod store;
 mod token;
+mod watchdog;
 mod workflow;
 
 pub use durability::{
@@ -40,4 +41,10 @@ pub use repo::{Db, clear_rig};
 pub use rusqlite::Connection;
 pub use store::Store;
 pub use token::{put_seat_token, seat_token};
+pub use watchdog::{
+    ClaimOutcome, FreshClaim, NewHistory, NewWatchJob, POLICIES, WatchHistory, WatchJob,
+    append_history, claim_occurrence, ensure_job, finish_claim, get_job, list_active, list_history,
+    mark_terminal, reconcile_abandoned, record_condition, record_evaluation, release_claim,
+    set_actionable, stop_job,
+};
 pub use workflow::{SeatCoord, commit_projection, list_seat_coords, load_workflow_document};

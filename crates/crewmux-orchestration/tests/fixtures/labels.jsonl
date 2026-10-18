@@ -4,3 +4,7 @@
 {"file":"compose-newline-2","sha256":"c410bfd99c846b9dc84431c34ca7044a1e3e4e33146a8fa105b25577e6188768","source":"OpenRig v0.6.9 4b48ca21 context-pack-compose.test.ts preserves EOF-newline bytes A + B\\n"}
 {"file":"compose-newline-3","sha256":"0bab4f3ce82f994d1a7728edc0a5651564a3f779b88e8e21a86dd969f7788189","source":"OpenRig v0.6.9 4b48ca21 context-pack-compose.test.ts preserves EOF-newline bytes A\\n + B\\n"}
 {"file":"good-recap","sha256":"2697ba952f276342151bc752b10bb8294422bcfc3ef69b535cac5ddd5d37501b","source":"OpenRig v0.6.9 4b48ca21 seat-recap-store.test.ts GOOD_RECAP bytes"}
+{"file":"watchdog/keepalive.txt","sha256":"60052f494d0c2e5acd103b547c83bc1ddb4169f18968b7a0f3bff02a5cddde3c","source":"OpenRig v0.6.9 4b48ca21 packages/daemon/src/domain/policies/workflow-keepalive.ts and queue nudge pointer"}
+{"file":"watchdog/keepalive-others.txt","sha256":"6e28063604f0baa340076941ddfffd1d3566d056dd4fb5bff1e2b139a34736ef","source":"OpenRig v0.6.9 4b48ca21 packages/daemon/src/domain/policies/workflow-keepalive.ts and queue nudge pointer"}
+{"file":"watchdog/stuck.txt","sha256":"407b48f8c5c8c114a9b4c04502ffa50f42888c62ff8aa439fd5acf9215687db3","source":"OpenRig v0.6.9 4b48ca21 packages/daemon/src/domain/policies/workflow-keepalive.ts and queue nudge pointer"}
+{"file":"watchdog/pointer.txt","sha256":"3d10d6bc82aaeaf0cd8fbf19e4b91b2ee4dfd32e6a472296b8bd34ecdffddd8f","source":"OpenRig v0.6.9 4b48ca21 packages/daemon/src/domain/policies/workflow-keepalive.ts and queue nudge pointer"}

@@ -77,6 +77,8 @@ pub(crate) struct App {
     cancel_on_restore: Arc<AtomicBool>,
     /// In-memory context-pack library. Materialized on the first context route.
     pub context: Arc<crate::context_hold::ContextHold>,
+    /// Watchdog outbox clock and test knobs.
+    pub(crate) outbox: crate::outbox::OutboxCtrl,
 }
 
 const CART_IDLE: u64 = 0;
@@ -147,6 +149,7 @@ impl App {
             cart_state: Arc::new(AtomicU64::new(cart_pack(0, CART_IDLE))),
             cancel_on_restore: Arc::new(AtomicBool::new(false)),
             context,
+            outbox: crate::outbox::OutboxCtrl::default(),
         }
     }
 
@@ -252,6 +255,7 @@ impl App {
         }
         self.tasks.spawn(crate::transcripts::run(self.clone()));
         self.tasks.spawn(crate::health_watch::run(self.clone()));
+        self.tasks.spawn(crate::outbox::run(self.clone()));
     }
 
     /// Remember the highest receipt cursor already stored. The next id is one past it.

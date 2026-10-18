@@ -31,6 +31,8 @@ mod launch;
 mod lineage;
 mod lineage_held;
 mod notify;
+mod outbox;
+mod outbox_fire;
 mod paste_check;
 mod persist;
 mod query;
@@ -76,6 +78,10 @@ mod flow;
 mod health_tests;
 #[cfg(all(test, feature = "tmux-it"))]
 mod lineage_it;
+#[cfg(all(test, feature = "tmux-it"))]
+mod outbox_it;
+#[cfg(test)]
+mod outbox_tests;
 #[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]
