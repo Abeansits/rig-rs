@@ -268,6 +268,24 @@ impl Book {
         })
     }
 
+    /// Put a claimed restore back to `Completed` when nothing was pasted.
+    ///
+    /// `NotReady` is the only caller. A missing summary hash stays
+    /// `RestoreSent`, so the attempt is not due again.
+    pub fn release_restore_claim(&mut self, id: &AttemptId) -> bool {
+        let Some(attempt) = self.by_id_mut(id) else {
+            return false;
+        };
+        if !matches!(attempt.state, AttemptState::RestoreSent) {
+            return false;
+        }
+        let Some(sha) = attempt.summary_sha else {
+            return false;
+        };
+        attempt.state = AttemptState::Completed { summary_sha: sha };
+        true
+    }
+
     /// Record that the restore prompt was submitted.
     pub fn mark_restore_sent(&mut self, id: &AttemptId) {
         if let Some(attempt) = self.by_id_mut(id)

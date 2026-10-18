@@ -50,6 +50,50 @@ fn assert_completed(start_first: bool) {
 }
 
 #[test]
+fn a_claimed_restore_is_not_sent_again() {
+    let mut book = Book::new();
+    finish(&mut book);
+    let id = book
+        .due_restore("seat", true, 13_000)
+        .expect("due")
+        .id
+        .clone();
+    book.mark_restore_sent(&id);
+    assert!(book.due_restore("seat", true, 13_000).is_none());
+    book.mark_failed(&id, "transcript did not confirm the delivery");
+    assert!(book.due_restore("seat", true, 13_000).is_none());
+    assert!(!book.release_restore_claim(&id));
+
+    let mut book = Book::new();
+    finish(&mut book);
+    let id = book
+        .due_restore("seat", true, 13_000)
+        .expect("due again")
+        .id
+        .clone();
+    book.mark_restore_sent(&id);
+    assert!(book.release_restore_claim(&id));
+    assert!(book.due_restore("seat", true, 13_000).is_some());
+
+    let mut held = book.attempts().to_vec();
+    let row = held.first_mut().expect("row");
+    row.summary_sha = None;
+    row.state = AttemptState::RestoreSent;
+    let id = row.id.clone();
+    book.load(held);
+    assert!(!book.release_restore_claim(&id));
+    let kept = book.for_seat("seat").into_iter().next().expect("kept");
+    assert!(matches!(kept.state, AttemptState::RestoreSent));
+}
+
+fn finish(book: &mut Book) {
+    book.request("seat", AttemptId("manual-1".into()), 0);
+    book.on_hook("seat", &pre("s1", CompactTrigger::Manual), 1_000);
+    book.on_hook("seat", &start("s1"), 2_000);
+    book.on_hook("seat", &post("s1", CompactTrigger::Manual, "sum"), 3_000);
+}
+
+#[test]
 fn cancel_drops_a_due_restore() {
     let mut book = Book::new();
     book.request("seat", AttemptId("manual-1".into()), 0);

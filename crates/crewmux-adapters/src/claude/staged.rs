@@ -14,7 +14,7 @@
 
 /// The composer shows `payload`, or Claude's collapsed paste of it.
 #[must_use]
-pub(crate) fn staged_matches(screen: &str, payload: &str) -> bool {
+pub fn staged_matches(screen: &str, payload: &str) -> bool {
     let Some(region) = input_region(screen) else {
         return false;
     };

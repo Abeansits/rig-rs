@@ -110,20 +110,30 @@ fn is_wrapper_line(line: &str) -> bool {
 
 /// Remove one outermost wrapper when the whole string is that wrapper.
 ///
-/// The match is anchored. A `<pasted_content` literal in the middle stays.
+/// Leading and trailing whitespace may surround the tag. Claude Code 2.1.287
+/// writes the close tag as `</pasted_content id="…">` and may put two newlines
+/// before the open tag. The id is not a content hash: the same id is reused
+/// for later pastes, so equality is the inner text. A `<pasted_content`
+/// literal in the middle stays. Two wrappers stay wrapped.
 #[must_use]
 pub fn unwrap_outermost(text: &str) -> Option<String> {
-    let rest = text.strip_prefix('\n').unwrap_or(text);
+    let rest = text.trim_matches(|ch: char| matches!(ch, '\n' | '\r' | ' ' | '\t'));
     let after_name = rest.strip_prefix("<pasted_content")?;
     let end = after_name.find('>')?;
     let after_tag = after_name.get(end.saturating_add(1)..)?;
-    let body_and_close = after_tag.strip_prefix('\n')?;
-    let trimmed = body_and_close.strip_suffix('\n').unwrap_or(body_and_close);
-    let inner = trimmed.strip_suffix("</pasted_content>")?;
+    let body_and_close = after_tag.strip_prefix('\n').unwrap_or(after_tag);
+    let close_at = body_and_close.rfind("</pasted_content")?;
+    let inner = body_and_close.get(..close_at)?;
     if inner.contains("</pasted_content>") {
         return None;
     }
-    Some(inner.to_owned())
+    let after_close = body_and_close.get(close_at..)?;
+    let tag_end = after_close.find('>')?;
+    let tail = after_close.get(tag_end.saturating_add(1)..)?;
+    if !tail.trim().is_empty() {
+        return None;
+    }
+    Some(inner.strip_suffix('\n').unwrap_or(inner).to_owned())
 }
 
 fn common(text: &str) -> String {

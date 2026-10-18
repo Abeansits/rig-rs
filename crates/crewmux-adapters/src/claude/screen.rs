@@ -11,7 +11,7 @@ use crewmux_types::{ComposerState, DialogId, ReadinessCode};
 
 use crate::claude::composer::{
     ComposerAnchor, boxed_body, composer_anchor, composer_view, has_continuation, is_box_rule,
-    is_idle_body,
+    is_dim_suggestion, is_idle_body,
 };
 use crate::claude::dialogs::CLAUDE_DIALOGS;
 use crate::dialog::{MenuOption, is_option_menu, parse_menu, recognise};
@@ -116,6 +116,11 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
             options: found.menu,
         });
     }
+    if permission_dialog(view) {
+        return ClaudeScreen::UnknownMenu {
+            evidence: clip(text),
+        };
+    }
     if no_conversation(view) {
         return ClaudeScreen::UnknownMenu {
             evidence: clip(text),
@@ -128,6 +133,7 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
         return ClaudeScreen::Busy;
     }
     if let Some(anchor) = anchor.as_ref()
+        && !dim_suggestion(text, anchor)
         && (has_continuation(text, anchor) || !is_idle_body(&anchor.body))
     {
         return ClaudeScreen::Draft;
@@ -177,6 +183,20 @@ pub fn strict_mcp_drift(screen: &ClaudeScreen) -> Option<&'static str> {
         | ClaudeScreen::UnknownMenu { .. }
         | ClaudeScreen::Inconclusive => None,
     }
+}
+
+fn dim_suggestion(text: &str, anchor: &ComposerAnchor) -> bool {
+    if has_continuation(text, anchor) {
+        return false;
+    }
+    text.lines().nth(anchor.line).is_some_and(is_dim_suggestion)
+}
+
+/// A permission or tool-approval dialog. These are attention, never ready.
+///
+/// The titles are the ones Claude Code 2.1.287 printed on the live pane.
+fn permission_dialog(text: &str) -> bool {
+    text.contains("Read outside the working directories") || text.contains("Do you want to proceed")
 }
 
 fn squash_empty(body: &str) -> bool {

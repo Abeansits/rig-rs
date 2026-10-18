@@ -20,7 +20,7 @@ use crate::argv::{
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::error::MuxError;
 use crate::exec::{ExecOutput, TmuxExec};
-use crate::fake_screen::{clear_prompt, land_or_append, slice_capture};
+use crate::fake_screen::{clear_one_draft_line, clear_prompt, land_or_append, slice_capture};
 use crate::hub::Hub;
 use crate::paste::perform_paste;
 use crate::types::{
@@ -607,12 +607,12 @@ fn clear_chevron_composer(guard: &mut FakeInner, pane: &PaneRef) {
     guard.screens.insert(session, cleared);
 }
 
-/// `C-u` restores an empty Claude composer on the capture and the session screen.
+/// `C-u` drops one typed line, then the prompt body, on the capture and the session screen.
 fn clear_composer(guard: &mut FakeInner, pane: &PaneRef) {
-    guard.capture = clear_prompt(&guard.capture);
+    guard.capture = clear_one_draft_line(&guard.capture);
     let session = canonical_session_name(&pane.session);
     if let Some(screen) = guard.screens.get_mut(&session) {
-        *screen = clear_prompt(screen);
+        *screen = clear_one_draft_line(screen);
     }
 }
 

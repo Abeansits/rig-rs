@@ -59,6 +59,56 @@ fn strip_prompt_marker(text: &str) -> Option<&str> {
         .or_else(|| text.trim().strip_prefix('›'))
 }
 
+/// One `C-u`: drop the last continuation inside the composer, or blank the prompt.
+///
+/// Enter still uses [`clear_prompt`], which blanks the prompt line in one step.
+pub(crate) fn clear_one_draft_line(capture: &Capture) -> Capture {
+    let mut lines: Vec<String> = capture.text.lines().map(str::to_owned).collect();
+    let Some(prompt) = lines.iter().rposition(|line| prompt_marker_line(line)) else {
+        return clear_prompt(capture);
+    };
+    if let Some(index) = last_continuation(&lines, prompt) {
+        lines.remove(index);
+        return joined(capture, &lines);
+    }
+    if let Some(line) = lines.get_mut(prompt) {
+        *line = fill_prompt(line, "");
+    }
+    joined(capture, &lines)
+}
+
+fn prompt_marker_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with('❯') || trimmed.starts_with('›')
+}
+
+fn last_continuation(lines: &[String], prompt: usize) -> Option<usize> {
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(prompt.saturating_add(1))
+        .find(|(_, line)| is_box_rule(line))
+        .map_or(lines.len(), |(index, _)| index);
+    (prompt.saturating_add(1)..end).rev().find(|index| {
+        lines
+            .get(*index)
+            .is_some_and(|line| !line.trim().is_empty())
+    })
+}
+
+fn is_box_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.chars().count() >= 10 && trimmed.chars().all(|ch| ch == '─' || ch == '═')
+}
+
+fn joined(capture: &Capture, lines: &[String]) -> Capture {
+    let mut text = lines.join("\n");
+    if capture.text.ends_with('\n') {
+        text.push('\n');
+    }
+    Capture::new(text, capture.cursor)
+}
+
 pub(crate) fn clear_prompt(capture: &Capture) -> Capture {
     let mut lines: Vec<String> = capture.text.lines().map(str::to_owned).collect();
     if let Some(index) = lines.iter().rposition(|line| {
@@ -183,4 +233,21 @@ pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
         text.push('\n');
     }
     Capture::new(text, capture.cursor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Capture, clear_one_draft_line};
+
+    #[test]
+    fn ctrl_u_drops_one_typed_line_then_the_prompt() {
+        let rule = "─".repeat(20);
+        let text = format!("{rule}\n❯ From: operator@host\nTo: cl@pr18\n{rule}\n");
+        let once = clear_one_draft_line(&Capture::new(text, (0, 0)));
+        assert!(once.text.contains("From:"), "{}", once.text);
+        assert!(!once.text.contains("To:"), "{}", once.text);
+        let twice = clear_one_draft_line(&once);
+        assert!(!twice.text.contains("From:"), "{}", twice.text);
+        assert!(twice.text.contains('❯'), "{}", twice.text);
+    }
 }

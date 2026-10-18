@@ -41,6 +41,9 @@ pub(crate) fn classify_for(
     after: &str,
     payload: &str,
 ) -> PasteHit {
+    if display.is_claude() && crewmux_adapters::claude::staged_matches(after, payload) {
+        return PasteHit::Clean;
+    }
     if display.is_claude() {
         let visible = claude_visible(payload);
         let hit = classify_against(before, after, &visible);
@@ -189,23 +192,38 @@ pub(crate) async fn clear_composer(
     lines: usize,
     runtime: RuntimeKind,
 ) -> Result<bool, Error> {
-    let parser = ComposerParser::Stub;
     let budget = clear_passes(lines);
     let deadline = Instant::now() + Duration::from_millis(40).saturating_mul(budget);
     let mut sent = 0u32;
     loop {
         if sent > 0 {
             let text = app.mux.capture(pane, range).await?.text;
-            if composer_empty(parser, &text) {
+            if composer_cleared(runtime, &text) {
                 return Ok(true);
             }
         }
-        if sent >= budget || (sent > 0 && Instant::now() >= deadline) {
-            return reset_composer(app, pane, range, parser, runtime).await;
+        // The stub's 40ms-per-line deadline keeps a newline from becoming Enter.
+        // Claude's clear is one Ctrl-U per typed line; stopping on that clock
+        // leaves the From/To lines of an unbracketed envelope in the composer.
+        let stub_deadline =
+            runtime != RuntimeKind::ClaudeCode && sent > 0 && Instant::now() >= deadline;
+        if sent >= budget || stub_deadline {
+            return reset_composer(app, pane, range, runtime).await;
         }
-        app.mux.send_keys(pane, parser.clear_keys()).await?;
+        app.mux
+            .send_keys(pane, ComposerParser::Stub.clear_keys())
+            .await?;
         sent = sent.saturating_add(1);
         tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+fn composer_cleared(runtime: RuntimeKind, screen: &str) -> bool {
+    match runtime {
+        RuntimeKind::ClaudeCode => crewmux_adapters::claude::classify_text(screen).is_ready(),
+        RuntimeKind::Stub | RuntimeKind::Codex | RuntimeKind::OpenCode | RuntimeKind::Terminal => {
+            composer_empty(ComposerParser::Stub, screen)
+        }
     }
 }
 
@@ -213,7 +231,6 @@ async fn reset_composer(
     app: &App,
     pane: &PaneRef,
     range: CaptureRange,
-    parser: ComposerParser,
     runtime: RuntimeKind,
 ) -> Result<bool, Error> {
     let keys = recovery_keys(runtime);
@@ -222,7 +239,7 @@ async fn reset_composer(
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let text = app.mux.capture(pane, range).await?.text;
-    Ok(composer_empty(parser, &text))
+    Ok(composer_cleared(runtime, &text))
 }
 
 /// `C-u` passes for a paste of `lines` lines. Short pastes stay at 8.
@@ -593,6 +610,34 @@ mod tests {
         assert_eq!(
             classify_for(PasteDisplay::Exact, "stub> ", "stub> col    value", plain),
             PasteHit::Missing
+        );
+    }
+
+    #[test]
+    fn claude_line_count_placeholder_is_the_send_envelope() {
+        let payload = crewmux_messaging::wrap_reply(
+            "operator@host",
+            "cl@pr18",
+            "ZEPHYR-342",
+            "operator@host",
+        );
+        assert_eq!(payload.matches('\n').count(), 5, "a 6-line envelope");
+        let rule = "─".repeat(40);
+        let screen =
+            format!("{rule}\n❯ [Pasted text #1 +5 lines]\n{rule}\n  paste again to expand\n");
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "idle\n", &screen, &payload),
+            PasteHit::Clean
+        );
+        let real = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/claude-2.1.287-pasted-plus11-lines.txt"
+        );
+        let body = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/payloads/claude-2.1.287-pasted-plus11-lines.payload.txt"
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "idle\n", real, body),
+            PasteHit::Clean
         );
     }
 

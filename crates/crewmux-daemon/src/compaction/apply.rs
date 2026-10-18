@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use crewmux_adapters::Readiness;
 use crewmux_health::compaction::{
-    Attempt, AttemptState, HookEvent, RestorePrompt, build_post_compact_restore_prompt,
-    marker_bytes, marker_path, parse_hook_value,
+    Attempt, AttemptState, HookEvent, RestoreMarker, RestorePrompt,
+    build_post_compact_restore_prompt, marker_bytes, marker_path, parse_hook_value,
 };
 use crewmux_provider::AtomicWrite;
 use serde_json::{Value, json};
@@ -91,36 +91,43 @@ pub(super) async fn deliver_seat(app: &App, seat_key: &str) -> Result<(), Error>
     if !seat_is_ready(app, &seat).await {
         return Ok(());
     }
-    let Some(attempt) = due_attempt(app, seat_key).await else {
+    let Some(attempt) = claim_restore(app, seat_key).await? else {
         return Ok(());
     };
     let session = seat.name.as_str().to_owned();
-    let text = restore_text(&app.home, &attempt, &session);
+    let text = match restore_text(&attempt, &session) {
+        Ok(text) => text,
+        Err(err) => {
+            fail_restore(app, &attempt, &err.to_string()).await?;
+            return Err(err);
+        }
+    };
     match submit_text(app, &session, &text).await {
         Ok(_) => mark_restored(app, &attempt, &session).await,
-        Err(Error::Adapter(err)) if after_enter(&err) => {
-            fail_restore(app, &attempt, &err.to_string()).await
+        Err(Error::Adapter(crewmux_adapters::Error::NotReady)) => {
+            release_restore(app, &attempt).await
         }
-        Err(Error::Adapter(
-            crewmux_adapters::Error::NotReady | crewmux_adapters::Error::PasteMismatch,
-        )) => Ok(()),
         Err(err) => {
-            tracing::warn!(seat_key, %err, "restore submit failed");
+            let reason = err.to_string();
+            fail_restore(app, &attempt, &reason).await?;
+            tracing::warn!(seat_key, reason, "restore submit failed");
             Ok(())
         }
     }
 }
 
-fn after_enter(err: &crewmux_adapters::Error) -> bool {
-    matches!(
-        err,
-        crewmux_adapters::Error::NotVerified | crewmux_adapters::Error::Contaminated
-    )
-}
-
-async fn due_attempt(app: &App, seat_key: &str) -> Option<Attempt> {
-    let guard = app.compaction.lock().await;
-    guard.book.due_restore(seat_key, true, now_ms()).cloned()
+/// `RestoreSent` before any await, so a second Stop cannot paste again.
+async fn claim_restore(app: &App, seat_key: &str) -> Result<Option<Attempt>, Error> {
+    let attempt = {
+        let mut guard = app.compaction.lock().await;
+        let Some(attempt) = guard.book.due_restore(seat_key, true, now_ms()).cloned() else {
+            return Ok(None);
+        };
+        guard.book.mark_restore_sent(&attempt.id);
+        attempt
+    };
+    save(app).await?;
+    Ok(Some(attempt))
 }
 
 async fn fail_restore(app: &App, attempt: &Attempt, reason: &str) -> Result<(), Error> {
@@ -128,6 +135,14 @@ async fn fail_restore(app: &App, attempt: &Attempt, reason: &str) -> Result<(), 
         let mut guard = app.compaction.lock().await;
         guard.book.mark_failed(&attempt.id, reason);
         super::trigger::release_finished(&mut guard);
+    }
+    save(app).await
+}
+
+async fn release_restore(app: &App, attempt: &Attempt) -> Result<(), Error> {
+    {
+        let mut guard = app.compaction.lock().await;
+        guard.book.release_restore_claim(&attempt.id);
     }
     save(app).await
 }
@@ -153,19 +168,31 @@ pub(super) async fn seat_is_ready(app: &App, seat: &crewmux_core::Seat) -> bool 
     matches!(adapter.check_ready(&binding).await, Ok(Readiness::Ready))
 }
 
-fn restore_text(home: &Path, attempt: &Attempt, session: &str) -> String {
-    let path = marker_path(home, &attempt.seat_key, attempt.id.as_str());
+fn restore_text(attempt: &Attempt, session: &str) -> Result<String, Error> {
+    let marker = RestoreMarker {
+        seat_key: attempt.seat_key.clone(),
+        attempt_id: attempt.id.as_str().to_owned(),
+        trigger: attempt.trigger,
+        managed: attempt.managed,
+        confirmed: true,
+        session_id: attempt.session_id.clone().unwrap_or_default(),
+        transcript_path: attempt.transcript_path.clone(),
+        cwd: attempt.cwd.clone(),
+    };
+    let bytes = marker_bytes(&marker).map_err(|err| Error::Message(err.to_string()))?;
+    let json = String::from_utf8(bytes).map_err(|err| Error::Message(err.to_string()))?;
     let transcript = nonempty(&attempt.transcript_path);
     build_post_compact_restore_prompt(&RestorePrompt {
         session_name: session,
-        rig_home: home,
-        marker_path: Some(&path),
+        rig_home: Path::new(""),
+        marker_json: &json,
         transcript_path: transcript,
         session_id: attempt.session_id.as_deref(),
         post_compact_instruction: None,
         post_compact_instruction_file: None,
         ignored_wrong_seat_extra: false,
     })
+    .map_err(|err| Error::Message(err.to_string()))
 }
 
 fn nonempty(path: &Path) -> Option<&Path> {

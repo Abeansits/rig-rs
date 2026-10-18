@@ -26,10 +26,10 @@ pub use marker::{
     RestoreMarker, is_actionable, marker_bytes, marker_path, parse_marker, sanitize_seat_key,
 };
 pub use prompt::{
-    RestorePrompt, build_compact_command, build_post_compact_compliance_prompt,
-    build_post_compact_restore_prompt, build_post_compact_turn_boundary_prompt,
-    build_pre_compact_prep_prompt, completion_marker, declared_seat_of, json_string,
-    map_is_complete, map_path,
+    RESTORE_INLINE_LIMIT, RestorePrompt, build_compact_command,
+    build_post_compact_compliance_prompt, build_post_compact_restore_prompt,
+    build_post_compact_turn_boundary_prompt, build_pre_compact_prep_prompt, completion_marker,
+    declared_seat_of, json_string, map_is_complete, map_path,
 };
 pub use spool::{SpoolEvent, SpoolText, parse_spool_line, split_spool_text};
 pub use threshold::Threshold;

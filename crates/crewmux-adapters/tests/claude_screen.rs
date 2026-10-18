@@ -2,10 +2,11 @@
 //!
 //! `2.1.286` and `2.1.289` are byte copies of the spike captures. `2.1.287`
 //! holds the 2026-10-18 Claude Code 2.1.287 panes: the trust cursor starts on
-//! "No, exit" and the folder is one line. `claude-trust.txt` is synthetic
-//! (cursor already on Yes, hard-wrapped folder, U+FFFD). Sanitized copies
-//! rewrite `/Users/sebas/` to `/tmp/rig-qa1/`; `labels.jsonl` records both
-//! hashes.
+//! "No, exit" and the folder is one line. The permission dialog and the
+//! no-color suggestion are from the same day's compact run, already rewritten
+//! to `/tmp/rig-qa1/`. `claude-trust.txt` is synthetic (cursor already on Yes,
+//! hard-wrapped folder, U+FFFD). Sanitized copies rewrite `/Users/sebas/` to
+//! `/tmp/rig-qa1/`; `labels.jsonl` records both hashes.
 #![expect(
     clippy::expect_used,
     clippy::panic,
@@ -166,6 +167,8 @@ proptest! {
     #[test]
     fn text_without_shortcuts_is_not_ready(body in "\\PC{0,180}") {
         prop_assume!(!body.contains("? for shortcuts"));
+        // Faint SGR is a suggestion (PE-026). Without an escape it stays a draft.
+        prop_assume!(!body.contains('\u{1b}'));
         prop_assert!(!classify_text(&body).is_ready());
     }
 }
@@ -235,6 +238,61 @@ fn assert_label(screen: &ClaudeScreen, label: &Value, name: &str) {
         }
         other => panic!("{name} screen {other:?}"),
     }
+}
+
+#[test]
+fn no_color_suggestion_is_a_draft_and_dim_sgr_is_ready() {
+    let path = support::fixtures()
+        .join("2.1.287")
+        .join("claude-2.1.287-suggestion-no-color.txt");
+    let text = support::read(&path);
+    assert!(
+        !text.contains('\u{1b}'),
+        "the live NO_COLOR capture has no SGR"
+    );
+    assert!(
+        matches!(classify_text(&text), ClaudeScreen::Draft),
+        "a no-color suggestion is the same bytes as a typed draft"
+    );
+    let dimmed = faint_suggestion(&text);
+    assert!(
+        classify_text(&dimmed).is_ready(),
+        "faint SGR is a suggestion, not a draft: {dimmed}"
+    );
+}
+
+#[test]
+fn tool_approval_is_an_unknown_menu() {
+    let screen = "Do you want to proceed?\n ❯ 1. Yes\n   2. No\n";
+    assert!(
+        matches!(classify_text(screen), ClaudeScreen::UnknownMenu { .. }),
+        "{screen}"
+    );
+}
+
+fn faint_suggestion(text: &str) -> String {
+    let phrase = "allow reading the marker path";
+    let mut out = String::new();
+    for line in text.lines() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let Some(start) = line.find(phrase) else {
+            out.push_str(line);
+            continue;
+        };
+        let head = line.get(..start).unwrap_or("");
+        let rest = line.get(start.saturating_add(phrase.len())..).unwrap_or("");
+        out.push_str(head);
+        out.push_str("\u{1b}[2m");
+        out.push_str(phrase);
+        out.push_str("\u{1b}[22m");
+        out.push_str(rest);
+    }
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 #[test]

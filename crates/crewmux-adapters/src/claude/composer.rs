@@ -72,6 +72,85 @@ pub(crate) fn composer_view<'a>(text: &'a str, anchor: &ComposerAnchor) -> &'a s
     text
 }
 
+/// The composer body is faint SGR and nothing else.
+///
+/// A no-color capture has no ESC bytes. The same suggestion is then the same
+/// bytes as a typed draft, and this returns false.
+#[must_use]
+pub(crate) fn is_dim_suggestion(line: &str) -> bool {
+    if !line.contains('\u{1b}') {
+        return false;
+    }
+    let mut faint = false;
+    let mut in_body = false;
+    let mut saw_faint = false;
+    let mut saw_plain = false;
+    let mut rest = line;
+    while !rest.is_empty() {
+        if let Some((next_faint, next)) = take_sgr(rest, faint) {
+            faint = next_faint;
+            rest = next;
+            continue;
+        }
+        if let Some(next) = skip_esc(rest) {
+            rest = next;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+        if !in_body {
+            if ch == '❯' || ch == '›' {
+                in_body = true;
+            }
+            continue;
+        }
+        if ch.is_whitespace() || ch == '\u{a0}' {
+            continue;
+        }
+        if faint {
+            saw_faint = true;
+        } else {
+            saw_plain = true;
+        }
+    }
+    saw_faint && !saw_plain
+}
+
+fn take_sgr(text: &str, faint: bool) -> Option<(bool, &str)> {
+    let rest = text.strip_prefix("\u{1b}[")?;
+    let end = rest.find('m')?;
+    let params = rest.get(..end)?;
+    if !params.is_empty() && !params.chars().all(|ch| ch.is_ascii_digit() || ch == ';') {
+        return None;
+    }
+    let next = rest.get(end.saturating_add(1)..)?;
+    Some((apply_sgr(faint, params), next))
+}
+
+fn apply_sgr(faint: bool, params: &str) -> bool {
+    if params.is_empty() || params == "0" {
+        return false;
+    }
+    let mut faint = faint;
+    for part in params.split(';') {
+        match part {
+            "2" => faint = true,
+            "0" | "22" => faint = false,
+            _ => {}
+        }
+    }
+    faint
+}
+
+fn skip_esc(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('\u{1b}')?;
+    let rest = rest.strip_prefix('[')?;
+    let end = rest.find(|ch: char| ch.is_ascii_alphabetic())?;
+    rest.get(end.saturating_add(1)..)
+}
+
 /// Empty prompt, or Claude's single-line `Try "…"` ghost hint.
 #[must_use]
 pub(crate) fn is_idle_body(body: &str) -> bool {

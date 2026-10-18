@@ -66,6 +66,64 @@ async fn a_stub_prompt_on_a_claude_seat_is_not_ready() {
     drop(std::fs::remove_dir_all(&rig.root));
 }
 
+#[tokio::test]
+async fn ps_reports_attention_while_a_permission_dialog_is_up() {
+    let ready = fixture("claude-2.1.287-ready-after-trust.txt");
+    let rig = boot("ps-dialog", &ready).await;
+    let dialog = fixture("claude-2.1.287-permission-read-outside.txt");
+    rig.mux.set_capture(Capture::new(dialog, (0, 0))).await;
+    let listed = crate::query::list_seats(&rig.app).await.expect("ps");
+    assert_eq!(seat_field(&listed, "state"), "attention");
+    assert_eq!(seat_field(&listed, "code"), "unknown_menu");
+    let stored = crate::query::find_seat(&rig.app, "claude")
+        .await
+        .expect("seat");
+    assert!(matches!(stored.state, SeatState::Ready));
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn a_failed_send_clears_each_typed_envelope_line() {
+    let rule = "─".repeat(40);
+    let screen = format!("{rule}\n❯ From: operator@host\nTo: cl@pr18\n---\n{rule}\n");
+    let rig = boot("residue", &screen).await;
+    let pane = crewmux_mux::PaneRef::session("seat__rig");
+    let cleared = crate::paste_check::clear_composer(
+        &rig.app,
+        &pane,
+        crewmux_mux::CaptureRange::Visible,
+        3,
+        RuntimeKind::ClaudeCode,
+    )
+    .await
+    .expect("clear");
+    assert!(cleared);
+    let shot = rig
+        .mux
+        .capture(&pane, crewmux_mux::CaptureRange::Visible)
+        .await
+        .expect("capture");
+    assert!(
+        crewmux_adapters::claude::classify_text(&shot.text).is_ready(),
+        "{}",
+        shot.text
+    );
+    assert!(!shot.text.contains("From:"), "{}", shot.text);
+    assert!(!shot.text.contains("To:"), "{}", shot.text);
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+fn seat_field(body: &serde_json::Value, field: &str) -> String {
+    body.get("rigs")
+        .and_then(|rigs| rigs.get(0))
+        .and_then(|rig| rig.get("seats"))
+        .and_then(|seats| seats.get(0))
+        .and_then(|seat| seat.get(field))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_owned()
+}
+
 fn fixture(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../crewmux-adapters/tests/fixtures/screens/claude/2.1.287")
