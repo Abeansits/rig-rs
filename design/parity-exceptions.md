@@ -186,6 +186,8 @@ v0.6.9's `rig context` noun is delivery-free. Its subcommands stop at `rm`, and 
 
 ## PE-024: a long newline-free paste may be a bare `[Pasted text #N]`
 
+Retitling this exception is three edits: this heading, the `PE-024` parenthetical in `crates/crewmux-adapters/src/claude/staged.rs`, and the note on `packages/daemon/test/session-transport.test.ts` in `parity/ledger.csv`. The ledger `pe_id` cell stays empty (`todo`). Do not add a `Covers` line.
+
 v0.6.9 `hasExpectedStagedText` (`packages/daemon/src/domain/session-transport.ts`) accepts `[Pasted text #N +X lines]` when X is the payload's newline count, or the first 24 normalised characters of the payload when there is no placeholder. It does not accept a bare `[Pasted text #N]`.
 
 - **TS behaviour:** the placeholder regex is `\[Pasted text #\d+ \+(\d+) lines\]`. A token with no `+X lines` falls through to the 24-character head check. A long collapsed paste whose composer shows only `[Pasted text #N]` does not match, and the send is treated as missing.
