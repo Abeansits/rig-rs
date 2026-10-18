@@ -524,12 +524,19 @@ mod suite {
                 MuxEvent::PaneDied { status, signal, .. } => {
                     assert_eq!(status, None, "kill -9 is not an exit status");
                     let signal = signal.expect("pane_dead_signal");
+                    // Linux tmux reports "9"; macOS tmux 3.x reports "kill".
+                    let name = signal.to_ascii_uppercase();
                     assert!(
-                        matches!(signal.as_str(), "9" | "KILL" | "SIGKILL"),
+                        matches!(name.as_str(), "9" | "KILL" | "SIGKILL"),
                         "{signal}"
                     );
                 }
-                other => panic!("{other:?}"),
+                event @ (MuxEvent::Output { .. }
+                | MuxEvent::WindowClosed { .. }
+                | MuxEvent::SessionsChanged
+                | MuxEvent::ServerExited
+                | MuxEvent::Reconnected
+                | MuxEvent::Gap { .. }) => panic!("{event:?}"),
             }
             let second = tokio::time::timeout(Duration::from_millis(1500), deaths.recv()).await;
             assert!(second.is_err(), "duplicate death: {second:?}");

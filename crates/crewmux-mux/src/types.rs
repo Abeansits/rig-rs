@@ -252,7 +252,7 @@ pub enum MuxEvent {
         ///
         /// Empty when the process was killed by a signal.
         status: Option<i32>,
-        /// `pane_dead_signal` (`9`, `KILL`, or `SIGKILL` for `kill -9`).
+        /// `pane_dead_signal`. `kill -9` is `9` on Linux and `kill` on macOS tmux.
         signal: Option<String>,
     },
     /// A window closed (`%window-close` or `%unlinked-window-close`).
