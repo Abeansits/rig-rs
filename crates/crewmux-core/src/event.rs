@@ -52,6 +52,12 @@ pub enum DomainEvent {
         seat: SeatId,
         /// When.
         at: Timestamp,
+        /// `pane_dead_status` when tmux reported one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_status: Option<i32>,
+        /// Last visible pane capture, when the multiplexer still had one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture: Option<String>,
     },
     /// A queue row was created or changed state.
     QueueChanged {

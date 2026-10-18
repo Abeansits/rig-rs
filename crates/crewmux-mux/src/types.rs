@@ -66,6 +66,11 @@ pub struct SessionSpec {
     pub cwd: PathBuf,
     /// Environment entries passed with `-e` (sorted by key).
     pub env: BTreeMap<String, String>,
+    /// Names removed from the session environment.
+    ///
+    /// tmux `new-session -e NAME` with no `=` unsets `NAME`, which otherwise
+    /// arrives from the server's copy of the operator environment.
+    pub clear_env: Vec<String>,
     /// Command argv. Empty starts the default shell. One element may be a shell line tmux runs.
     pub argv: Vec<String>,
     /// Initial window size. Defaults to 90×27.
@@ -82,6 +87,7 @@ impl SessionSpec {
             name: name.into(),
             cwd,
             env: BTreeMap::new(),
+            clear_env: Vec::new(),
             argv: Vec::new(),
             geometry: Geometry::default(),
             remain_on_exit: false,
@@ -123,6 +129,10 @@ pub struct PasteReceipt {
 pub enum CaptureRange {
     /// The visible screen.
     Visible,
+    /// The visible screen including SGR (`capture-pane -e`).
+    ///
+    /// Claude readiness uses this so a faint suggestion is not a draft.
+    VisibleEscapes,
     /// The visible screen with soft-wrapped rows joined (`capture-pane -J`).
     Joined,
     /// Scrollback with soft-wrapped rows joined (`capture-pane -J -S -n`).

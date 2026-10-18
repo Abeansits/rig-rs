@@ -37,24 +37,27 @@ async fn compact_after_abort_sends_again() {
 }
 
 #[tokio::test]
-async fn compact_after_send_failed_then_incomplete_sends_again() {
+async fn refused_precheck_fails_the_attempt_and_the_next_compact_sends_again() {
     let rig = boot("failed-prep", Duration::from_millis(800)).await;
-    watch(Arc::clone(&rig.mux), rig.transcript.clone());
     rig.mux
         .set_capture(Capture::new("booting\n".to_owned(), (0, 0)))
         .await;
     let body = br#"{"seat":"claude"}"#;
-    let first = trigger(&rig.app, body).await.expect("send while not ready");
-    assert_eq!(first["reason"], "send_failed", "{first}");
+    let failed = trigger(&rig.app, body)
+        .await
+        .expect_err("draft refuses the compact");
+    assert!(failed.to_string().contains("send_failed"), "{failed}");
+    let reported = status(&rig.app, body).await.expect("status");
+    assert_eq!(reported["stage"], "failed", "{reported}");
+    let attempt = &reported["attempts"][0];
+    assert_eq!(attempt["state"], "failed", "{reported}");
+    assert_eq!(attempt["abort_reason"], "send_failed", "{reported}");
+    let first_id = attempt["attempt_id"].as_str().expect("id").to_owned();
+    assert!(first_id.ends_with("-1"), "{first_id}");
     {
-        let mut guard = rig.app.compaction.lock().await;
-        let prep = guard.preps.get_mut("claude").expect("prep");
-        assert!(prep.active);
-        prep.deadline_ms = Some(0);
+        let guard = rig.app.compaction.lock().await;
+        assert!(!guard.prep("claude").active);
     }
-    let failed = trigger(&rig.app, body).await;
-    let message = failed.expect_err("deadline").to_string();
-    assert!(message.contains("preparation_incomplete"), "{message}");
     let rule = "─".repeat(40);
     rig.mux
         .set_capture(Capture::new(
@@ -62,14 +65,63 @@ async fn compact_after_send_failed_then_incomplete_sends_again() {
             (0, 0),
         ))
         .await;
-    let second = trigger(&rig.app, br#"{"seat":"claude","skip_map":true}"#)
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let second = trigger(&rig.app, body)
         .await
-        .expect("compact after a failed prep");
-    assert_eq!(second["compact_sent"], true, "{second}");
+        .expect("compact after a refused pre-check");
+    assert_eq!(second["compact_sent"], false, "{second}");
     assert!(
-        !second.to_string().contains("preparation_stopped"),
+        !second.to_string().contains("preparation_pending"),
         "{second}"
     );
+    let guard = rig.app.compaction.lock().await;
+    let prep = guard.prep("claude");
+    assert!(prep.active, "{prep:?}");
+    assert_ne!(prep.attempt_id, first_id);
+    assert!(prep.attempt_id.ends_with("-2"), "{}", prep.attempt_id);
+    drop(guard);
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn contaminated_prep_fails_the_attempt() {
+    let rig = boot("contaminated", Duration::from_millis(800)).await;
+    watch_once_contaminated(Arc::clone(&rig.mux), rig.transcript.clone());
+    let body = br#"{"seat":"claude"}"#;
+    let failed = trigger(&rig.app, body)
+        .await
+        .expect_err("transcript did not match");
+    let message = failed.to_string();
+    assert!(
+        message.contains("transcript did not confirm") || message.contains("merged the paste"),
+        "{message}"
+    );
+    let reported = status(&rig.app, body).await.expect("status");
+    assert_eq!(reported["stage"], "failed", "{reported}");
+    let attempt = &reported["attempts"][0];
+    assert_eq!(attempt["state"], "failed", "{reported}");
+    assert_eq!(attempt["abort_reason"], message, "{reported}");
+    let id = attempt["attempt_id"].as_str().expect("id").to_owned();
+    let seat_key = attempt["seat_key"].as_str().expect("seat").to_owned();
+    {
+        let mut guard = rig.app.compaction.lock().await;
+        assert!(!guard.prep("claude").active);
+        let session = "11111111-1111-4111-8111-111111111111";
+        guard.book.on_hook(&seat_key, &precompact(session), 10);
+        guard.book.on_hook(&seat_key, &compact_start(session), 11);
+        guard.book.on_hook(&seat_key, &post_compact(session), 12);
+        let still = guard
+            .book
+            .attempts()
+            .iter()
+            .find(|row| row.id.as_str() == id)
+            .expect("attempt");
+        assert!(
+            matches!(still.state, AttemptState::Failed(_)),
+            "{:?}",
+            still.state
+        );
+    }
     drop(std::fs::remove_dir_all(&rig.root));
 }
 
@@ -325,6 +377,23 @@ async fn boot(label: &str, wait: Duration) -> Boot {
 
 fn watch(mux: Arc<FakeMux>, path: PathBuf) {
     watch_after(mux, path, String::new());
+}
+
+/// Append the first paste with a stray suffix, then stop.
+fn watch_once_contaminated(mux: Arc<FakeMux>, path: PathBuf) {
+    tokio::spawn(async move {
+        for _ in 0..2_000 {
+            if let Some(text) = mux.last_paste().await
+                && !text.is_empty()
+                && !text.starts_with("/compact")
+            {
+                let dirty = format!("{text}\n\nx");
+                append_turn(&path, &dirty).await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
 }
 
 /// Append later pastes. `seen` is a paste that already happened and must not count.

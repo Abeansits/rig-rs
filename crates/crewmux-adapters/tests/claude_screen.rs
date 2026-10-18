@@ -259,6 +259,13 @@ fn no_color_suggestion_is_a_draft_and_dim_sgr_is_ready() {
         classify_text(&dimmed).is_ready(),
         "faint SGR is a suggestion, not a draft: {dimmed}"
     );
+    let leading = "\u{1b}[2m❯ allow reading the marker path\u{1b}[22m\n";
+    let rule = "─".repeat(40);
+    let wrapped = format!("{rule}\n{leading}{rule}\n  ? for shortcuts\n");
+    assert!(
+        classify_text(&wrapped).is_ready(),
+        "a capture with escapes still sees a leading faint suggestion: {wrapped:?}"
+    );
 }
 
 #[test]

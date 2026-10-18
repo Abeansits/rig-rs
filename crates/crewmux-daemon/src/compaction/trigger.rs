@@ -200,6 +200,7 @@ async fn drive(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Resul
             }
             Some(text) => match submit_text(app, seat.name.as_str(), &text).await {
                 Ok(_) => {
+                    mark_paste_accepted(app, seat.name.as_str()).await;
                     if !body.skip_map {
                         break;
                     }
@@ -208,7 +209,12 @@ async fn drive(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Resul
                     release_failed_prep(app, seat, &err).await?;
                     return Err(err);
                 }
-                Err(err) => return Err(err),
+                // Enter landed, but the transcript is not the prep we sent.
+                // Fail the attempt so it cannot later be recorded as `done`.
+                Err(err) => {
+                    fail_unconfirmed_prep(app, seat, &err).await?;
+                    return Err(err);
+                }
             },
             None => return finish_skip(app, seat, step.reason).await,
         }
@@ -263,6 +269,20 @@ async fn plan(app: &App, seat: &Seat, body: &TriggerBody, ready: bool) -> Step {
         skip_map: body.skip_map,
     };
     let outcome = guard.enforcer.decide_manual(&input, &prep, now_ms());
+    if matches!(
+        outcome,
+        EnforcerOutcome::Skip(EnforcerSkipReason::SendFailed)
+    ) {
+        guard.book.fail_unsent(
+            &seat.id.to_string(),
+            AttemptId(attempt_id.clone()),
+            "send_failed",
+            now_ms(),
+        );
+        guard
+            .enforcer
+            .note_settled(session, ManualCompactionStage::Failed);
+    }
     let text = gated_submit(ready, &outcome);
     let compact = matches!(outcome, EnforcerOutcome::SendCompact(_));
     if compact {
@@ -311,7 +331,10 @@ pub(super) async fn deliver_prepared(app: &App) -> Result<(), Error> {
             .preps
             .iter()
             .filter(|(_, prep)| {
-                prep.active && prep.map_complete && matches!(prep.status, PrepStatus::Waiting)
+                prep.active
+                    && prep.paste_accepted
+                    && prep.map_complete
+                    && matches!(prep.status, PrepStatus::Waiting)
             })
             .map(|(session, _)| session.clone())
             .collect::<Vec<_>>()
@@ -418,14 +441,23 @@ fn prep_fail_reason(err: &Error) -> &'static str {
 
 /// The prep paste never landed. Drop it so the next compact is not `preparation_pending`.
 async fn release_failed_prep(app: &App, seat: &Seat, err: &Error) -> Result<(), Error> {
+    settle_failed_prep(app, seat, prep_fail_reason(err)).await
+}
+
+/// The prep was submitted and the transcript did not match it.
+async fn fail_unconfirmed_prep(app: &App, seat: &Seat, err: &Error) -> Result<(), Error> {
+    settle_failed_prep(app, seat, &err.to_string()).await
+}
+
+async fn settle_failed_prep(app: &App, seat: &Seat, reason: &str) -> Result<(), Error> {
     let session = seat.name.as_str();
-    let reason = prep_fail_reason(err);
     {
         let mut guard = app.compaction.lock().await;
         let attempt_id = guard.prep(session).attempt_id;
         if let Some(prep) = guard.preps.get_mut(session) {
             prep.active = false;
             prep.status = PrepStatus::Stopped;
+            prep.paste_accepted = false;
             prep.reason = Some(reason.to_owned());
             prep.attempt_id.clear();
         }
@@ -442,6 +474,13 @@ async fn release_failed_prep(app: &App, seat: &Seat, err: &Error) -> Result<(), 
             .note_settled(session, ManualCompactionStage::Failed);
     }
     save(app).await
+}
+
+async fn mark_paste_accepted(app: &App, session: &str) {
+    let mut guard = app.compaction.lock().await;
+    if let Some(prep) = guard.preps.get_mut(session) {
+        prep.paste_accepted = true;
+    }
 }
 
 fn compact_entered(err: &crewmux_adapters::Error) -> bool {
@@ -489,12 +528,20 @@ fn remember(
     attempt_id.clone_into(&mut prep.attempt_id);
     prep.mode = PrepMode::Manual;
     match outcome {
-        EnforcerOutcome::SendPrep(_) | EnforcerOutcome::Skip(EnforcerSkipReason::SendFailed) => {
+        EnforcerOutcome::SendPrep(_) => {
             prep.active = true;
             prep.status = PrepStatus::Waiting;
             prep.map_complete = skip_map;
+            prep.paste_accepted = false;
             prep.reason = None;
             prep.deadline_ms = Some(now_ms().saturating_add(wait_ms()));
+        }
+        EnforcerOutcome::Skip(EnforcerSkipReason::SendFailed) => {
+            prep.active = false;
+            prep.attempt_id.clear();
+            prep.status = PrepStatus::Stopped;
+            prep.paste_accepted = false;
+            prep.reason = Some(EnforcerSkipReason::SendFailed.as_str().to_owned());
         }
         EnforcerOutcome::SendCompact(_) => {
             prep.active = true;
@@ -527,7 +574,7 @@ async fn finish_skip(
     let guard = app.compaction.lock().await;
     let reason = reason.map_or("skipped", EnforcerSkipReason::as_str);
     let value = status_value(&guard, seat, None, Some(reason));
-    if reason == "send_failed" || reason == "preparation_pending" {
+    if reason == "preparation_pending" {
         return Ok(value);
     }
     Err(Error::Message(reason.to_owned()))

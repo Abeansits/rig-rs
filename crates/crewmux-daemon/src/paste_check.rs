@@ -197,7 +197,11 @@ pub(crate) async fn clear_composer(
     let mut sent = 0u32;
     loop {
         if sent > 0 {
-            let text = app.mux.capture(pane, range).await?.text;
+            let text = app
+                .mux
+                .capture(pane, classify_range(runtime, range))
+                .await?
+                .text;
             if composer_cleared(runtime, &text) {
                 return Ok(true);
             }
@@ -238,8 +242,21 @@ async fn reset_composer(
         app.mux.send_keys(pane, keys).await?;
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    let text = app.mux.capture(pane, range).await?.text;
+    let text = app
+        .mux
+        .capture(pane, classify_range(runtime, range))
+        .await?
+        .text;
     Ok(composer_cleared(runtime, &text))
+}
+
+/// Claude's draft check needs SGR. Other runtimes keep the caller's range.
+fn classify_range(runtime: RuntimeKind, range: CaptureRange) -> CaptureRange {
+    if runtime == RuntimeKind::ClaudeCode {
+        CaptureRange::VisibleEscapes
+    } else {
+        range
+    }
 }
 
 /// `C-u` passes for a paste of `lines` lines. Short pastes stay at 8.

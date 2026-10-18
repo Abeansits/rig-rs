@@ -152,7 +152,12 @@ async fn one(app: &App, outbound: &Outbound, target: &str) -> Result<Value, Erro
         display: PasteDisplay::for_runtime(runtime),
         runtime,
     };
-    let shot = app.mux.capture(&pane, CaptureRange::Visible).await?;
+    let range = if runtime == RuntimeKind::ClaudeCode {
+        CaptureRange::VisibleEscapes
+    } else {
+        CaptureRange::Visible
+    };
+    let shot = app.mux.capture(&pane, range).await?;
     // The seat's own classifier. The stub one is Ready only on `stub> ` (issue #34).
     let readiness = readiness_of(app, runtime, &shot.text);
     if readiness != Readiness::Ready {

@@ -72,6 +72,25 @@ pub(crate) fn composer_view<'a>(text: &'a str, anchor: &ComposerAnchor) -> &'a s
     text
 }
 
+/// Drop CSI sequences. Line breaks stay, so a prompt index still addresses the raw text.
+#[must_use]
+pub(crate) fn strip_csi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(next) = skip_esc(rest) {
+            rest = next;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        out.push(ch);
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+    }
+    out
+}
+
 /// The composer body is faint SGR and nothing else.
 ///
 /// A no-color capture has no ESC bytes. The same suggestion is then the same

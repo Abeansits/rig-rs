@@ -148,7 +148,7 @@ async fn up_relaunches_a_dead_seat_beside_a_ready_one() {
         .expect("seats");
     let one_before = seat(&before, "one").clone();
     let two_before = seat(&before, "two").clone();
-    crate::death::mark_dead(&app, &two_before)
+    crate::death::mark_dead(&app, &two_before, None, None)
         .await
         .expect("dead");
     assert!(mux.has_session("two__pair").await.expect("leftover"));
@@ -278,6 +278,23 @@ async fn exit_after_marks_the_seat_dead() {
     .await
     .expect("events");
     assert!(kinds.iter().any(|kind| kind == "seat_died"), "{kinds:?}");
+    let died = crate::db::read(&app.store, |conn| {
+        Ok(EventLog::list(conn)?
+            .into_iter()
+            .find(|event| event.kind() == "seat_died"))
+    })
+    .await
+    .expect("events");
+    let Some(crewmux_core::DomainEvent::SeatDied {
+        exit_status,
+        capture,
+        ..
+    }) = died
+    else {
+        panic!("seat_died missing");
+    };
+    assert_eq!(exit_status, Some(0));
+    assert!(capture.is_some(), "seat_died records the last pane");
 }
 
 #[tokio::test]
@@ -327,7 +344,7 @@ async fn down_is_not_overwritten_by_death() {
     let hammer = tokio::spawn(async move {
         for _ in 0..40 {
             for seat in &seats {
-                crate::death::mark_dead(&app_death, seat)
+                crate::death::mark_dead(&app_death, seat, None, None)
                     .await
                     .expect("dead");
             }

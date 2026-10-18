@@ -270,7 +270,7 @@ async fn overlay_claude_attention(app: &App, seat: &mut Seat) {
 
 async fn visible_text(app: &App, seat: &Seat) -> Option<String> {
     let pane = pane_of(seat).ok()?;
-    match app.mux.capture(&pane, CaptureRange::Visible).await {
+    match app.mux.capture(&pane, CaptureRange::VisibleEscapes).await {
         Ok(shot) => Some(shot.text),
         Err(_) => None,
     }

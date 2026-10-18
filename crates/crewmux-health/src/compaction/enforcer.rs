@@ -179,6 +179,8 @@ pub struct PreparationState {
     pub status: PrepStatus,
     /// The map file ends with this attempt's marker.
     pub map_complete: bool,
+    /// The prep paste was confirmed. `/compact` waits for this.
+    pub paste_accepted: bool,
     /// Deadline in Unix milliseconds.
     pub deadline_ms: Option<u64>,
     /// Why it stopped.
@@ -195,6 +197,7 @@ impl PreparationState {
             mode: PrepMode::Automatic,
             status: PrepStatus::Sending,
             map_complete: false,
+            paste_accepted: false,
             deadline_ms: None,
             reason: None,
         }

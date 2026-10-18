@@ -108,6 +108,13 @@ pub(crate) fn new_session_args(spec: &SessionSpec) -> Vec<String> {
         args.push("-e".to_owned());
         args.push(format!("{key}={value}"));
     }
+    for key in &spec.clear_env {
+        if key.is_empty() || key.contains('=') {
+            continue;
+        }
+        args.push("-e".to_owned());
+        args.push(key.clone());
+    }
     args.push("-P".to_owned());
     args.push("-F".to_owned());
     args.push("#{pane_id}|#{session_name}".to_owned());
@@ -337,6 +344,7 @@ pub(crate) fn capture_args(target: &str, range: CaptureRange) -> Vec<String> {
     ];
     match range {
         CaptureRange::Visible => {}
+        CaptureRange::VisibleEscapes => args.push("-e".to_owned()),
         CaptureRange::Joined => args.push("-J".to_owned()),
         CaptureRange::JoinedHistory(lines) => {
             args.push("-J".to_owned());
@@ -570,7 +578,8 @@ mod tests {
 
     use super::{
         armed_session_args, backstop_command, canonical_session_name, capture_args, exact_session,
-        invocation, paste_buffer_args, quote_control, send_keys_args, validate_keys,
+        invocation, new_session_args, paste_buffer_args, quote_control, send_keys_args,
+        validate_keys,
     };
     use crate::error::MuxError;
     use crate::types::{CaptureRange, PasteOpts, SessionSpec};
@@ -701,11 +710,45 @@ mod tests {
         assert!(!args.iter().any(|arg| arg == "-S"), "{args:?}");
         let visible = capture_args("%1", CaptureRange::Visible);
         assert!(!visible.iter().any(|arg| arg == "-J"));
+        assert!(
+            !visible.iter().any(|arg| arg == "-e"),
+            "a plain capture drops escapes: {visible:?}"
+        );
+        let escapes = capture_args("%1", CaptureRange::VisibleEscapes);
+        assert!(
+            escapes.iter().any(|arg| arg == "-e"),
+            "the suggestion check needs SGR: {escapes:?}"
+        );
         let history = capture_args("%1", CaptureRange::JoinedHistory(40));
         assert!(history.iter().any(|arg| arg == "-J"), "{history:?}");
         assert!(
             history.windows(2).any(|pair| pair == ["-S", "-40"]),
             "{history:?}"
+        );
+    }
+
+    #[test]
+    fn clear_env_unsets_without_assigning() {
+        let mut spec = SessionSpec::new("demo", PathBuf::from("/tmp"));
+        spec.env.insert("RIG_HOME".to_owned(), "/h".to_owned());
+        spec.clear_env = vec!["NO_COLOR".to_owned(), "FORCE_COLOR".to_owned()];
+        let args = new_session_args(&spec);
+        assert!(
+            args.windows(2).any(|pair| pair == ["-e", "NO_COLOR"]),
+            "{args:?}"
+        );
+        assert!(
+            args.windows(2).any(|pair| pair == ["-e", "FORCE_COLOR"]),
+            "{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg.starts_with("NO_COLOR=")),
+            "{args:?}"
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "-e" && pair[1] == "RIG_HOME=/h"),
+            "{args:?}"
         );
     }
 

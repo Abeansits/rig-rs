@@ -31,11 +31,13 @@ pub(crate) struct CompactArgs {
     pub(crate) json: bool,
 }
 
-/// Returns 0 when the daemon accepts the request.
+/// Exit 0 once `/compact` was submitted.
 ///
-/// A compact that submits `/compact` returns 0 at that moment. A later abort,
-/// including `no_post_compact` after 120s, does not change this exit code.
-/// `--status` reports the attempt.
+/// Exit 4 means the preparation was accepted and `/compact` has not been
+/// submitted yet. Exit 1 is a refusal or a failure, including `send_failed`
+/// and a prep the transcript did not confirm. A later abort, including
+/// `no_post_compact` after 120s, does not change an exit 0. `--status` and
+/// `--cancel` report state and return 0 when the daemon accepts them.
 pub(crate) fn run(args: &CompactArgs) -> Result<i32, Error> {
     let client = ensure_daemon()?;
     let (method, path, body) = request(args)?;
@@ -52,7 +54,19 @@ pub(crate) fn run(args: &CompactArgs) -> Result<i32, Error> {
     } else {
         print_status(&value);
     }
-    Ok(0)
+    if args.status || args.cancel {
+        return Ok(0);
+    }
+    Ok(compact_exit(&value))
+}
+
+/// 0 after `/compact` is submitted. 4 while the prep is still pending.
+fn compact_exit(value: &Value) -> i32 {
+    if value.get("compact_sent").and_then(Value::as_bool) == Some(true) {
+        0
+    } else {
+        4
+    }
 }
 
 fn request(args: &CompactArgs) -> Result<(&'static str, &'static str, Vec<u8>), Error> {
@@ -110,4 +124,24 @@ fn http_error(body: &str) -> Result<i32, Error> {
         })
         .unwrap_or_else(|| body.to_owned());
     Err(Error::User(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::compact_exit;
+
+    #[test]
+    fn exit_is_zero_only_after_compact_is_submitted() {
+        assert_eq!(compact_exit(&json!({"compact_sent": true})), 0);
+        assert_eq!(
+            compact_exit(&json!({"compact_sent": false, "stage": "preparing"})),
+            4
+        );
+        assert_eq!(
+            compact_exit(&json!({"stage": "waiting_map", "reason": "preparation_pending"})),
+            4
+        );
+    }
 }

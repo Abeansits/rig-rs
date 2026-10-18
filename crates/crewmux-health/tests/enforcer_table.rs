@@ -480,6 +480,7 @@ fn manual_prep(id: &str, status: PrepStatus, map_complete: bool) -> PreparationS
         mode: PrepMode::Manual,
         status,
         map_complete,
+        paste_accepted: false,
         deadline_ms: Some(u64::MAX),
         reason: None,
     }
@@ -492,6 +493,7 @@ fn waiting(map_complete: bool) -> PreparationState {
         mode: PrepMode::Automatic,
         status: PrepStatus::Waiting,
         map_complete,
+        paste_accepted: false,
         deadline_ms: Some(u64::MAX),
         reason: None,
     }

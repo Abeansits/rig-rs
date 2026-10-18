@@ -148,9 +148,11 @@ enum Commands {
     Chatroom(chatroom::ChatroomArgs),
     /// Compact a Claude seat, cancel it, or print its status.
     ///
-    /// Exit 0 means the daemon accepted the request. A compact returns as soon
-    /// as `/compact` is submitted; the attempt can still abort later, for
-    /// example `no_post_compact` after 120s. `--status` reports that outcome.
+    /// Exit 0 means `/compact` was submitted. The attempt can still abort later,
+    /// for example `no_post_compact` after 120s. `--status` reports that outcome.
+    /// Exit 4 means the preparation was accepted and `/compact` has not been
+    /// submitted (`compact_sent` is false; `stage` is `preparing` or
+    /// `waiting_map`). Exit 1 means the compact was refused or failed.
     Compact(compact::CompactArgs),
     /// Claude hook entry. Reads JSON on stdin and exits 0.
     ///

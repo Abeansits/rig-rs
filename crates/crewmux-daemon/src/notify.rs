@@ -47,10 +47,17 @@ fn project(event: &DomainEvent) -> (StreamKind, Option<StreamPayload>) {
                 ..StreamPayload::default()
             }),
         ),
-        DomainEvent::SeatDied { seat, .. } => (
+        DomainEvent::SeatDied {
+            seat,
+            exit_status,
+            capture,
+            ..
+        } => (
             StreamKind::SeatDied,
             Some(StreamPayload {
                 seat: Some(seat.to_string()),
+                exit_status: *exit_status,
+                capture: capture.clone(),
                 ..StreamPayload::default()
             }),
         ),

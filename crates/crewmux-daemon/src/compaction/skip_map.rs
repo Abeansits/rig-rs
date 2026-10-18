@@ -63,6 +63,7 @@ async fn unverified_compact_counts_as_sent() {
                 mode: PrepMode::Manual,
                 status: PrepStatus::Waiting,
                 map_complete: true,
+                paste_accepted: true,
                 deadline_ms: Some(u64::MAX),
                 reason: None,
             },

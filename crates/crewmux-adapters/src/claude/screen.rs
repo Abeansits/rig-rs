@@ -11,7 +11,7 @@ use crewmux_types::{ComposerState, DialogId, ReadinessCode};
 
 use crate::claude::composer::{
     ComposerAnchor, boxed_body, composer_anchor, composer_view, has_continuation, is_box_rule,
-    is_dim_suggestion, is_idle_body,
+    is_dim_suggestion, is_idle_body, strip_csi,
 };
 use crate::claude::dialogs::CLAUDE_DIALOGS;
 use crate::dialog::{MenuOption, is_option_menu, parse_menu, recognise};
@@ -102,8 +102,37 @@ pub fn classify(capture: &Capture) -> ClaudeScreen {
 }
 
 /// Classify captured text.
+///
+/// Structure is read with CSI removed. A faint suggestion is decided from the
+/// raw line, which still has the SGR when the capture used escapes.
 #[must_use]
 pub fn classify_text(text: &str) -> ClaudeScreen {
+    let plain = strip_csi(text);
+    let screen = classify_plain(&plain);
+    promote_faint(text, &plain, screen)
+}
+
+fn promote_faint(raw: &str, plain: &str, screen: ClaudeScreen) -> ClaudeScreen {
+    if !matches!(screen, ClaudeScreen::Draft) {
+        return screen;
+    }
+    let Some(anchor) = composer_anchor(plain) else {
+        return screen;
+    };
+    if has_continuation(plain, &anchor) {
+        return screen;
+    }
+    let Some(line) = raw.lines().nth(anchor.line) else {
+        return screen;
+    };
+    if is_dim_suggestion(line) {
+        ClaudeScreen::Ready(ComposerState { bordered: true })
+    } else {
+        screen
+    }
+}
+
+fn classify_plain(text: &str) -> ClaudeScreen {
     let anchor = composer_anchor(text);
     let view = anchor
         .as_ref()

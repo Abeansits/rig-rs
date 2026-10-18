@@ -216,7 +216,9 @@ fn bar_inner(line: &str) -> Option<&str> {
 
 pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     let lines = match range {
-        CaptureRange::Visible | CaptureRange::Joined => return capture,
+        CaptureRange::Visible | CaptureRange::VisibleEscapes | CaptureRange::Joined => {
+            return capture;
+        }
         CaptureRange::LastLines(n) => usize::from(n),
         CaptureRange::History(n) | CaptureRange::JoinedHistory(n) => {
             usize::try_from(n).unwrap_or(usize::MAX)

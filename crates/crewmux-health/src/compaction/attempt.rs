@@ -3,6 +3,7 @@
 //! Elapsed time aborts an unfinished attempt. It never confirms a marker and
 //! never produces a restore.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -132,7 +133,8 @@ pub struct ApplyEffect {
 #[derive(Clone, Debug, Default)]
 pub struct Book {
     attempts: Vec<Attempt>,
-    seq: u64,
+    /// Next number for each seat. Manual and automatic ids share it.
+    seat_seq: BTreeMap<String, u64>,
     completion_wait_ms: u64,
     send_wait_ms: u64,
 }
@@ -143,7 +145,7 @@ impl Book {
     pub fn new() -> Self {
         Self {
             attempts: Vec::new(),
-            seq: 1,
+            seat_seq: BTreeMap::new(),
             completion_wait_ms: duration_ms(COMPLETION_WAIT),
             send_wait_ms: duration_ms(POST_COMPACT_SEND_WAIT),
         }
@@ -359,11 +361,12 @@ impl Book {
 
     /// Replace the book with persisted rows.
     pub fn load(&mut self, attempts: Vec<Attempt>) {
-        let mut seq = 1u64;
+        self.seat_seq.clear();
         for attempt in &attempts {
-            seq = seq.max(seq_after(attempt.id.as_str()));
+            let next = seq_after(attempt.id.as_str());
+            let slot = self.seat_seq.entry(attempt.seat_key.clone()).or_insert(1);
+            *slot = (*slot).max(next);
         }
-        self.seq = seq;
         self.attempts = attempts;
     }
 
@@ -477,9 +480,10 @@ impl Book {
     }
 
     fn mint_prefixed(&mut self, prefix: &str, seat_key: &str) -> AttemptId {
-        let id = AttemptId(format!("{prefix}-{seat_key}-{}", self.seq));
-        self.seq = self.seq.saturating_add(1);
-        id
+        let next = self.seat_seq.get(seat_key).copied().unwrap_or(1);
+        self.seat_seq
+            .insert(seat_key.to_owned(), next.saturating_add(1));
+        AttemptId(format!("{prefix}-{seat_key}-{next}"))
     }
 }
 

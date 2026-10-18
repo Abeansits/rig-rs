@@ -50,6 +50,7 @@ pub(crate) async fn prepare(
         .unwrap_or("claude");
     let mut spec = SessionSpec::new(opts.session_name.clone(), binding.cwd.clone());
     spec.env.clone_from(&opts.env);
+    strip_claude_color(&mut spec);
     spec.argv = claude_argv(
         binary,
         &session_id,
@@ -67,6 +68,20 @@ pub(crate) fn token(session_id: String) -> ResumeToken {
     ResumeToken {
         kind: "claude".to_owned(),
         value: session_id,
+    }
+}
+
+/// Drop colour killers the tmux server would copy from the operator environment.
+///
+/// `NO_COLOR` (any value) and `FORCE_COLOR=0` make Claude draw a suggestion with
+/// no SGR, which is then the same bytes as a typed draft. Unset both so a
+/// suggestion can render faint. A capture that still has no ESC stays a draft.
+pub(crate) fn strip_claude_color(spec: &mut SessionSpec) {
+    for key in ["NO_COLOR", "FORCE_COLOR"] {
+        spec.env.remove(key);
+        if !spec.clear_env.iter().any(|item| item == key) {
+            spec.clear_env.push(key.to_owned());
+        }
     }
 }
 
@@ -141,4 +156,27 @@ async fn write_id(path: &Path, id: &str) -> Result<(), Error> {
     }
     tokio::fs::write(path, id.as_bytes()).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crewmux_mux::SessionSpec;
+
+    use super::strip_claude_color;
+
+    #[test]
+    fn claude_seat_unsets_no_color_and_force_color() {
+        let mut spec = SessionSpec::new("seat", PathBuf::from("/tmp"));
+        spec.env.insert("NO_COLOR".to_owned(), "1".to_owned());
+        spec.env.insert("FORCE_COLOR".to_owned(), "0".to_owned());
+        spec.env.insert("RIG_HOME".to_owned(), "/h".to_owned());
+        strip_claude_color(&mut spec);
+        assert!(!spec.env.contains_key("NO_COLOR"));
+        assert!(!spec.env.contains_key("FORCE_COLOR"));
+        assert_eq!(spec.env.get("RIG_HOME").map(String::as_str), Some("/h"));
+        assert!(spec.clear_env.iter().any(|key| key == "NO_COLOR"));
+        assert!(spec.clear_env.iter().any(|key| key == "FORCE_COLOR"));
+    }
 }
