@@ -53,8 +53,15 @@ pub enum CodexScreen {
 }
 
 /// Classify `text`.
+///
+/// Codex does not interpret SGR. Escapes are removed first, so a bold `›` and
+/// a dim placeholder classify the same as the plain capture.
 #[must_use]
 pub fn classify(text: &str) -> CodexScreen {
+    classify_plain(&crate::sgr::strip_csi(text))
+}
+
+fn classify_plain(text: &str) -> CodexScreen {
     let live = live_screen(text);
     if let Some(screen) = hard_failure(live) {
         return screen;

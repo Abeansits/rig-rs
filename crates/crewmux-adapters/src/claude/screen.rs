@@ -11,10 +11,11 @@ use crewmux_types::{ComposerState, DialogId, ReadinessCode};
 
 use crate::claude::composer::{
     ComposerAnchor, boxed_body, composer_anchor, composer_view, has_continuation, is_box_rule,
-    is_dim_suggestion, is_idle_body, strip_csi,
+    is_dim_suggestion, is_idle_body,
 };
 use crate::claude::dialogs::CLAUDE_DIALOGS;
 use crate::dialog::{MenuOption, is_option_menu, parse_menu, recognise};
+use crate::sgr::strip_csi;
 use crate::types::Readiness;
 
 /// A classified known dialog, including the choice list and the cursor.

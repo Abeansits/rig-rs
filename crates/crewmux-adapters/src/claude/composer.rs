@@ -1,6 +1,7 @@
 //! Composer region. The current input is the last `❯` that a same-indent rule closes.
 
 use crate::claude::staged::staged_matches;
+use crate::sgr::{skip_esc, strip_csi};
 
 /// A `❯` line that has a box-drawing rule after it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,25 +71,6 @@ pub(crate) fn composer_view<'a>(text: &'a str, anchor: &ComposerAnchor) -> &'a s
         offset = offset.saturating_add(line.len()).saturating_add(1);
     }
     text
-}
-
-/// Drop CSI sequences. Line breaks stay, so a prompt index still addresses the raw text.
-#[must_use]
-pub(crate) fn strip_csi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while !rest.is_empty() {
-        if let Some(next) = skip_esc(rest) {
-            rest = next;
-            continue;
-        }
-        let Some(ch) = rest.chars().next() else {
-            break;
-        };
-        out.push(ch);
-        rest = rest.get(ch.len_utf8()..).unwrap_or("");
-    }
-    out
 }
 
 /// The composer body is faint SGR and nothing else.
@@ -161,13 +143,6 @@ fn apply_sgr(faint: bool, params: &str) -> bool {
         }
     }
     faint
-}
-
-fn skip_esc(text: &str) -> Option<&str> {
-    let rest = text.strip_prefix('\u{1b}')?;
-    let rest = rest.strip_prefix('[')?;
-    let end = rest.find(|ch: char| ch.is_ascii_alphabetic())?;
-    rest.get(end.saturating_add(1)..)
 }
 
 /// Empty prompt, or Claude's single-line `Try "…"` ghost hint.
@@ -309,4 +284,18 @@ fn strip_marker(body: &str) -> String {
         out.push_str(line.trim());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::composer_matches;
+
+    #[test]
+    fn composer_match_ignores_sgr() {
+        let screen = "╭──╮\n│ \u{1b}[1mhello\u{1b}[22m │\n╰──╯\n";
+        assert!(
+            composer_matches(screen, "hello"),
+            "composer strip dropped the escapes"
+        );
+    }
 }

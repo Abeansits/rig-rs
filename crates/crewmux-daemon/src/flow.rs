@@ -298,6 +298,34 @@ async fn exit_after_marks_the_seat_dead() {
 }
 
 #[tokio::test]
+async fn seat_died_redacts_on_the_death_path() {
+    let (app, _mux) = harness(Some("print_gate=sk-abcDEF1234567890xyz,exit_after_ms=80")).await;
+    let spec = "name: pair\nseats:\n  - name: one\n    runtime: stub\n    cwd: /tmp\n";
+    bring_up(&app, spec).await.expect("up");
+    let mut capture = None;
+    for _ in 0..40 {
+        let died = crate::db::read(&app.store, |conn| {
+            Ok(EventLog::list(conn)?
+                .into_iter()
+                .find(|event| event.kind() == "seat_died"))
+        })
+        .await
+        .expect("events");
+        if let Some(crewmux_core::DomainEvent::SeatDied { capture: shot, .. }) = died {
+            capture = shot;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let shot = capture.expect("seat_died capture");
+    assert!(
+        !shot.contains("abcDEF1234567890"),
+        "death path stored the token: {shot}"
+    );
+    assert!(shot.contains("[redacted]"), "{shot}");
+}
+
+#[tokio::test]
 async fn down_kills_sessions_and_stops_seats() {
     let (app, mux) = harness(None).await;
     bring_up(&app, &two_stub("/tmp")).await.expect("up");

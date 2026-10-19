@@ -106,6 +106,12 @@ impl ClaudeIo {
     }
 
     async fn confirm(&self, sent: &str, after: TranscriptCursor) -> Result<(), Error> {
+        // `/compact` is skipped in the transcript, so a user turn never appears.
+        // Waiting out `submit_wait` only delays NotVerified. One probe still
+        // reports a contamination that is already on disk.
+        if compact_command(sent) {
+            return self.probe(sent, after).await.and_then(landed_or_missing);
+        }
         let deadline = Instant::now() + self.submit_wait;
         let sent = sent.to_owned();
         loop {
@@ -126,6 +132,12 @@ impl ClaudeIo {
                 }
             }
         }
+    }
+
+    async fn probe(&self, sent: &str, after: TranscriptCursor) -> Result<Delivery, Error> {
+        let probe = sent.to_owned();
+        self.with_source(move |source| crewmux_transcript::verify_delivery(source, after, &probe))
+            .await
     }
 
     async fn with_source<T, F>(&self, job: F) -> Result<T, Error>
@@ -150,6 +162,19 @@ impl ClaudeIo {
         .await
         .map_err(|err| Error::Message(err.to_string()))?
         .map_err(map_transcript)
+    }
+}
+
+fn compact_command(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed == "/compact" || trimmed.starts_with("/compact ")
+}
+
+fn landed_or_missing(delivery: Delivery) -> Result<(), Error> {
+    match delivery {
+        Delivery::Landed => Ok(()),
+        Delivery::Composite => Err(Error::Contaminated),
+        Delivery::Missing | Delivery::Duplicate(_) => Err(Error::NotVerified),
     }
 }
 

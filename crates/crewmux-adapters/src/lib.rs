@@ -9,6 +9,7 @@ pub mod dialog;
 mod error;
 mod readiness;
 mod registry;
+mod sgr;
 mod stub;
 mod types;
 
@@ -46,6 +47,12 @@ mod screen_tests {
         let verdict = classify("stub gate: login_required\nstub> ");
         assert_eq!(verdict, Readiness::Gate(ReadinessCode::LoginRequired));
         assert!(ReadinessCode::LoginRequired.requires_attention());
+    }
+
+    #[test]
+    fn a_coloured_prompt_is_still_ready() {
+        let verdict = classify("stub-agent\n\u{1b}[1mstub> \u{1b}[22m");
+        assert_eq!(verdict, Readiness::Ready, "{verdict:?}");
     }
 
     #[test]

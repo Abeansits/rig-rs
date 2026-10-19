@@ -277,7 +277,27 @@ fn skip_esc(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Capture, clear_one_draft_line};
+    use super::{Capture, clear_one_draft_line, slice_capture};
+
+    #[test]
+    fn a_plain_capture_strips_sgr() {
+        let raw = "\u{1b}[1m›\u{1b}[22m hello";
+        let plain = slice_capture(
+            Capture::new(raw.to_owned(), (0, 0)),
+            crate::CaptureRange::Visible,
+        );
+        assert!(
+            !plain.text.contains('\u{1b}'),
+            "fake mux kept escapes on a plain capture: {}",
+            plain.text
+        );
+        assert!(plain.text.contains('›'), "{}", plain.text);
+        let kept = slice_capture(
+            Capture::new(raw.to_owned(), (0, 0)),
+            crate::CaptureRange::VisibleEscapes,
+        );
+        assert!(kept.text.contains('\u{1b}'), "{}", kept.text);
+    }
 
     #[test]
     fn ctrl_u_drops_one_typed_line_then_the_prompt() {

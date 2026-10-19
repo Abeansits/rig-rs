@@ -126,7 +126,9 @@ fn push_env_unset(args: &mut Vec<String>, keys: &[String]) {
     if keys.is_empty() {
         return;
     }
-    args.push("env".to_owned());
+    // Absolute. A daemon PATH without /usr/bin resolves `env` to nothing and
+    // `rig up` then fails as lineage:pane_pid_mismatch.
+    args.push("/usr/bin/env".to_owned());
     for key in keys {
         args.push("-u".to_owned());
         args.push(key.to_owned());
@@ -756,7 +758,11 @@ mod tests {
         spec.clear_env = vec!["NO_COLOR".to_owned(), "FORCE_COLOR".to_owned()];
         spec.argv = vec!["claude".to_owned()];
         let args = new_session_args(&spec);
-        let env_at = args.iter().position(|arg| arg == "env").expect("env");
+        let env_at = args
+            .iter()
+            .position(|arg| arg == "/usr/bin/env")
+            .expect("/usr/bin/env");
+        assert!(!args.iter().any(|arg| arg == "env"));
         let command_at = args
             .iter()
             .position(|arg| arg == "claude")

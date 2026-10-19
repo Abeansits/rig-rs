@@ -158,7 +158,8 @@ impl CaptureRange {
         matches!(self, Self::VisibleEscapes | Self::LastLinesEscapes(_))
     }
 
-    /// Tail the send guard reads. It has to keep SGR or a faint suggestion is a draft.
+    /// Tail the send guard reads. It keeps SGR so Claude can tell a faint
+    /// suggestion from a typed draft. Other runtimes strip CSI before classifying.
     #[must_use]
     pub const fn guard_tail(lines: u16) -> Self {
         Self::LastLinesEscapes(lines)

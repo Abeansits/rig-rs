@@ -99,7 +99,7 @@ pub(crate) async fn mark_dead(
 pub(crate) async fn last_capture(app: &App, seat: &Seat) -> Option<String> {
     let pane = crate::query::pane_of(seat).ok()?;
     let shot = app.mux.capture(&pane, CaptureRange::Visible).await.ok()?;
-    Some(redact_capture(shot.text))
+    Some(redact_capture(&shot.text))
 }
 
 /// Cap the stored pane and replace obvious credentials.
@@ -107,13 +107,15 @@ pub(crate) async fn last_capture(app: &App, seat: &Seat) -> Option<String> {
 /// The tail is what was on screen when the process died, which can include a
 /// pasted key. Values are replaced and the row is marked `[redacted]`. This is
 /// not a general secret scanner: it catches common token shapes and assignments.
-fn redact_capture(text: String) -> String {
-    let capped = bound_capture(text);
-    let (redacted, changed) = redact_tokens(&capped);
+fn redact_capture(text: &str) -> String {
+    // Redact the whole pane first. Capping first can keep the tail of a token
+    // whose prefix fell outside the window.
+    let (redacted, changed) = redact_tokens(text);
+    let capped = bound_capture(redacted);
     if !changed {
-        return redacted;
+        return capped;
     }
-    let mut out = redacted;
+    let mut out = capped;
     if !out.ends_with('\n') {
         out.push('\n');
     }
@@ -177,66 +179,140 @@ fn redact_prefixes(text: &str) -> (String, bool) {
 }
 
 fn earliest_prefix(text: &str) -> Option<(usize, &'static str)> {
-    PREFIXES.iter().fold(None, |best, prefix| {
-        let Some(at) = text.find(prefix) else {
-            return best;
-        };
-        match best {
-            Some((earlier, _)) if earlier <= at => best,
-            _ => Some((at, *prefix)),
+    let mut best: Option<(usize, &'static str)> = None;
+    for prefix in PREFIXES {
+        let mut from = 0usize;
+        while let Some(rel) = text.get(from..).and_then(|rest| rest.find(prefix)) {
+            let at = from.saturating_add(rel);
+            let next = at.saturating_add(prefix.len());
+            if at_boundary(text, at) {
+                best = match best {
+                    Some((earlier, _)) if earlier <= at => best,
+                    _ => Some((at, *prefix)),
+                };
+                break;
+            }
+            if next <= from {
+                break;
+            }
+            from = next;
         }
-    })
+    }
+    best
+}
+
+fn at_boundary(text: &str, at: usize) -> bool {
+    let Some(before) = text.get(..at).and_then(|head| head.chars().next_back()) else {
+        return true;
+    };
+    !before.is_ascii_alphanumeric() && before != '_'
+}
+
+struct Assignment {
+    key_at: usize,
+    value_at: usize,
+    value_end: usize,
 }
 
 fn redact_assignments(text: &str) -> (String, bool) {
     let mut changed = false;
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
+    let mut base = 0usize;
     while !rest.is_empty() {
-        let Some(at) = assignment_at(rest) else {
+        let Some(hit) = next_assignment(text, base) else {
             out.push_str(rest);
             break;
         };
-        out.push_str(rest.get(..at).unwrap_or(""));
-        let tail = rest.get(at..).unwrap_or("");
-        let eq = tail.find(['=', ':']).unwrap_or(0);
-        let mut split = eq.saturating_add(1);
-        if tail.as_bytes().get(split) == Some(&b' ') {
-            split = split.saturating_add(1);
-        }
-        out.push_str(tail.get(..split).unwrap_or(""));
-        let value = tail.get(split..).unwrap_or("");
-        let len = value
-            .chars()
-            .take_while(|ch| !ch.is_whitespace())
-            .map(char::len_utf8)
-            .sum::<usize>();
-        if len > 0 {
-            out.push_str("[redacted]");
-            changed = true;
-        }
-        rest = value.get(len..).unwrap_or("");
+        let local = hit.key_at.saturating_sub(base);
+        out.push_str(rest.get(..local).unwrap_or(""));
+        out.push_str(text.get(hit.key_at..hit.value_at).unwrap_or(""));
+        out.push_str("[redacted]");
+        changed = true;
+        base = hit.value_end;
+        rest = text.get(base..).unwrap_or("");
     }
     (out, changed)
 }
 
-fn assignment_at(text: &str) -> Option<usize> {
-    let lower = text.to_ascii_lowercase();
-    let mut found = None;
+/// Earliest `key` that is an assignment, including a later one after a bare mention.
+fn next_assignment(text: &str, from: usize) -> Option<Assignment> {
+    let lower = text.get(from..)?.to_ascii_lowercase();
+    let mut best: Option<Assignment> = None;
     for key in KEYS {
-        let Some(at) = lower.find(key) else {
-            continue;
-        };
-        let after = text.get(at.saturating_add(key.len())..).unwrap_or("");
-        let trimmed = after.trim_start();
-        if !(trimmed.starts_with('=') || trimmed.starts_with(':')) {
-            continue;
-        }
-        if found.is_none_or(|earlier| at < earlier) {
-            found = Some(at);
+        let mut cursor = 0usize;
+        while let Some(rel) = lower.get(cursor..).and_then(|rest| rest.find(*key)) {
+            let at = from.saturating_add(cursor).saturating_add(rel);
+            let next = at.saturating_add(key.len());
+            if at_boundary(text, at)
+                && let Some(hit) = assignment_after(text, at, key.len())
+            {
+                if best.as_ref().is_none_or(|cur| hit.key_at < cur.key_at) {
+                    best = Some(hit);
+                }
+                break;
+            }
+            if next <= from.saturating_add(cursor) {
+                break;
+            }
+            cursor = next.saturating_sub(from);
         }
     }
-    found
+    best
+}
+
+fn assignment_after(text: &str, at: usize, key_len: usize) -> Option<Assignment> {
+    let after = text.get(at.saturating_add(key_len)..)?;
+    let mut idx = 0usize;
+    if after
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| *byte == b'"' || *byte == b'\'')
+    {
+        idx = idx.saturating_add(1);
+    }
+    while after
+        .as_bytes()
+        .get(idx)
+        .is_some_and(u8::is_ascii_whitespace)
+    {
+        idx = idx.saturating_add(1);
+    }
+    let sep = *after.as_bytes().get(idx)?;
+    if sep != b'=' && sep != b':' {
+        return None;
+    }
+    idx = idx.saturating_add(1);
+    while after
+        .as_bytes()
+        .get(idx)
+        .is_some_and(u8::is_ascii_whitespace)
+    {
+        idx = idx.saturating_add(1);
+    }
+    let value_at = at.saturating_add(key_len).saturating_add(idx);
+    let value = text.get(value_at..)?;
+    let value_len = quoted_or_bare(value)?;
+    Some(Assignment {
+        key_at: at,
+        value_at,
+        value_end: value_at.saturating_add(value_len),
+    })
+}
+
+fn quoted_or_bare(value: &str) -> Option<usize> {
+    let quote = value.as_bytes().first().copied()?;
+    if quote == b'"' || quote == b'\'' {
+        let rest = value.get(1..)?;
+        let end = rest.find(char::from(quote))?;
+        return Some(1usize.saturating_add(end).saturating_add(1));
+    }
+    let len = value
+        .chars()
+        .take_while(|ch| !ch.is_whitespace())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    (len > 0).then_some(len)
 }
 
 fn bound_capture(text: String) -> String {
@@ -264,12 +340,31 @@ sk-abcDEF1234567890xyz
 Bearer ghp_abcdefghijklmnop
 still here
 ";
-        let redacted = redact_capture(raw.to_owned());
+        let redacted = redact_capture(raw);
         assert!(!redacted.contains("supersecretvalue"), "{redacted}");
         assert!(!redacted.contains("sk-abcDEF"), "{redacted}");
         assert!(!redacted.contains("ghp_abcdefghijklmnop"), "{redacted}");
         assert!(redacted.contains("hello"), "{redacted}");
         assert!(redacted.contains("still here"), "{redacted}");
         assert!(redacted.contains("[redacted]"), "{redacted}");
+    }
+
+    #[test]
+    fn redaction_covers_later_keys_json_and_a_split_token() {
+        let later = redact_capture("see the token bucket\ntoken=supersecretvalue\n");
+        assert!(!later.contains("supersecretvalue"), "{later}");
+        let json = redact_capture("{\"token\": \"supersecretvalue\"}\n");
+        assert!(!json.contains("supersecretvalue"), "{json}");
+        let task = redact_capture("task-abcdefghijklmnop\n");
+        assert!(task.contains("task-abcdefghijklmnop"), "{task}");
+        assert!(!task.contains("[redacted]"), "{task}");
+        // The secret sits on a token boundary and straddles the 8000-byte window.
+        // Capping first would keep `4567890xyz`; redacting first removes it.
+        let secret = "sk-abcDEF1234567890xyz";
+        let raw = format!("{}\n{secret}{}", "z".repeat(90), "y".repeat(7_990));
+        let cut = redact_capture(&raw);
+        assert!(!cut.contains("abcDEF1234567890"), "{cut}");
+        assert!(!cut.contains("4567890xyz"), "{cut}");
+        assert!(cut.contains("[redacted]"), "{cut}");
     }
 }

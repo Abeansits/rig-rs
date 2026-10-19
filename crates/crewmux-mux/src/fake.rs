@@ -50,6 +50,7 @@ struct FakeInner {
     hooks: ScriptHooks,
     hub: Hub,
     last_paste: Option<String>,
+    last_range: Option<CaptureRange>,
 }
 
 struct ScriptHooks {
@@ -114,6 +115,7 @@ impl FakeMux {
                 },
                 hub: Hub::default(),
                 last_paste: None,
+                last_range: None,
             })),
             events,
             own_write,
@@ -213,6 +215,11 @@ impl FakeMux {
                 }
             }
         });
+    }
+
+    /// Range of the most recent [`capture`](Multiplexer::capture).
+    pub async fn last_capture_range(&self) -> Option<CaptureRange> {
+        self.inner.lock().await.last_range
     }
 
     /// Text of the most recent [`paste`](Multiplexer::paste).
@@ -506,6 +513,7 @@ impl Multiplexer for FakeMux {
     async fn capture(&self, pane: &PaneRef, range: CaptureRange) -> Result<Capture, MuxError> {
         let mut guard = self.inner.lock().await;
         let session = canonical_session_name(&pane.session);
+        guard.last_range = Some(range);
         let capture = if let Some(frame) = guard.scripted_captures.pop_front() {
             if guard.scripted_captures.is_empty() {
                 stick_screen(&mut guard, &session, &frame);

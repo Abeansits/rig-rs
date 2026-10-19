@@ -432,6 +432,120 @@ async fn a_faint_suggestion_is_ready_for_skip_map_compact() {
     drop(std::fs::remove_dir_all(&rig.root));
 }
 
+#[tokio::test]
+async fn a_refused_compact_submit_fails_the_attempt() {
+    let rig = boot("compact-refuse", Duration::from_millis(200)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let rule = "─".repeat(40);
+    let ready = Capture::new(format!("{rule}\n❯ \n{rule}\n  ? for shortcuts\n"), (0, 0));
+    let seat = crate::query::find_seat(&rig.app, "claude")
+        .await
+        .expect("seat");
+    {
+        let mut guard = rig.app.compaction.lock().await;
+        let id = guard.book.next_manual_id(&seat.id.to_string());
+        guard.set_prep(
+            "claude",
+            PreparationState {
+                active: true,
+                attempt_id: id.0,
+                mode: PrepMode::Manual,
+                status: PrepStatus::Waiting,
+                map_complete: true,
+                paste_accepted: true,
+                deadline_ms: Some(crate::state::now_ms().saturating_add(5_000)),
+                reason: None,
+            },
+        );
+    }
+    rig.mux
+        .script_captures(vec![
+            ready.clone(),
+            ready.clone(),
+            Capture::new("booting\n".to_owned(), (0, 0)),
+        ])
+        .await;
+    let body = br#"{"seat":"claude","skip_map":true}"#;
+    let failed = trigger(&rig.app, body)
+        .await
+        .expect_err("compact submit refused");
+    assert!(
+        failed.to_string().contains("seat is not ready for input"),
+        "{failed}"
+    );
+    let reported = status(&rig.app, body).await.expect("status");
+    assert_eq!(reported["stage"], "failed", "{reported}");
+    assert_eq!(reported["attempts"][0]["state"], "failed", "{reported}");
+    rig.mux.set_capture(ready).await;
+    let second = trigger(&rig.app, body)
+        .await
+        .expect("compact after the refused submit");
+    assert_eq!(second["compact_sent"], true, "{second}");
+    assert!(
+        second["attempts"]
+            .as_array()
+            .and_then(|rows| rows.last())
+            .and_then(|row| row["attempt_id"].as_str())
+            .unwrap_or("")
+            .ends_with("-2"),
+        "{second}"
+    );
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn an_unused_mint_is_reused_on_the_next_compact() {
+    let rig = boot("reuse-mint", Duration::from_millis(800)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    {
+        let mut guard = rig.app.compaction.lock().await;
+        guard.set_prep(
+            "claude",
+            PreparationState {
+                active: true,
+                attempt_id: String::new(),
+                mode: PrepMode::Manual,
+                status: PrepStatus::Stopped,
+                map_complete: false,
+                paste_accepted: false,
+                deadline_ms: None,
+                reason: None,
+            },
+        );
+    }
+    let skipped = trigger(&rig.app, br#"{"seat":"claude"}"#)
+        .await
+        .expect_err("stopped prep");
+    assert!(
+        skipped.to_string().contains("preparation_stopped"),
+        "{skipped}"
+    );
+    let value = trigger(&rig.app, br#"{"seat":"claude"}"#)
+        .await
+        .expect("prep reuses the released id");
+    assert_eq!(value["compact_sent"], false, "{value}");
+    let id = value["attempts"][0]["attempt_id"].as_str().unwrap_or("");
+    assert!(id.ends_with("-1"), "{value}");
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
+#[tokio::test]
+async fn skip_map_compact_does_not_wait_for_a_user_turn() {
+    let rig = boot("compact-wait", Duration::from_secs(3)).await;
+    watch(Arc::clone(&rig.mux), rig.transcript.clone());
+    let started = Instant::now();
+    let value = trigger(&rig.app, br#"{"seat":"claude","skip_map":true}"#)
+        .await
+        .expect("compact");
+    assert_eq!(value["compact_sent"], true, "{value}");
+    assert!(
+        started.elapsed() < Duration::from_millis(1_500),
+        "compact waited for a user turn: {:?}",
+        started.elapsed()
+    );
+    drop(std::fs::remove_dir_all(&rig.root));
+}
+
 fn faint_suggestion() -> String {
     let rule = "─".repeat(40);
     format!(

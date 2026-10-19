@@ -60,6 +60,8 @@ pub use serve::run;
 #[cfg(test)]
 mod claude_send_tests;
 #[cfg(test)]
+mod codex_send_tests;
+#[cfg(test)]
 mod context_deliver_tests;
 #[cfg(test)]
 mod context_pack_route_cases;

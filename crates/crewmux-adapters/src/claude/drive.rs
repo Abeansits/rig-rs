@@ -31,7 +31,9 @@ pub(crate) async fn drive(
         if watch.expired(budget) {
             return blocked();
         }
-        let Ok(capture) = mux.capture(pane, CaptureRange::Visible).await else {
+        // Claude is the runtime that interprets SGR. A plain capture turns a
+        // faint suggestion into a typed draft and the launch poll stops.
+        let Ok(capture) = mux.capture(pane, CaptureRange::VisibleEscapes).await else {
             return blocked();
         };
         let ctx = AnswerCtx {
@@ -191,7 +193,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use crewmux_mux::{Capture, FakeMux, PaneRef};
+    use crewmux_mux::{Capture, CaptureRange, FakeMux, Multiplexer, PaneRef};
     use crewmux_types::ReadinessCode;
 
     use super::drive;
@@ -221,5 +223,36 @@ mod tests {
         .await;
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(outcome.force, Some(ReadinessCode::UnrecognisedScreen));
+    }
+
+    #[tokio::test]
+    async fn launch_poll_keeps_sgr_on_a_faint_suggestion() {
+        let mux = Arc::new(FakeMux::new());
+        let rule = "─".repeat(20);
+        let screen = format!("{rule}\n\u{1b}[2m❯ hint\u{1b}[22m\n{rule}\n");
+        mux.set_capture(Capture::new(screen, (0, 0))).await;
+        let budget = LaunchBudget {
+            first_screen: Duration::from_millis(50),
+            ready_after_last_gate: Duration::from_millis(50),
+            inconclusive_stable: Duration::from_millis(50),
+            overall: Duration::from_millis(300),
+            poll: Duration::from_millis(20),
+        };
+        let cloned: Arc<FakeMux> = Arc::clone(&mux);
+        let shared: Arc<dyn Multiplexer> = cloned;
+        let outcome = drive(
+            shared,
+            &PaneRef::session("seat"),
+            Path::new("/work"),
+            Path::new("/home"),
+            false,
+            budget,
+        )
+        .await;
+        assert!(outcome.force.is_none());
+        assert_eq!(
+            mux.last_capture_range().await,
+            Some(CaptureRange::VisibleEscapes)
+        );
     }
 }

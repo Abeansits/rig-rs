@@ -10,6 +10,8 @@ use crate::types::Readiness;
 /// Anything else that lacks the composer is inconclusive.
 #[must_use]
 pub(crate) fn classify(text: &str) -> Readiness {
+    let stripped = crate::sgr::strip_csi(text);
+    let text = stripped.as_str();
     if let Some(code) = gate_code(text) {
         return Readiness::Gate(code);
     }
