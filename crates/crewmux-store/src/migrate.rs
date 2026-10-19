@@ -185,6 +185,50 @@ CREATE TABLE workflow_documents (
 );
 ";
 
+const WATCHDOG: &str = "
+CREATE TABLE watchdog_jobs (
+    job_id TEXT PRIMARY KEY NOT NULL,
+    policy TEXT NOT NULL,
+    target_session TEXT NOT NULL,
+    spec_yaml TEXT NOT NULL,
+    message TEXT,
+    state TEXT NOT NULL CHECK (state IN ('active', 'stopped', 'terminal')),
+    interval_seconds INTEGER NOT NULL,
+    scan_interval_seconds INTEGER,
+    active_wake_interval_seconds INTEGER,
+    registered_at_ms INTEGER NOT NULL,
+    last_evaluation_at_ms INTEGER,
+    last_fire_at_ms INTEGER,
+    last_fired_condition TEXT,
+    actionable INTEGER NOT NULL DEFAULT 0 CHECK (actionable IN (0, 1)),
+    last_actionable_at_ms INTEGER,
+    terminal_reason TEXT,
+    registered_by TEXT NOT NULL
+);
+CREATE TABLE watchdog_history (
+    id TEXT PRIMARY KEY NOT NULL,
+    job_id TEXT NOT NULL REFERENCES watchdog_jobs(job_id),
+    evaluated_at_ms INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    skip_reason TEXT,
+    delivery_target TEXT,
+    delivery_status TEXT,
+    delivery_message TEXT,
+    notes TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX idx_watchdog_history_job ON watchdog_history (job_id, evaluated_at_ms);
+CREATE TABLE watchdog_claims (
+    occurrence_id TEXT PRIMARY KEY NOT NULL,
+    job_id TEXT NOT NULL,
+    claimed_at_ms INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('sending', 'delivered', 'failed', 'indeterminate', 'cancelled')),
+    target_session TEXT NOT NULL,
+    message TEXT NOT NULL,
+    prior_evaluation_ms INTEGER,
+    prior_fire_ms INTEGER
+);
+";
+
 const DURABILITY: &str = "
 CREATE TABLE seat_restore (
     seat_id TEXT PRIMARY KEY NOT NULL REFERENCES seats(id) ON DELETE CASCADE,
@@ -241,8 +285,9 @@ pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
         M::up(LINEAGE),
         M::up(LINEAGE_START),
         M::up(WORKFLOW),
+        M::up(WATCHDOG),
     ]),
-    len: 8,
+    len: 9,
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {

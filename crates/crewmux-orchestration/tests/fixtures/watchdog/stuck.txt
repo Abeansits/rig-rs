@@ -1,0 +1,2 @@
+Workflow deadline: inst-active, packet q-1, owner owner1@rig; 240m overdue (created_at at 2026-05-03T07:00:00.000Z).
+Packet age does not establish idle. Inspect: rig workflow show inst-active. Full packet: rig queue show q-1 --full.

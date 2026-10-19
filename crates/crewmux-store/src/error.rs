@@ -45,6 +45,9 @@ pub enum Error {
     /// The snapshot backup could not run on the maintenance connection.
     #[error("{0}")]
     Backup(String),
+    /// A watchdog job write was rejected.
+    #[error("watchdog: {0}")]
+    Watchdog(String),
 }
 
 impl Error {
@@ -63,7 +66,8 @@ impl Error {
             | Self::Event(_)
             | Self::CrashHook(_)
             | Self::Health(_)
-            | Self::Backup(_) => crewmux_core::chat::ChatError::Store(rendered),
+            | Self::Backup(_)
+            | Self::Watchdog(_) => crewmux_core::chat::ChatError::Store(rendered),
         }
     }
 }

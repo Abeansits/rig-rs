@@ -17,6 +17,7 @@ mod frontier;
 mod inspect;
 mod keepalive;
 mod model;
+mod outbox;
 mod packet;
 mod project;
 mod role;
@@ -38,6 +39,11 @@ pub use exit::Exit;
 pub use frontier::frontier_block;
 pub use inspect::{Inspected, inspect};
 pub use model::{CachedSpec, Decision, Engine, Instance, Keepalive, Phase, Status, Trail};
+pub use outbox::{
+    ArmedSpec, KeepaliveJob, OwnerWake, Schedule, WatchAction, WatchFail, evaluate_keepalive,
+    is_due, is_quiet, keepalive_message, next_due_at, occurrence_id, owner_wakes, parse_armed,
+    stuck_message,
+};
 pub use project::ProjectRequest;
 pub use project::{ProjectCtx, Projection, project_step};
 pub use role::{Disqualified, RolePick, SeatCandidate, select_role_seat};

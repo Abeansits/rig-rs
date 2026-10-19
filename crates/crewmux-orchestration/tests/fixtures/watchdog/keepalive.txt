@@ -1,0 +1,2 @@
+Workflow keepalive: wf@1 / inst-active is still live (status: active).
+Continue the current step. If the run has ended, update the workflow state honestly and manufacture the next truthful packet now. If you think you need approval, first ask whether there is real product ambiguity or only approval theater. Keep communications bridged, name exact blockers, and self-scout deterministic bias: add only the minimum deterministic code required for reliable agent operation, then rely on agent judgment for routing, adaptation, and edge handling.
