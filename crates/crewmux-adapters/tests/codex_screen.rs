@@ -15,6 +15,7 @@ mod support;
 use std::fs;
 
 use crewmux_adapters::CODEX_DIALOGS;
+use crewmux_adapters::classify_runtime;
 use crewmux_adapters::codex::{CodexScreen, classify};
 use crewmux_adapters::dialog::recognise;
 use crewmux_types::DialogId;
@@ -69,6 +70,46 @@ fn finished_turn_reads_idle() {
     let text = fs::read_to_string(fixtures().join("0.162.0/codex-069-midturn.txt")).expect("done");
     assert!(text.contains("Worked for"));
     assert!(matches!(classify(&text), CodexScreen::Ready(_)));
+}
+
+#[test]
+fn coloured_codex_097_is_ready_not_unknown() {
+    let text =
+        fs::read_to_string(fixtures().join("0.162.0/codex-097-seat-ready.txt")).expect("097");
+    let coloured = text.replace(
+        "› Ask Codex to do anything",
+        "\u{1b}[1m›\u{1b}[22m \u{1b}[2mAsk Codex to do anything\u{1b}[22m",
+    );
+    assert_ne!(coloured, text, "fixture prompt was not coloured");
+    match classify(&coloured) {
+        CodexScreen::Ready(_) => {}
+        other => panic!("codex-097 with a bold › and a dim placeholder was {other:?}"),
+    }
+    assert_eq!(
+        classify_runtime(crewmux_types::RuntimeKind::Codex, &coloured),
+        crewmux_adapters::Readiness::Ready
+    );
+}
+
+#[test]
+fn osc_8_on_a_codex_prompt_is_ready() {
+    let bel = "\u{1b}]8;;https://example.test\u{7}› Ask Codex to do anything\u{1b}]8;;\u{7}\n  ? for shortcuts\n";
+    let st = "\u{1b}]8;;https://example.test\u{1b}\\› Ask Codex to do anything\u{1b}]8;;\u{1b}\\\n  ? for shortcuts\n";
+    for screen in [bel, st] {
+        match classify(screen) {
+            CodexScreen::Ready(_) => {}
+            other => panic!("OSC 8 prompt was {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_coloured_typed_line_is_a_draft() {
+    let text = "\u{1b}[1m›\u{1b}[22m hello\n  ? for shortcuts\n";
+    match classify(text) {
+        CodexScreen::Draft { visible } => assert_eq!(visible, "hello"),
+        other => panic!("coloured draft was {other:?}"),
+    }
 }
 
 #[test]

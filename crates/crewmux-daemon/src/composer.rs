@@ -1,8 +1,5 @@
-//! Composer parsers. Claude and Codex land in later slices.
-//!
-//! The stub parser is the only one this slice ships. `ComposerParser::Stub`
-//! is the seam those parsers plug into: a region, a [`ComposerState`], and the
-//! keys that clear a failed paste.
+//! Composer parsers. The stub parser reads `stub> `. Claude and Codex use
+//! the adapter classifier for that runtime (issue #34).
 
 use std::time::Duration;
 
@@ -21,14 +18,6 @@ impl ComposerParser {
     pub(crate) fn region(self, screen: &str) -> Option<String> {
         match self {
             Self::Stub => stub_region(screen),
-        }
-    }
-
-    /// Prompt, draft, gate, or unknown.
-    #[must_use]
-    pub(crate) fn state(self, screen: &str, draft_age: Option<Duration>) -> ComposerState {
-        match self {
-            Self::Stub => classify_stub(screen, draft_age),
         }
     }
 
@@ -108,9 +97,31 @@ fn region_after_prompt(screen: &str, nth: usize) -> Option<String> {
     }
 }
 
+/// Composer state for `runtime`. Claude and Codex do not go through the stub parser.
+#[must_use]
+pub(crate) fn classify_runtime(
+    runtime: crewmux_types::RuntimeKind,
+    text: &str,
+    draft_age: Option<Duration>,
+) -> ComposerState {
+    crewmux_adapters::runtime_composer(runtime, text, draft_age)
+        .unwrap_or_else(|| classify_stub(text, draft_age))
+}
+
+/// True when `runtime`'s composer holds a draft.
+#[must_use]
+pub(crate) fn runtime_drafting(runtime: crewmux_types::RuntimeKind, text: &str) -> bool {
+    matches!(
+        classify_runtime(runtime, text, None),
+        ComposerState::Draft { .. }
+    )
+}
+
 /// Classify a stub pane. A gate is not a prompt. Text after `stub> ` is a draft.
 #[must_use]
 pub(crate) fn classify_stub(text: &str, draft_age: Option<Duration>) -> ComposerState {
+    let stripped = crewmux_adapters::strip_csi(text);
+    let text = stripped.as_str();
     if text
         .lines()
         .any(|line| line.trim().starts_with("stub gate:"))
@@ -131,12 +142,6 @@ pub(crate) fn classify_stub(text: &str, draft_age: Option<Duration>) -> Composer
     }
 }
 
-/// True when the stub prompt has text after it.
-#[must_use]
-pub(crate) fn stub_drafting(text: &str) -> bool {
-    matches!(classify_stub(text, None), ComposerState::Draft { .. })
-}
-
 /// The parser matched and the composer has no text.
 ///
 /// A screen the parser does not recognise is not empty: the caller treats that
@@ -150,10 +155,24 @@ pub(crate) fn composer_empty(parser: ComposerParser, screen: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crewmux_mux::Key;
+    use crewmux_mux::{ComposerState, Key};
     use crewmux_types::RuntimeKind;
 
     use super::recovery_keys;
+
+    #[test]
+    fn a_coloured_stub_prompt_is_at_the_prompt() {
+        let bold = "\u{1b}[1mstub>\u{1b}[22m ";
+        let colour = "\u{1b}[38;5;114mstub>\u{1b}[39m ";
+        assert!(matches!(
+            super::classify_stub(bold, None),
+            ComposerState::AtPrompt
+        ));
+        assert!(matches!(
+            super::classify_stub(colour, None),
+            ComposerState::AtPrompt
+        ));
+    }
 
     #[test]
     fn failed_paste_reset_is_stub_only() {

@@ -2,24 +2,28 @@
 
 mod adapter;
 mod budget;
+mod classify;
 pub mod claude;
 pub mod codex;
 pub mod dialog;
 mod error;
 mod readiness;
 mod registry;
+mod sgr;
 mod stub;
 mod types;
 
 pub use adapter::{AgentAdapter, SeatIo};
 pub use budget::{BudgetOverrides, LaunchBudget};
+pub use classify::{classify_runtime, runtime_composer};
 pub use claude::ClaudeAdapter;
 pub use codex::{CODEX_DIALOGS, CodexAdapter};
 pub use dialog::{AnswerPolicy, DialogDriver, DriveOutcome, EscalateReason, MuxPane, SeatContext};
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};
 pub use registry::AdapterRegistry;
-pub use stub::{StubAdapter, StubScript, binding_for, classify, parse_script, run_stub_agent};
+pub use sgr::strip_csi;
+pub use stub::{StubAdapter, StubScript, binding_for, parse_script, run_stub_agent};
 pub use types::{
     AppliedLaunch, Capabilities, DeliveryReceipt, InstalledResource, LaunchOpts, LaunchOutcome,
     NodeBinding, ProjectionPlan, ProjectionResult, Readiness, Recovery, ResolvedStartupFile,
@@ -44,6 +48,26 @@ mod screen_tests {
         let verdict = classify("stub gate: login_required\nstub> ");
         assert_eq!(verdict, Readiness::Gate(ReadinessCode::LoginRequired));
         assert!(ReadinessCode::LoginRequired.requires_attention());
+    }
+
+    #[test]
+    fn a_coloured_prompt_is_still_ready() {
+        // The reset sits between `>` and the space, so the raw bytes do not
+        // contain `stub> `. Dropping the strip leaves this Inconclusive.
+        let bold = "stub-agent\n\u{1b}[1mstub>\u{1b}[22m ";
+        let colour = "stub-agent\n\u{1b}[38;5;114mstub>\u{1b}[39m ";
+        assert!(!bold.contains("stub> "), "{bold:?}");
+        assert!(!colour.contains("stub> "), "{colour:?}");
+        assert_eq!(
+            classify(bold),
+            Readiness::Ready,
+            "stub strip dropped the escapes"
+        );
+        assert_eq!(
+            classify(colour),
+            Readiness::Ready,
+            "stub strip dropped the 256-colour prompt"
+        );
     }
 
     #[test]

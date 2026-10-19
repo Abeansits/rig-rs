@@ -6,6 +6,7 @@
 mod autostart;
 mod chatroom;
 mod command;
+mod compact;
 mod context_add;
 mod context_call;
 mod context_cmd;
@@ -19,6 +20,7 @@ mod doctor_live;
 mod error;
 mod health_cmd;
 mod herdr_probe;
+mod hook;
 pub mod output;
 mod paths;
 mod setup_apply;
@@ -144,6 +146,25 @@ enum Commands {
     Whoami,
     /// Per-rig chatroom: send, history, watch, topic, and clear.
     Chatroom(chatroom::ChatroomArgs),
+    /// Compact a Claude seat, cancel it, or print its status.
+    ///
+    /// Exit 0 means `/compact` was submitted. The attempt can still abort later,
+    /// for example `no_post_compact` after 120s. `--status` reports that outcome.
+    /// `--skip-map` can exit 0 while the restore is still running. A second
+    /// compact then returns `already_in_progress` for about 12 seconds: the 10s
+    /// post-compact lower bound, then the restore submit.
+    /// Exit 4 means the preparation was accepted and `/compact` has not been
+    /// submitted (`compact_sent` is false; `stage` is `preparing` or
+    /// `waiting_map`). Exit 1 means the compact was refused or failed.
+    Compact(compact::CompactArgs),
+    /// Claude hook entry. Reads JSON on stdin and exits 0.
+    ///
+    /// Hidden: `hook` is the Claude process entry, not an operator verb.
+    #[command(hide = true)]
+    Hook {
+        /// Hook event name, such as `PreCompact`.
+        event: String,
+    },
     /// Health findings.
     Health(health_cmd::HealthArgs),
     /// Operator stream and the classifier lease.
@@ -206,6 +227,8 @@ fn dispatch(cli: Cli) -> Result<i32, Error> {
         Commands::Unclaim(args) => slice4::unclaim(&args),
         Commands::Whoami => slice4::whoami(),
         Commands::Chatroom(args) => chatroom::run(&args),
+        Commands::Compact(args) => compact::run(&args),
+        Commands::Hook { event } => Ok(hook::run(&event)),
         Commands::Health(args) => health_cmd::health(&args),
         Commands::Stream(args) => health_cmd::stream(&args),
         Commands::Usage(args) => health_cmd::usage(&args),

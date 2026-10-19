@@ -5,6 +5,7 @@ mod cart;
 mod chat;
 mod check_run;
 mod checkpoint;
+mod compaction;
 mod composer;
 mod context_address;
 mod context_deliver;
@@ -57,6 +58,10 @@ pub use error::Error;
 pub use serve::run;
 
 #[cfg(test)]
+mod claude_send_tests;
+#[cfg(test)]
+mod codex_send_tests;
+#[cfg(test)]
 mod context_deliver_tests;
 #[cfg(test)]
 mod context_pack_route_cases;
@@ -76,6 +81,8 @@ mod flow;
 mod health_tests;
 #[cfg(all(test, feature = "tmux-it"))]
 mod lineage_it;
+#[cfg(test)]
+mod pr18_run5;
 #[cfg(test)]
 mod receipt_tests;
 #[cfg(test)]

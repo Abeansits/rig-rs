@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use xtask::{lint_blind_enter, lint_workspace_root};
 
 fn scratch(label: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("xtask-enter-{label}-{}", std::process::id()));
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("xtask-enter-{label}-{}-{n}", std::process::id()));
     drop(fs::remove_dir_all(&root));
     root
 }

@@ -364,6 +364,7 @@ async fn confirm_death(
     buffer: Option<String>,
 ) {
     let mut status = None;
+    let mut signal = None;
     let mut dead = false;
     let mut empty_status = 0u8;
     for attempt in 0..8 {
@@ -373,15 +374,16 @@ async fn confirm_death(
         let Ok(output) = exec.run(&dead_status_args(&pane_id)).await else {
             continue;
         };
-        let Ok((is_dead, pane_status)) = parse_dead_status(&output.stdout) else {
+        let Ok(pane) = parse_dead_status(&output.stdout) else {
             continue;
         };
-        if !is_dead {
+        if !pane.dead {
             continue;
         }
         dead = true;
-        status = pane_status;
-        if status.is_some() {
+        status = pane.status;
+        signal.clone_from(&pane.signal);
+        if status.is_some() || signal.is_some() {
             break;
         }
         empty_status = empty_status.saturating_add(1);
@@ -390,7 +392,11 @@ async fn confirm_death(
         }
     }
     if dead && hub.lock().await.should_emit(&pane_id) {
-        drop(events.send(MuxEvent::PaneDied { pane_id, status }));
+        drop(events.send(MuxEvent::PaneDied {
+            pane_id,
+            status,
+            signal,
+        }));
     }
     if dead {
         delete_buffer(&exec, buffer.as_deref()).await;
@@ -417,6 +423,7 @@ async fn emit_window_close(ctx: &ControlCtx, window_id: &str) {
             drop(ctx.events.send(MuxEvent::PaneDied {
                 pane_id,
                 status: None,
+                signal: None,
             }));
         }
     }

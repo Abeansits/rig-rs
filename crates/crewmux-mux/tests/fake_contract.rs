@@ -142,6 +142,7 @@ async fn scripted_guard_and_injected_events_round_trip() {
     mux.inject(MuxEvent::PaneDied {
         pane_id: "%1".to_owned(),
         status: Some(7),
+        signal: None,
     })
     .await;
     let event = events.recv().await.expect("event");
@@ -149,7 +150,8 @@ async fn scripted_guard_and_injected_events_round_trip() {
         event,
         MuxEvent::PaneDied {
             pane_id: "%1".to_owned(),
-            status: Some(7)
+            status: Some(7),
+            signal: None,
         }
     );
 }
@@ -214,4 +216,30 @@ async fn own_writes_are_visible_to_an_unscripted_guard() {
     let after = mux.guard_inputs(&pane, 1).await.expect("after");
     assert!(after.last_own_write.is_some());
     assert!(after.last_human_keystroke_tmux.is_none());
+}
+
+#[tokio::test]
+async fn enter_clears_a_chevron_composer_and_leaves_stub() {
+    let mux = FakeMux::new();
+    let rule = "─".repeat(8);
+    mux.set_capture(Capture::new(format!("{rule}\n❯ hello\n{rule}\n"), (0, 0)))
+        .await;
+    let pane = mux.create_session(&spec("demo")).await.expect("create");
+    mux.send_keys(&pane, &[Key::Enter]).await.expect("enter");
+    let shot = mux
+        .capture(&pane, CaptureRange::Visible)
+        .await
+        .expect("cap");
+    assert!(!shot.text.contains("hello"), "{shot:?}");
+    assert!(shot.text.contains('❯'), "{shot:?}");
+    mux.set_capture(Capture::new("stub> hello\n".to_owned(), (0, 0)))
+        .await;
+    mux.send_keys(&pane, &[Key::Enter])
+        .await
+        .expect("enter stub");
+    let stub = mux
+        .capture(&pane, CaptureRange::Visible)
+        .await
+        .expect("stub");
+    assert!(stub.text.contains("stub> hello"), "{stub:?}");
 }

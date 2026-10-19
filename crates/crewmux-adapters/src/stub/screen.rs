@@ -9,7 +9,9 @@ use crate::types::Readiness;
 /// Gate lines (`stub gate: <code>`) are attention even when `stub> ` is also present.
 /// Anything else that lacks the composer is inconclusive.
 #[must_use]
-pub fn classify(text: &str) -> Readiness {
+pub(crate) fn classify(text: &str) -> Readiness {
+    let stripped = crate::sgr::strip_csi(text);
+    let text = stripped.as_str();
     if let Some(code) = gate_code(text) {
         return Readiness::Gate(code);
     }

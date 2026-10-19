@@ -1,8 +1,11 @@
 //! `rig ps`, `rig capture`, `rig attach`, and `rig down`.
 
+use std::str::FromStr;
+
+use crewmux_adapters::Readiness;
 use crewmux_core::{LifecycleService, RigRepo, Seat, SeatRepo, SeatState};
 use crewmux_mux::{CaptureRange, MuxError, PaneRef};
-use crewmux_types::{MAX_NAME_LEN, RigName, SeatName};
+use crewmux_types::{MAX_NAME_LEN, ReadinessCode, RigName, RuntimeKind, SeatId, SeatName};
 use serde_json::{Value, json};
 
 use crate::db::{read, write};
@@ -18,8 +21,9 @@ pub(crate) async fn list_seats(app: &App) -> Result<Value, Error> {
         let id = rig.id;
         let seats = read(&app.store, move |conn| conn.list_by_rig(&id)).await?;
         let mut rendered = Vec::new();
-        for seat in seats {
+        for mut seat in seats {
             let attached = attached(app, &seat).await?;
+            overlay_claude_attention(app, &mut seat).await;
             rendered.push(seat_value(&seat, Some(attached)));
         }
         body.push(json!({"name": rig.name.as_str(), "seats": rendered}));
@@ -152,6 +156,14 @@ async fn attached(app: &App, seat: &Seat) -> Result<bool, Error> {
     Ok(!clients.is_empty())
 }
 
+pub(crate) async fn find_seat_id(app: &App, key: &str) -> Result<Seat, Error> {
+    let id = SeatId::from_str(key).map_err(|err| Error::Message(err.to_string()))?;
+    read(&app.store, move |conn| {
+        crewmux_core::SeatRepo::get(conn, &id)
+    })
+    .await
+}
+
 pub(crate) async fn find_seat(app: &App, name: &str) -> Result<Seat, Error> {
     if name.len() > MAX_NAME_LEN || SeatName::new(name).is_err() {
         return Err(Error::Message("invalid seat name".to_owned()));
@@ -225,6 +237,45 @@ pub(crate) async fn find_address(app: &App, target: &str) -> Result<Seat, Error>
     find_seat(app, name).await
 }
 
+/// A permission dialog or a draft on a stored-ready Claude seat.
+///
+/// `rig ps` reads this and does not write it back. Stub seats stay on the
+/// stored state. Capture errors stay stored too.
+pub(crate) fn attention_from_capture(runtime: RuntimeKind, text: &str) -> Option<ReadinessCode> {
+    if runtime != RuntimeKind::ClaudeCode {
+        return None;
+    }
+    match crewmux_adapters::classify_runtime(runtime, text) {
+        Readiness::Gate(code) => Some(code),
+        Readiness::Ready
+        | Readiness::Booting
+        | Readiness::Inconclusive
+        | Readiness::HardFailure(_)
+        | Readiness::Login { .. } => None,
+    }
+}
+
+async fn overlay_claude_attention(app: &App, seat: &mut Seat) {
+    if seat.runtime != RuntimeKind::ClaudeCode || !matches!(seat.state, SeatState::Ready) {
+        return;
+    }
+    let Some(text) = visible_text(app, seat).await else {
+        return;
+    };
+    let Some(code) = attention_from_capture(seat.runtime, &text) else {
+        return;
+    };
+    LifecycleService::mark_attention(seat, code, None);
+}
+
+async fn visible_text(app: &App, seat: &Seat) -> Option<String> {
+    let pane = pane_of(seat).ok()?;
+    match app.mux.capture(&pane, CaptureRange::VisibleEscapes).await {
+        Ok(shot) => Some(shot.text),
+        Err(_) => None,
+    }
+}
+
 pub(crate) fn pane_of(seat: &Seat) -> Result<PaneRef, Error> {
     let session = seat
         .tmux_session
@@ -236,4 +287,34 @@ pub(crate) fn pane_of(seat: &Seat) -> Result<PaneRef, Error> {
         pane: Some(0),
         pane_id: seat.pane_id.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crewmux_types::{ReadinessCode, RuntimeKind};
+
+    use super::attention_from_capture;
+
+    #[test]
+    fn a_permission_dialog_is_attention_and_a_ready_composer_is_not() {
+        let dialog = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/claude-2.1.287-permission-read-outside.txt"
+        );
+        assert_eq!(
+            attention_from_capture(RuntimeKind::ClaudeCode, dialog),
+            Some(ReadinessCode::UnknownMenu)
+        );
+        assert_eq!(attention_from_capture(RuntimeKind::Stub, dialog), None);
+        let suggestion = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/claude-2.1.287-suggestion-no-color.txt"
+        );
+        assert_eq!(
+            attention_from_capture(RuntimeKind::ClaudeCode, suggestion),
+            Some(ReadinessCode::PromptDraft)
+        );
+        let ready = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/claude-2.1.287-ready-after-trust.txt"
+        );
+        assert_eq!(attention_from_capture(RuntimeKind::ClaudeCode, ready), None);
+    }
 }

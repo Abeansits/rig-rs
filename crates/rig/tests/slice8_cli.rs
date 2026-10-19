@@ -125,7 +125,10 @@ fn snapshot_list_and_show_json() {
     );
     assert_eq!(code, 0, "{err}");
     let mut shown: Value = serde_json::from_str(shown.trim()).expect("json");
-    assert_eq!(shown.get("schema_version").and_then(Value::as_u64), Some(8));
+    // Equals the migration list length. Compaction is last, at user_version 9.
+    // If a migration is inserted ahead of it, move this literal and the show
+    // snapshot with that length.
+    assert_eq!(shown.get("schema_version").and_then(Value::as_u64), Some(9));
     redact(&mut shown);
     insta::assert_snapshot!("show", serde_json::to_string_pretty(&shown).unwrap());
 }

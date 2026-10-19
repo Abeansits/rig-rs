@@ -11,10 +11,11 @@ use crewmux_types::{ComposerState, DialogId, ReadinessCode};
 
 use crate::claude::composer::{
     ComposerAnchor, boxed_body, composer_anchor, composer_view, has_continuation, is_box_rule,
-    is_idle_body,
+    is_dim_suggestion, is_idle_body,
 };
 use crate::claude::dialogs::CLAUDE_DIALOGS;
 use crate::dialog::{MenuOption, is_option_menu, parse_menu, recognise};
+use crate::sgr::strip_csi;
 use crate::types::Readiness;
 
 /// A classified known dialog, including the choice list and the cursor.
@@ -102,8 +103,37 @@ pub fn classify(capture: &Capture) -> ClaudeScreen {
 }
 
 /// Classify captured text.
+///
+/// Structure is read with CSI removed. A faint suggestion is decided from the
+/// raw line, which still has the SGR when the capture used escapes.
 #[must_use]
 pub fn classify_text(text: &str) -> ClaudeScreen {
+    let plain = strip_csi(text);
+    let screen = classify_plain(&plain);
+    promote_faint(text, &plain, screen)
+}
+
+fn promote_faint(raw: &str, plain: &str, screen: ClaudeScreen) -> ClaudeScreen {
+    if !matches!(screen, ClaudeScreen::Draft) {
+        return screen;
+    }
+    let Some(anchor) = composer_anchor(plain) else {
+        return screen;
+    };
+    if has_continuation(plain, &anchor) {
+        return screen;
+    }
+    let Some(line) = raw.lines().nth(anchor.line) else {
+        return screen;
+    };
+    if is_dim_suggestion(line) {
+        ClaudeScreen::Ready(ComposerState { bordered: true })
+    } else {
+        screen
+    }
+}
+
+fn classify_plain(text: &str) -> ClaudeScreen {
     let anchor = composer_anchor(text);
     let view = anchor
         .as_ref()
@@ -116,6 +146,11 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
             options: found.menu,
         });
     }
+    if permission_dialog(view) {
+        return ClaudeScreen::UnknownMenu {
+            evidence: clip(text),
+        };
+    }
     if no_conversation(view) {
         return ClaudeScreen::UnknownMenu {
             evidence: clip(text),
@@ -124,13 +159,16 @@ pub fn classify_text(text: &str) -> ClaudeScreen {
     if let Some(kind) = login_kind(view) {
         return ClaudeScreen::Login(kind);
     }
-    if has_interrupt(text) || pane_is_busy(text, anchor.as_ref()) {
-        return ClaudeScreen::Busy;
-    }
+    // A filled composer is a draft even while a spinner is still above the box.
+    // The 2.1.287 x-draft pane shows `· Incubating…` over a two-row draft.
     if let Some(anchor) = anchor.as_ref()
+        && !dim_suggestion(text, anchor)
         && (has_continuation(text, anchor) || !is_idle_body(&anchor.body))
     {
         return ClaudeScreen::Draft;
+    }
+    if has_interrupt(text) || pane_is_busy(text, anchor.as_ref()) {
+        return ClaudeScreen::Busy;
     }
     if is_option_menu(&parse_menu(view)) {
         return ClaudeScreen::UnknownMenu {
@@ -179,6 +217,20 @@ pub fn strict_mcp_drift(screen: &ClaudeScreen) -> Option<&'static str> {
     }
 }
 
+fn dim_suggestion(text: &str, anchor: &ComposerAnchor) -> bool {
+    if has_continuation(text, anchor) {
+        return false;
+    }
+    text.lines().nth(anchor.line).is_some_and(is_dim_suggestion)
+}
+
+/// A permission or tool-approval dialog. These are attention, never ready.
+///
+/// The titles are the ones Claude Code 2.1.287 printed on the live pane.
+fn permission_dialog(text: &str) -> bool {
+    text.contains("Read outside the working directories") || text.contains("Do you want to proceed")
+}
+
 fn squash_empty(body: &str) -> bool {
     body.split_whitespace().next().is_none()
 }
@@ -223,7 +275,44 @@ fn line_has_title(text: &str, title: &str) -> bool {
 }
 
 fn has_interrupt(text: &str) -> bool {
+    let Some(anchor) = composer_anchor(text) else {
+        return contains_interrupt(text);
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let start = live_band_start(&lines, anchor.line);
+    lines
+        .get(start..)
+        .is_some_and(|band| band.iter().any(|line| contains_interrupt(line)))
+}
+
+fn contains_interrupt(text: &str) -> bool {
     text.to_ascii_lowercase().contains("esc to interrupt")
+}
+
+/// Busy only because the live region shows `esc to interrupt`, with no spinner.
+#[must_use]
+pub(crate) fn bounded_interrupt(text: &str) -> bool {
+    has_interrupt(text) && !pane_is_busy(text, composer_anchor(text).as_ref())
+}
+
+fn live_band_start(lines: &[&str], prompt: usize) -> usize {
+    let mut index = prompt;
+    let mut start = prompt;
+    while index > 0 {
+        index = index.saturating_sub(1);
+        let Some(line) = lines.get(index) else {
+            break;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() || is_box_rule(line) {
+            continue;
+        }
+        if !line.starts_with([' ', '\t']) {
+            break;
+        }
+        start = index;
+    }
+    start
 }
 
 fn pane_is_busy(text: &str, anchor: Option<&ComposerAnchor>) -> bool {

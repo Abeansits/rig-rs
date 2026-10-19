@@ -311,7 +311,9 @@ fn health_error(err: &crewmux_health::Error) -> Response {
         | crewmux_health::Error::Limit
         | crewmux_health::Error::LeaseNotActive
         | crewmux_health::Error::LeaseExpired
-        | crewmux_health::Error::Classify(_) => StatusCode::BAD_REQUEST,
+        | crewmux_health::Error::Classify(_)
+        | crewmux_health::Error::Hook(_)
+        | crewmux_health::Error::Message(_) => StatusCode::BAD_REQUEST,
     };
     (status, Json(json!({"error": err.to_string()}))).into_response()
 }

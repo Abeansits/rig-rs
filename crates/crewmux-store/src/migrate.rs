@@ -229,10 +229,30 @@ CREATE TABLE rig_kernel (
 );
 ";
 
-/// Rig tables, the queue, chat, then the snapshot tables main already ships,
-/// then health, the pane lineage recorded at launch, and the workflow document.
-pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
-    inner: Migrations::new(vec![
+const COMPACTION: &str = "
+CREATE TABLE compaction_attempts (
+    id TEXT PRIMARY KEY NOT NULL,
+    seat_key TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE INDEX idx_compaction_attempts_seat ON compaction_attempts (seat_key);
+";
+
+/// Rig tables, the queue, chat, snapshot/restore, health, pane lineage,
+/// the workflow document, then compaction attempts.
+///
+/// Migrations 1–8 match a database written by main. Compaction attempts are
+/// the last `M::up`, so `user_version` is this list's length (9 on this
+/// branch). The `CREATE TABLE` stays unconditional and is not folded into an
+/// earlier migration. Inserting another migration ahead of
+/// `M::up(COMPACTION)` moves compaction to the new length. A file this branch
+/// wrote when that last slot was already `compaction_attempts` then fails the
+/// duplicate `CREATE TABLE` and is refused. A database this branch wrote when
+/// compaction was migration 8 (no `workflow_documents` table) fails closed
+/// on open.
+pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| {
+    let steps = vec![
         M::up(SCHEMA),
         M::up(QUEUE_SCHEMA),
         M::up(CHAT),
@@ -241,8 +261,13 @@ pub static MIGRATIONS: LazyLock<MigrationSet> = LazyLock::new(|| MigrationSet {
         M::up(LINEAGE),
         M::up(LINEAGE_START),
         M::up(WORKFLOW),
-    ]),
-    len: 8,
+        M::up(COMPACTION),
+    ];
+    let len = steps.len();
+    MigrationSet {
+        inner: Migrations::new(steps),
+        len,
+    }
 });
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {
@@ -257,4 +282,26 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {
     }
     MIGRATIONS.inner.to_latest(conn)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod shape {
+    use super::{COMPACTION, MIGRATIONS};
+
+    #[test]
+    fn compaction_is_its_own_last_migration() {
+        assert_eq!(
+            MIGRATIONS.len(),
+            9,
+            "compaction is the last migration; bump this literal with the list length"
+        );
+        assert!(
+            COMPACTION.contains("CREATE TABLE compaction_attempts"),
+            "compaction stays a separate CREATE TABLE"
+        );
+        assert!(
+            !COMPACTION.to_ascii_uppercase().contains("IF NOT EXISTS"),
+            "a duplicate create must fail closed when this slot moves"
+        );
+    }
 }

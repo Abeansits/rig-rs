@@ -15,4 +15,8 @@ pub(crate) use dialogs::CLAUDE_DIALOGS;
 pub use screen::{
     ClassifiedDialog, ClaudeScreen, LoginKind, classify, classify_text, readiness, strict_mcp_drift,
 };
+pub use staged::staged_matches;
 pub use submit::ClaudeIo;
+
+#[cfg(test)]
+mod run5_fixtures;

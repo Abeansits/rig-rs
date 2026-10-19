@@ -103,7 +103,7 @@ impl AgentAdapter for ClaudeAdapter {
         Capabilities {
             structured_input: false,
             hooks: true,
-            compaction_control: false,
+            compaction_control: true,
             fork: false,
             usage_telemetry: false,
         }
@@ -175,7 +175,7 @@ impl AgentAdapter for ClaudeAdapter {
     async fn check_ready(&self, binding: &NodeBinding) -> Result<Readiness, Error> {
         let capture = self
             .mux
-            .capture(&binding.pane, CaptureRange::Visible)
+            .capture(&binding.pane, CaptureRange::VisibleEscapes)
             .await?;
         let live = readiness(&classify(&capture));
         if !matches!(live, Readiness::Inconclusive) {

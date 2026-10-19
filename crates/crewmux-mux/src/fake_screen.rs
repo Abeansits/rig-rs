@@ -3,6 +3,9 @@
 use crate::types::{Capture, CaptureRange};
 
 pub(crate) fn land_or_append(screen: Capture, text: &str) -> Capture {
+    if let Some(landed) = land_codex_prompt(&screen.text, text) {
+        return Capture::new(landed, screen.cursor);
+    }
     if screen.text.contains('›') {
         let spliced = spliced_composer(&screen.text, text);
         if spliced != screen.text {
@@ -37,7 +40,12 @@ fn land_paste(capture: &Capture, payload: &str) -> Capture {
 }
 
 fn empty_prompt_line(line: &str) -> bool {
-    let inner = bar_inner(line).unwrap_or(line.trim());
+    // A faint suggestion is not typed text. The paste replaces it.
+    if line.contains("\u{1b}[2m") && strip_prompt_marker(strip_escapes(line).trim()).is_some() {
+        return true;
+    }
+    let plain = strip_escapes(line);
+    let inner = bar_inner(&plain).unwrap_or(plain.trim());
     let Some(body) = strip_prompt_marker(inner) else {
         return false;
     };
@@ -46,10 +54,40 @@ fn empty_prompt_line(line: &str) -> bool {
 }
 
 fn is_idle_hint(body: &str) -> bool {
+    if body == "Ask Codex to do anything" {
+        return true;
+    }
     let Some(rest) = body.strip_prefix("Try \"") else {
         return false;
     };
     rest.ends_with('"') && !rest.chars().rev().skip(1).any(|ch| ch == '"')
+}
+
+/// An idle Codex `›` prompt is replaced by the paste. The placeholder is not
+/// left glued to the payload, and the shortcuts footer stays put.
+fn land_codex_prompt(capture: &str, pasted: &str) -> Option<String> {
+    let cursor = capture.rfind('›')?;
+    let line_start = capture
+        .get(..cursor)
+        .and_then(|head| head.rfind('\n'))
+        .map_or(0, |index| index.saturating_add(1));
+    let line_end = capture
+        .get(cursor..)
+        .and_then(|rest| rest.find('\n'))
+        .map_or(capture.len(), |index| cursor.saturating_add(index));
+    let line = capture.get(line_start..line_end)?;
+    if !empty_prompt_line(line) {
+        return None;
+    }
+    let mut out = String::new();
+    out.push_str(capture.get(..line_start).unwrap_or(""));
+    out.push_str("› ");
+    out.push_str(pasted);
+    if !pasted.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(capture.get(line_end..).unwrap_or(""));
+    Some(out)
 }
 
 fn strip_prompt_marker(text: &str) -> Option<&str> {
@@ -57,6 +95,56 @@ fn strip_prompt_marker(text: &str) -> Option<&str> {
         .strip_prefix('❯')
         .or_else(|| text.trim().strip_prefix('>'))
         .or_else(|| text.trim().strip_prefix('›'))
+}
+
+/// One `C-u`: drop the last continuation inside the composer, or blank the prompt.
+///
+/// Enter still uses [`clear_prompt`], which blanks the prompt line in one step.
+pub(crate) fn clear_one_draft_line(capture: &Capture) -> Capture {
+    let mut lines: Vec<String> = capture.text.lines().map(str::to_owned).collect();
+    let Some(prompt) = lines.iter().rposition(|line| prompt_marker_line(line)) else {
+        return clear_prompt(capture);
+    };
+    if let Some(index) = last_continuation(&lines, prompt) {
+        lines.remove(index);
+        return joined(capture, &lines);
+    }
+    if let Some(line) = lines.get_mut(prompt) {
+        *line = fill_prompt(line, "");
+    }
+    joined(capture, &lines)
+}
+
+fn prompt_marker_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with('❯') || trimmed.starts_with('›')
+}
+
+fn last_continuation(lines: &[String], prompt: usize) -> Option<usize> {
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(prompt.saturating_add(1))
+        .find(|(_, line)| is_box_rule(line))
+        .map_or(lines.len(), |(index, _)| index);
+    (prompt.saturating_add(1)..end).rev().find(|index| {
+        lines
+            .get(*index)
+            .is_some_and(|line| !line.trim().is_empty())
+    })
+}
+
+fn is_box_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.chars().count() >= 10 && trimmed.chars().all(|ch| ch == '─' || ch == '═')
+}
+
+fn joined(capture: &Capture, lines: &[String]) -> Capture {
+    let mut text = lines.join("\n");
+    if capture.text.ends_with('\n') {
+        text.push('\n');
+    }
+    Capture::new(text, capture.cursor)
 }
 
 pub(crate) fn clear_prompt(capture: &Capture) -> Capture {
@@ -137,9 +225,10 @@ fn spliced_composer(capture: &str, pasted: &str) -> String {
 }
 
 fn rewrite_marker(line: &str, flat: &str) -> String {
-    let trimmed = line.trim_start();
-    let indent_len = line.len().saturating_sub(trimmed.len());
-    let indent = line.get(..indent_len).unwrap_or("");
+    let plain = strip_escapes(line);
+    let trimmed = plain.trim_start();
+    let indent_len = plain.len().saturating_sub(trimmed.len());
+    let indent = plain.get(..indent_len).unwrap_or("");
     let marker = if trimmed.starts_with('❯') {
         "❯"
     } else if trimmed.starts_with('›') {
@@ -166,8 +255,10 @@ fn bar_inner(line: &str) -> Option<&str> {
 
 pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     let lines = match range {
-        CaptureRange::Visible | CaptureRange::Joined => return capture,
-        CaptureRange::LastLines(n) => usize::from(n),
+        CaptureRange::Visible | CaptureRange::VisibleEscapes | CaptureRange::Joined => {
+            return present(capture, range);
+        }
+        CaptureRange::LastLines(n) | CaptureRange::LastLinesEscapes(n) => usize::from(n),
         CaptureRange::History(n) | CaptureRange::JoinedHistory(n) => {
             usize::try_from(n).unwrap_or(usize::MAX)
         }
@@ -182,5 +273,74 @@ pub(crate) fn slice_capture(capture: Capture, range: CaptureRange) -> Capture {
     if trailing && skip < count {
         text.push('\n');
     }
-    Capture::new(text, capture.cursor)
+    present(Capture::new(text, capture.cursor), range)
+}
+
+/// A plain capture drops SGR. Code that forgets `-e` then sees a suggestion as a draft.
+fn present(capture: Capture, range: CaptureRange) -> Capture {
+    if range.keeps_escapes() {
+        return capture;
+    }
+    Capture::new(strip_escapes(&capture.text), capture.cursor)
+}
+
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(next) = skip_esc(rest) {
+            rest = next;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        out.push(ch);
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+    }
+    out
+}
+
+fn skip_esc(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('\u{1b}')?;
+    let rest = rest.strip_prefix('[')?;
+    let end = rest.find(|ch: char| ch.is_ascii_alphabetic())?;
+    rest.get(end.saturating_add(1)..)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Capture, clear_one_draft_line, slice_capture};
+
+    #[test]
+    fn a_plain_capture_strips_sgr() {
+        let raw = "\u{1b}[1m›\u{1b}[22m hello";
+        let plain = slice_capture(
+            Capture::new(raw.to_owned(), (0, 0)),
+            crate::CaptureRange::Visible,
+        );
+        assert!(
+            !plain.text.contains('\u{1b}'),
+            "fake mux kept escapes on a plain capture: {}",
+            plain.text
+        );
+        assert!(plain.text.contains('›'), "{}", plain.text);
+        let kept = slice_capture(
+            Capture::new(raw.to_owned(), (0, 0)),
+            crate::CaptureRange::VisibleEscapes,
+        );
+        assert!(kept.text.contains('\u{1b}'), "{}", kept.text);
+    }
+
+    #[test]
+    fn ctrl_u_drops_one_typed_line_then_the_prompt() {
+        let rule = "─".repeat(20);
+        let text = format!("{rule}\n❯ From: operator@host\nTo: cl@pr18\n{rule}\n");
+        let once = clear_one_draft_line(&Capture::new(text, (0, 0)));
+        assert!(once.text.contains("From:"), "{}", once.text);
+        assert!(!once.text.contains("To:"), "{}", once.text);
+        let twice = clear_one_draft_line(&once);
+        assert!(!twice.text.contains("From:"), "{}", twice.text);
+        assert!(twice.text.contains('❯'), "{}", twice.text);
+    }
 }

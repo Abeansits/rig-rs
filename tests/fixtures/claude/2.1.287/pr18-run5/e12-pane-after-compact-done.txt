@@ -1,0 +1,27 @@
+    "trigger": "manual",                                                                  
+    "managed": true,                                                                      
+    "confirmed": true,                                                                    
+    "session_id": "e1c6bdd1-41b2-4c51-b694-00f6939b596b",                                 
+    "transcript_path": "/tmp/rig-qa1/.claude/projects/-Users-sebas-openrig-spikes-scratch 
+  -rig-rs-w18r4062938/e1c6bdd1-41b2-4c51-b694-00f6939b596b.jsonl",                        
+    "cwd": "/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4062938"                       
+  }                                                                                       
+   If the marker is missing and you have no restore map, rebuild a packet from this       
+  Claude JSONL transcript: /tmp/rig-qa1/.claude/projects/-Users-sebas-openrig-spikes-scra 
+  tch-rig-rs-w18r4062938/e1c6bdd1-41b2-4c51-b694-00f6939b596b.jsonl. Follow the marker's  
+  restoreInstruction and postCompactInstruction when present, read your newest restore    
+  map and use the restore packet as a lookup, then reply with: restored from packet at    
+  <path>; resumed at step <X>.                                                            
+                                                                                          
+  Read 1 file                                                                             
+
+⏺ restored from packet at /tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4062938/.openrig/
+  compaction/preparation/cl/manual-01M57K88ZSA0VWTMJ85EGMMW7B-1/RESTORE-MAP.md; resumed at
+  step 4 (no pending tasks, so I'm waiting for further operator instructions).            
+
+✻ Crunched for 4s · done 6:30 AM                                                          
+                                         Update available! Run: brew upgrade claude-code  
+──────────────────────────────────────────────────────────────────────────────────────────
+❯                                            
+──────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                        

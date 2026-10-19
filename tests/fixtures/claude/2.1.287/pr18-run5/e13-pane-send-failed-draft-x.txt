@@ -1,0 +1,27 @@
+    "trigger": "manual",                                                                  
+    "managed": true,                                                                      
+    "confirmed": true,                                                                    
+    "session_id": "bbbd1278-a790-4f70-a457-afd1f209c1fa",                                 
+    "transcript_path": "/tmp/rig-qa1/.claude/projects/-Users-sebas-openrig-spikes-scratch 
+  -rig-rs-w18r4e064350/bbbd1278-a790-4f70-a457-afd1f209c1fa.jsonl",                       
+    "cwd": "/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4e064350"                      
+  }                                                                                       
+   If the marker is missing and you have no restore map, rebuild a packet from this       
+  Claude JSONL transcript: /tmp/rig-qa1/.claude/projects/-Users-sebas-openrig-spikes-scra 
+  tch-rig-rs-w18r4e064350/bbbd1278-a790-4f70-a457-afd1f209c1fa.jsonl. Follow the marker's 
+  restoreInstruction and postCompactInstruction when present, read your newest restore    
+  map and use the restore packet as a lookup, then reply with: restored from packet at    
+  <path>; resumed at step <X>.                                                            
+                                                                                          
+  Read 1 file                                                                             
+                                                                                          
+⏺ restored from packet at /tmp/rig-qa1/openrig-spikes-scratch/rig-rs/w18r4e064350/.openrig
+  /compaction/preparation/cl/manual-01M57M27WYBJ041HA21FZH25BB-4/RESTORE-MAP.md; resumed  
+  at step 3. There is no pending task, so I'm waiting for the next instruction.           
+                                                                                          
+✻ Cooked for 3s · done 6:48 AM                                                            
+                                         Update available! Run: brew upgrade claude-code  
+──────────────────────────────────────────────────────────────────────────────────────────
+❯                                                                                         
+──────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                        

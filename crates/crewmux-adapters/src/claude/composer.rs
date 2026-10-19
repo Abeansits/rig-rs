@@ -1,6 +1,7 @@
 //! Composer region. The current input is the last `❯` that a same-indent rule closes.
 
 use crate::claude::staged::staged_matches;
+use crate::sgr::{skip_esc, strip_csi};
 
 /// A `❯` line that has a box-drawing rule after it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,6 +73,78 @@ pub(crate) fn composer_view<'a>(text: &'a str, anchor: &ComposerAnchor) -> &'a s
     text
 }
 
+/// The composer body is faint SGR and nothing else.
+///
+/// A no-color capture has no ESC bytes. The same suggestion is then the same
+/// bytes as a typed draft, and this returns false.
+#[must_use]
+pub(crate) fn is_dim_suggestion(line: &str) -> bool {
+    if !line.contains('\u{1b}') {
+        return false;
+    }
+    let mut faint = false;
+    let mut in_body = false;
+    let mut saw_faint = false;
+    let mut saw_plain = false;
+    let mut rest = line;
+    while !rest.is_empty() {
+        if let Some((next_faint, next)) = take_sgr(rest, faint) {
+            faint = next_faint;
+            rest = next;
+            continue;
+        }
+        if let Some(next) = skip_esc(rest) {
+            rest = next;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+        if !in_body {
+            if ch == '❯' || ch == '›' {
+                in_body = true;
+            }
+            continue;
+        }
+        if ch.is_whitespace() || ch == '\u{a0}' {
+            continue;
+        }
+        if faint {
+            saw_faint = true;
+        } else {
+            saw_plain = true;
+        }
+    }
+    saw_faint && !saw_plain
+}
+
+fn take_sgr(text: &str, faint: bool) -> Option<(bool, &str)> {
+    let rest = text.strip_prefix("\u{1b}[")?;
+    let end = rest.find('m')?;
+    let params = rest.get(..end)?;
+    if !params.is_empty() && !params.chars().all(|ch| ch.is_ascii_digit() || ch == ';') {
+        return None;
+    }
+    let next = rest.get(end.saturating_add(1)..)?;
+    Some((apply_sgr(faint, params), next))
+}
+
+fn apply_sgr(faint: bool, params: &str) -> bool {
+    if params.is_empty() || params == "0" {
+        return false;
+    }
+    let mut faint = faint;
+    for part in params.split(';') {
+        match part {
+            "2" => faint = true,
+            "0" | "22" => faint = false,
+            _ => {}
+        }
+    }
+    faint
+}
+
 /// Empty prompt, or Claude's single-line `Try "…"` ghost hint.
 #[must_use]
 pub(crate) fn is_idle_body(body: &str) -> bool {
@@ -88,7 +161,9 @@ pub(crate) fn is_idle_body(body: &str) -> bool {
 /// The composer shows `payload` (boxed, inline, or a paste placeholder).
 #[must_use]
 pub(crate) fn composer_matches(screen: &str, payload: &str) -> bool {
-    if let Some(body) = box_body(screen) {
+    // Readiness captures keep SGR. The payload itself is plain text.
+    let plain = strip_csi(screen);
+    if let Some(body) = box_body(&plain) {
         let body = squash(&strip_marker(&body));
         let raw = squash(payload);
         let wrapped = squash(&claude_visible(payload));
@@ -96,7 +171,7 @@ pub(crate) fn composer_matches(screen: &str, payload: &str) -> bool {
             return true;
         }
     }
-    staged_matches(screen, payload)
+    staged_matches(&plain, payload)
 }
 
 /// Multi-line pastes are wrapped. Tabs become four spaces. Single-line text stays.
@@ -209,4 +284,18 @@ fn strip_marker(body: &str) -> String {
         out.push_str(line.trim());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::composer_matches;
+
+    #[test]
+    fn composer_match_ignores_sgr() {
+        let screen = "╭──╮\n│ \u{1b}[1mhello\u{1b}[22m │\n╰──╯\n";
+        assert!(
+            composer_matches(screen, "hello"),
+            "composer strip dropped the escapes"
+        );
+    }
 }

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crewmux_mux::{Geometry, SessionSpec};
-use crewmux_provider::{ClaudeSeatFiles, ClaudeSeatSettings};
+use crewmux_provider::{ClaudeSeatFiles, ClaudeSeatSettings, RunHooks};
 
 use crate::claude::argv::{claude_argv, mint_session_id};
 use crate::error::Error;
@@ -21,12 +21,22 @@ pub(crate) async fn prepare(
 ) -> Result<Prepared, Error> {
     let mode = binding.permission_mode.clone();
     let dir = seat_dir.to_path_buf();
+    let seat_key = binding.seat.to_string();
+    let rig_home = rig_home_of(seat_dir);
     let seat_env = seat_env(binding, opts);
     let rig_bin = crewmux_provider::rig_executable();
-    let (mcp, settings) =
-        tokio::task::spawn_blocking(move || write_seat(&dir, mode, &rig_bin, &seat_env))
-            .await
-            .map_err(|err| Error::Message(err.to_string()))??;
+    let (mcp, settings) = tokio::task::spawn_blocking(move || {
+        write_seat(
+            &dir,
+            mode.as_deref(),
+            &seat_key,
+            &rig_home,
+            &rig_bin,
+            &seat_env,
+        )
+    })
+    .await
+    .map_err(|err| Error::Message(err.to_string()))??;
     let session_id = match &opts.resume {
         Some(token) => crewmux_transcript::canonical_session_id(&token.value)
             .map_err(|_| Error::Message("resume token is not a UUID".to_owned()))?,
@@ -40,6 +50,7 @@ pub(crate) async fn prepare(
         .unwrap_or("claude");
     let mut spec = SessionSpec::new(opts.session_name.clone(), binding.cwd.clone());
     spec.env.clone_from(&opts.env);
+    strip_claude_color(&mut spec);
     spec.argv = claude_argv(
         binary,
         &session_id,
@@ -57,6 +68,20 @@ pub(crate) fn token(session_id: String) -> ResumeToken {
     ResumeToken {
         kind: "claude".to_owned(),
         value: session_id,
+    }
+}
+
+/// Drop colour killers the tmux server would copy from the operator environment.
+///
+/// `NO_COLOR` (any value) and `FORCE_COLOR=0` make Claude draw a suggestion with
+/// no SGR, which is then the same bytes as a typed draft. Unset both so a
+/// suggestion can render faint. A capture that still has no ESC stays a draft.
+pub(crate) fn strip_claude_color(spec: &mut SessionSpec) {
+    for key in ["NO_COLOR", "FORCE_COLOR"] {
+        spec.env.remove(key);
+        if !spec.clear_env.iter().any(|item| item == key) {
+            spec.clear_env.push(key.to_owned());
+        }
     }
 }
 
@@ -83,17 +108,46 @@ fn seat_env(binding: &NodeBinding, opts: &LaunchOpts) -> crewmux_provider::SeatE
 
 fn write_seat(
     dir: &Path,
-    permission_mode: Option<String>,
+    permission_mode: Option<&str>,
+    seat_key: &str,
+    rig_home: &Path,
     rig_bin: &Path,
     env: &crewmux_provider::SeatEnv,
 ) -> Result<(PathBuf, PathBuf), crewmux_provider::ProviderError> {
     let files = ClaudeSeatFiles::new(dir);
     let mcp = files.write_mcp(&[crewmux_provider::claude_mcp_entry(rig_bin, env)])?;
-    let settings = files.write_settings(&ClaudeSeatSettings {
-        permission_mode,
+    files.write_settings(&ClaudeSeatSettings {
+        permission_mode: permission_mode.map(str::to_owned),
         hooks: serde_json::json!({}),
     })?;
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let settings = files.write_run_settings(
+        &RunHooks {
+            seat_key: seat_key.to_owned(),
+            rig_home: rig_home.to_path_buf(),
+            run_id,
+            rig_bin: rig_binary(),
+        },
+        permission_mode,
+    )?;
     Ok((mcp, settings))
+}
+
+fn rig_binary() -> PathBuf {
+    let Ok(path) = std::env::current_exe() else {
+        return PathBuf::from("rig");
+    };
+    if path.is_absolute() {
+        return path;
+    }
+    std::env::current_dir().map_or(path.clone(), |cwd| cwd.join(&path))
+}
+
+fn rig_home_of(seat_dir: &Path) -> PathBuf {
+    seat_dir
+        .parent()
+        .and_then(Path::parent)
+        .map_or_else(|| seat_dir.to_path_buf(), Path::to_path_buf)
 }
 
 async fn write_id(path: &Path, id: &str) -> Result<(), Error> {
@@ -102,4 +156,27 @@ async fn write_id(path: &Path, id: &str) -> Result<(), Error> {
     }
     tokio::fs::write(path, id.as_bytes()).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crewmux_mux::SessionSpec;
+
+    use super::strip_claude_color;
+
+    #[test]
+    fn claude_seat_unsets_no_color_and_force_color() {
+        let mut spec = SessionSpec::new("seat", PathBuf::from("/tmp"));
+        spec.env.insert("NO_COLOR".to_owned(), "1".to_owned());
+        spec.env.insert("FORCE_COLOR".to_owned(), "0".to_owned());
+        spec.env.insert("RIG_HOME".to_owned(), "/h".to_owned());
+        strip_claude_color(&mut spec);
+        assert!(!spec.env.contains_key("NO_COLOR"));
+        assert!(!spec.env.contains_key("FORCE_COLOR"));
+        assert_eq!(spec.env.get("RIG_HOME").map(String::as_str), Some("/h"));
+        assert!(spec.clear_env.iter().any(|key| key == "NO_COLOR"));
+        assert!(spec.clear_env.iter().any(|key| key == "FORCE_COLOR"));
+    }
 }

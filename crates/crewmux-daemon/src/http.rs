@@ -55,6 +55,7 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/inbox/deny", post(crate::inbox_http::deny))
         .route("/api/outbox", post(crate::inbox_http::outbox))
         .merge(crate::chat::routes())
+        .merge(crate::compaction::routes())
         .merge(crate::health_http::routes())
         .merge(crate::workflow_http::routes())
         .merge(crate::stream_http::routes())

@@ -66,6 +66,11 @@ pub struct SessionSpec {
     pub cwd: PathBuf,
     /// Environment entries passed with `-e` (sorted by key).
     pub env: BTreeMap<String, String>,
+    /// Names removed from the pane environment.
+    ///
+    /// tmux `new-session -e NAME` with no `=` does not unset a variable the
+    /// server inherited. The pane command is wrapped in `env -u NAME` instead.
+    pub clear_env: Vec<String>,
     /// Command argv. Empty starts the default shell. One element may be a shell line tmux runs.
     pub argv: Vec<String>,
     /// Initial window size. Defaults to 90×27.
@@ -82,6 +87,7 @@ impl SessionSpec {
             name: name.into(),
             cwd,
             env: BTreeMap::new(),
+            clear_env: Vec::new(),
             argv: Vec::new(),
             geometry: Geometry::default(),
             remain_on_exit: false,
@@ -123,6 +129,10 @@ pub struct PasteReceipt {
 pub enum CaptureRange {
     /// The visible screen.
     Visible,
+    /// The visible screen including SGR (`capture-pane -e`).
+    ///
+    /// Claude readiness uses this so a faint suggestion is not a draft.
+    VisibleEscapes,
     /// The visible screen with soft-wrapped rows joined (`capture-pane -J`).
     Joined,
     /// Scrollback with soft-wrapped rows joined (`capture-pane -J -S -n`).
@@ -132,8 +142,28 @@ pub enum CaptureRange {
     JoinedHistory(u32),
     /// The last `n` lines, via `capture-pane -S -n`.
     LastLines(u16),
+    /// The last `n` lines including SGR (`capture-pane -e -S -n`).
+    ///
+    /// The send guard reads this tail. A plain capture turns a faint suggestion
+    /// into the same bytes as a typed draft.
+    LastLinesEscapes(u16),
     /// The last `n` lines of history, via `capture-pane -S -n`.
     History(u32),
+}
+
+impl CaptureRange {
+    /// `capture-pane -e`. Plain ranges come back without SGR.
+    #[must_use]
+    pub const fn keeps_escapes(self) -> bool {
+        matches!(self, Self::VisibleEscapes | Self::LastLinesEscapes(_))
+    }
+
+    /// Tail the send guard reads. It keeps SGR so Claude can tell a faint
+    /// suggestion from a typed draft. Other runtimes strip CSI before classifying.
+    #[must_use]
+    pub const fn guard_tail(lines: u16) -> Self {
+        Self::LastLinesEscapes(lines)
+    }
 }
 
 /// A screen snapshot plus a stable hash of text and cursor.
@@ -220,7 +250,11 @@ pub enum MuxEvent {
         /// Pane id.
         pane_id: String,
         /// Exit status, when tmux reported `pane_dead_status`.
+        ///
+        /// Empty when the process was killed by a signal.
         status: Option<i32>,
+        /// `pane_dead_signal`. `kill -9` is `9` on Linux and `kill` on macOS tmux.
+        signal: Option<String>,
     },
     /// A window closed (`%window-close` or `%unlinked-window-close`).
     WindowClosed {

@@ -20,7 +20,7 @@ use crate::argv::{
 use crate::clients::{filter_human_clients, last_human_keystroke};
 use crate::error::MuxError;
 use crate::exec::{ExecOutput, TmuxExec};
-use crate::fake_screen::{clear_prompt, land_or_append, slice_capture};
+use crate::fake_screen::{clear_one_draft_line, clear_prompt, land_or_append, slice_capture};
 use crate::hub::Hub;
 use crate::paste::perform_paste;
 use crate::types::{
@@ -42,10 +42,15 @@ struct FakeInner {
     scripted: Option<GuardInputs>,
     fail_paste: bool,
     after_paste: Option<Capture>,
+    after_enter: Option<Capture>,
+    /// Popped once per `capture`. The last frame sticks.
+    scripted_captures: VecDeque<Capture>,
     next_id: u32,
     guard_reads: u32,
     hooks: ScriptHooks,
     hub: Hub,
+    last_paste: Option<String>,
+    last_range: Option<CaptureRange>,
 }
 
 struct ScriptHooks {
@@ -99,6 +104,8 @@ impl FakeMux {
                 scripted: None,
                 fail_paste: false,
                 after_paste: None,
+                after_enter: None,
+                scripted_captures: VecDeque::new(),
                 next_id: 1,
                 guard_reads: 0,
                 hooks: ScriptHooks {
@@ -107,6 +114,8 @@ impl FakeMux {
                     swallow: false,
                 },
                 hub: Hub::default(),
+                last_paste: None,
+                last_range: None,
             })),
             events,
             own_write,
@@ -201,10 +210,21 @@ impl FakeMux {
                     drop(events.send(MuxEvent::PaneDied {
                         pane_id,
                         status: Some(0),
+                        signal: None,
                     }));
                 }
             }
         });
+    }
+
+    /// Range of the most recent [`capture`](Multiplexer::capture).
+    pub async fn last_capture_range(&self) -> Option<CaptureRange> {
+        self.inner.lock().await.last_range
+    }
+
+    /// Text of the most recent [`paste`](Multiplexer::paste).
+    pub async fn last_paste(&self) -> Option<String> {
+        self.inner.lock().await.last_paste.clone()
     }
 
     /// Argv recorded so far, including `tmux -L <socket> -f /dev/null`.
@@ -215,6 +235,18 @@ impl FakeMux {
     /// The next paste replaces the screen with `capture` instead of splicing.
     pub async fn set_capture_after_paste(&self, capture: Capture) {
         self.inner.lock().await.after_paste = Some(capture);
+    }
+
+    /// The next Enter replaces the screen after the composer clear.
+    pub async fn set_capture_after_enter(&self, capture: Capture) {
+        self.inner.lock().await.after_enter = Some(capture);
+    }
+
+    /// Each [`capture`](Multiplexer::capture) pops one frame. The last one sticks.
+    pub async fn script_captures(&self, frames: Vec<Capture>) {
+        let mut guard = self.inner.lock().await;
+        guard.scripted_captures = VecDeque::from(frames);
+        guard.replay.clear();
     }
 
     /// Next `paste` fails after `load-buffer` and must `delete-buffer`.
@@ -234,6 +266,7 @@ impl FakeMux {
         let mut guard = self.inner.lock().await;
         guard.capture = capture;
         guard.replay.clear();
+        guard.scripted_captures.clear();
     }
 
     /// Screens for a dialog replay. `capture` returns the front. Each `send_keys`
@@ -363,7 +396,8 @@ impl Multiplexer for FakeMux {
         let script = scripted_plan(&guard, spec);
         if let Some(plan) = &script {
             let text = if plan.ready_after_ms == 0 {
-                crate::fake_script::render_stub(plan)
+                let script = spec.env.get("RIG_STUB_SCRIPT").map(String::as_str);
+                crate::fake_script::session_screen(plan, script)
             } else {
                 crate::fake_script::banner().to_owned()
             };
@@ -424,20 +458,8 @@ impl Multiplexer for FakeMux {
         if keys.iter().any(|key| matches!(key, Key::CtrlU)) && guard.replay.is_empty() {
             clear_composer(&mut guard, pane);
         }
-        if guard.script_stubs && keys.iter().any(|key| matches!(key, Key::Enter)) {
-            let session = canonical_session_name(&pane.session);
-            if let Some(screen) = guard.screens.get(&session).cloned() {
-                let mut text = screen.text;
-                if !text.ends_with("stub> \n") {
-                    if !text.ends_with('\n') {
-                        text.push('\n');
-                    }
-                    text.push_str("stub> \n");
-                }
-                let next = Capture::new(text, (0, 0));
-                guard.capture = next.clone();
-                guard.screens.insert(session, next);
-            }
+        if keys.iter().any(|key| matches!(key, Key::Enter)) {
+            on_enter(&mut guard, pane);
         }
         if guard.replay.len() > 1 {
             guard.replay.pop_front();
@@ -453,6 +475,11 @@ impl Multiplexer for FakeMux {
         text: &str,
         opts: PasteOpts,
     ) -> Result<PasteReceipt, MuxError> {
+        {
+            let mut guard = self.inner.lock().await;
+            guard.last_paste = Some(text.to_owned());
+        }
+        crate::fake_script::echo_paste(text);
         let exec = RecordingExec {
             inner: Arc::clone(&self.inner),
         };
@@ -484,14 +511,22 @@ impl Multiplexer for FakeMux {
     }
 
     async fn capture(&self, pane: &PaneRef, range: CaptureRange) -> Result<Capture, MuxError> {
-        let guard = self.inner.lock().await;
+        let mut guard = self.inner.lock().await;
         let session = canonical_session_name(&pane.session);
-        let capture = guard
-            .replay
-            .front()
-            .cloned()
-            .or_else(|| guard.screens.get(&session).cloned())
-            .unwrap_or_else(|| guard.capture.clone());
+        guard.last_range = Some(range);
+        let capture = if let Some(frame) = guard.scripted_captures.pop_front() {
+            if guard.scripted_captures.is_empty() {
+                stick_screen(&mut guard, &session, &frame);
+            }
+            frame
+        } else {
+            guard
+                .replay
+                .front()
+                .cloned()
+                .or_else(|| guard.screens.get(&session).cloned())
+                .unwrap_or_else(|| guard.capture.clone())
+        };
         Ok(slice_capture(capture, range))
     }
 
@@ -549,7 +584,7 @@ impl Multiplexer for FakeMux {
             last_human_keystroke_tap: None,
             pane_in_mode: self.pane_in_mode(pane).await?,
             tail: self
-                .capture(pane, CaptureRange::LastLines(tail_lines))
+                .capture(pane, CaptureRange::guard_tail(tail_lines))
                 .await?,
             last_own_write: *self.own_write.borrow(),
         })
@@ -570,12 +605,64 @@ impl Multiplexer for FakeMux {
     }
 }
 
-/// `C-u` restores an empty Claude composer on the capture and the session screen.
+/// Enter clears a `❯` composer when nothing is replaying, and puts a stub prompt back.
+fn on_enter(guard: &mut FakeInner, pane: &PaneRef) {
+    if guard.replay.is_empty() {
+        clear_chevron_composer(guard, pane);
+    }
+    if !guard.script_stubs {
+        apply_after_enter(guard, pane);
+        return;
+    }
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get(&session) else {
+        return;
+    };
+    let Some(text) = crate::fake_script::restore_stub_prompt(&screen.text) else {
+        return;
+    };
+    let next = Capture::new(text, (0, 0));
+    guard.capture = next.clone();
+    guard.screens.insert(session, next);
+    apply_after_enter(guard, pane);
+}
+
+fn apply_after_enter(guard: &mut FakeInner, pane: &PaneRef) {
+    let Some(next) = guard.after_enter.take() else {
+        return;
+    };
+    stick_screen(guard, &canonical_session_name(&pane.session), &next);
+}
+
+fn stick_screen(guard: &mut FakeInner, session: &str, frame: &Capture) {
+    if guard.screens.contains_key(session) {
+        guard.screens.insert(session.to_owned(), frame.clone());
+    }
+    guard.capture = frame.clone();
+}
+
+/// Enter clears a `❯` composer so the next paste is not a draft. A `stub>` screen stays.
+fn clear_chevron_composer(guard: &mut FakeInner, pane: &PaneRef) {
+    if guard.capture.text.contains('❯') {
+        guard.capture = clear_prompt(&guard.capture);
+    }
+    let session = canonical_session_name(&pane.session);
+    let Some(screen) = guard.screens.get(&session) else {
+        return;
+    };
+    if !screen.text.contains('❯') {
+        return;
+    }
+    let cleared = clear_prompt(screen);
+    guard.screens.insert(session, cleared);
+}
+
+/// `C-u` drops one typed line, then the prompt body, on the capture and the session screen.
 fn clear_composer(guard: &mut FakeInner, pane: &PaneRef) {
-    guard.capture = clear_prompt(&guard.capture);
+    guard.capture = clear_one_draft_line(&guard.capture);
     let session = canonical_session_name(&pane.session);
     if let Some(screen) = guard.screens.get_mut(&session) {
-        *screen = clear_prompt(screen);
+        *screen = clear_one_draft_line(screen);
     }
 }
 

@@ -1,0 +1,27 @@
+
+
+  Reading                                                                                 
+  .openrig/compaction/preparation/cl/manual-01M57FK9VMY0DPF1YSJ1MTHMQW-1/RESTORE-MAP.md   
+  ⎿  .openrig/compaction/preparation/cl/manual-01M57FK9VMY0DPF1YSJ1MTHMQW-1/RESTORE-MAP.md
+                                                                                          
+──────────────────────────────────────────────────────────────────────────────────────────
+ Read outside the working directories                                                     
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Read(/tmp/rig-qa1/openrig-spikes-scratch/rig-rs/h18r3/compaction/restore-pending/01M57FK 
+ 9VMY0DPF1YSJ1MTHMQW/manual-01M57FK9VMY0DPF1YSJ1MTHMQW-1.json)                            
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Auto mode and the sandbox read outside the working directories without asking. Yes or No 
+ answers for this read; the rest is for later reads. Block: the file tools refuse reads   
+ outside the working directories in every project. Sandboxed commands are not changed on  
+ this machine (the sandbox is off, its filesystem rules are relaxed, a managed read-path  
+ lock is on, or the working directory name has glob characters). To undo, remove          
+ permissions.blockReadsOutsideWorkingDirectories from your user settings; file tools      
+ follow next session, sandboxed commands at once.                                         
+
+ Allow this read outside the working directories?                                         
+ ❯ 1. Yes, and keep allowing any reads outside the working directories                    
+   2. No, and block reads outside the working directories from now on                     
+   3. No, and ask again next time                                                         
+   4. Yes, but ask again next time           
+
+ Esc to cancel · Tab to amend                                                             

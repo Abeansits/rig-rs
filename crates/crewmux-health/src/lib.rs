@@ -1,11 +1,14 @@
-//! Health detectors, stream classifier, and context-usage monitor.
+//! Health detectors, stream classifier, context-usage monitor, and compaction.
 //!
 //! The projection is pure. SQLite lives in `crewmux-store`. The daemon is the
 //! only composition root, and it never calls a model to classify a stream item.
+//! The compaction enforcer decides when to ask for a restore map and when to
+//! send `/compact`. Completion is a hook fact (PE-018), not a timer.
 
 // Derived modules name their OpenRig source in the file header.
 
 mod classify;
+pub mod compaction;
 mod coverage;
 mod detector;
 mod error;

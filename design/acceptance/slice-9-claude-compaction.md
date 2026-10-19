@@ -67,7 +67,7 @@ pub const MANUAL_PREP_WAIT: Duration = 120s; pub const AUTO_PREP_WAIT: Duration 
 ## Acceptance criteria
 **Enforcer parity**
 1. Every TS enforcer test case is ported as a table test against `decide()` with an injected clock. Prompt strings are byte-equal to TS (goldens via `xtask diff`). The invalid-threshold rule (0, 101, NaN, non-integer → disabled) is covered.
-2. A threshold crossing → `SendPrep` first. `/compact` is sent only after the completed map exists, or once with `--skip-map`. Re-arm requires dropping below the threshold. `rig compact <seat> --cancel` ends the attempt in `Cancelled`.
+2. A threshold crossing → `SendPrep` first. `/compact` is sent only after the completed map exists, or once with `--skip-map`. Re-arm requires dropping below the threshold. `rig compact <seat> --cancel` ends the attempt in `Cancelled`. `--skip-map` exits 0 once `/compact` has been submitted, while the restore can still be running. The post-compact lower bound is 10s; a second `rig compact` returns `already_in_progress` for about 12s (that wait, then the restore submit) while the stage is still `compacting` or `restoring`.
 3. `/compact`, the prep and the restore prompts go only through `SeatIo::submit`. A non-`Ready` seat makes the attempt wait within its budget, then fail visibly. It never sends keys to a dialog (PE-006).
 
 **Hooks and settings**

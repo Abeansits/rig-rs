@@ -64,6 +64,8 @@ pub(crate) struct App {
     queue_rx: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<QueueWrite>>>>,
     /// Next snapshot write fails at this `replace_book` hook, then the hook clears.
     persist_crash: Arc<tokio::sync::Mutex<Option<&'static str>>>,
+    /// Compaction attempts and the in-memory enforcer.
+    pub compaction: Arc<tokio::sync::Mutex<crate::compaction::Runtime>>,
     /// In-process direct-delivery phase. `before`, `ack`, or absent.
     ///
     /// The file hook under `$RIG_HOME/direct-phase` is for the binary. Tests
@@ -143,6 +145,7 @@ impl App {
             persist_tx,
             queue_rx: Arc::new(tokio::sync::Mutex::new(Some(queue_rx))),
             persist_crash: Arc::new(tokio::sync::Mutex::new(None)),
+            compaction: Arc::new(tokio::sync::Mutex::new(crate::compaction::Runtime::new())),
             direct_phase: Arc::new(tokio::sync::Mutex::new(None)),
             cart_state: Arc::new(AtomicU64::new(cart_pack(0, CART_IDLE))),
             cancel_on_restore: Arc::new(AtomicBool::new(false)),

@@ -41,6 +41,18 @@ pub(crate) fn classify_for(
     after: &str,
     payload: &str,
 ) -> PasteHit {
+    // A placeholder that was already on screen is not this paste.
+    if display.is_claude()
+        && crewmux_adapters::claude::staged_matches(after, payload)
+        && !crewmux_adapters::claude::staged_matches(before, payload)
+    {
+        return PasteHit::Clean;
+    }
+    if display == PasteDisplay::Exact
+        && let Some(hit) = classify_codex(before, after, payload)
+    {
+        return hit;
+    }
     if display.is_claude() {
         let visible = claude_visible(payload);
         let hit = classify_against(before, after, &visible);
@@ -56,6 +68,61 @@ pub(crate) fn classify_for(
         }
     }
     classify_against(before, after, payload)
+}
+
+/// Codex shows the paste after `›` and keeps `? for shortcuts` below it.
+///
+/// The stub parser treats that footer and the prompt marker as unexplained
+/// text, so a paste that landed is reported contaminated. The composer body
+/// is the comparison. Screens without a Codex footer stay on the stub path.
+fn classify_codex(before: &str, after: &str, payload: &str) -> Option<PasteHit> {
+    if before.contains("stub> ") || after.contains("stub> ") {
+        return None;
+    }
+    let before_body = codex_body(before)?;
+    let after_body = codex_body(after)?;
+    let payload_flat = flatten(payload);
+    let after_flat = flatten(&after_body);
+    let before_flat = flatten(&before_body);
+    if !located(&after_flat, &payload_flat) {
+        return Some(PasteHit::Missing);
+    }
+    if leftover(&before_flat, &after_flat, &payload_flat) {
+        Some(PasteHit::Contaminated)
+    } else {
+        Some(PasteHit::Clean)
+    }
+}
+
+fn codex_body(screen: &str) -> Option<String> {
+    let plain = crewmux_adapters::strip_csi(screen);
+    if !plain.contains('›') || !plain.contains("? for shortcuts") {
+        return None;
+    }
+    let mut lines = Vec::new();
+    let mut started = false;
+    for line in plain.lines() {
+        let trimmed = line.trim();
+        if !started {
+            let rest = trimmed.trim_start_matches(['│', '┃']);
+            let Some(after) = rest.trim_start().strip_prefix('›') else {
+                continue;
+            };
+            started = true;
+            let body = after.trim();
+            if !body.is_empty() && body != "Ask Codex to do anything" {
+                lines.push(body.to_owned());
+            }
+            continue;
+        }
+        if trimmed.contains("? for shortcuts") {
+            break;
+        }
+        if !trimmed.is_empty() {
+            lines.push(trimmed.to_owned());
+        }
+    }
+    started.then(|| lines.join("\n"))
 }
 
 fn classify_against(before: &str, after: &str, payload: &str) -> PasteHit {
@@ -189,23 +256,42 @@ pub(crate) async fn clear_composer(
     lines: usize,
     runtime: RuntimeKind,
 ) -> Result<bool, Error> {
-    let parser = ComposerParser::Stub;
     let budget = clear_passes(lines);
     let deadline = Instant::now() + Duration::from_millis(40).saturating_mul(budget);
     let mut sent = 0u32;
     loop {
         if sent > 0 {
-            let text = app.mux.capture(pane, range).await?.text;
-            if composer_empty(parser, &text) {
+            let text = app
+                .mux
+                .capture(pane, classify_range(runtime, range))
+                .await?
+                .text;
+            if composer_cleared(runtime, &text) {
                 return Ok(true);
             }
         }
-        if sent >= budget || (sent > 0 && Instant::now() >= deadline) {
-            return reset_composer(app, pane, range, parser, runtime).await;
+        // The stub's 40ms-per-line deadline keeps a newline from becoming Enter.
+        // Claude's clear is one Ctrl-U per typed line; stopping on that clock
+        // leaves the From/To lines of an unbracketed envelope in the composer.
+        let stub_deadline =
+            runtime != RuntimeKind::ClaudeCode && sent > 0 && Instant::now() >= deadline;
+        if sent >= budget || stub_deadline {
+            return reset_composer(app, pane, range, runtime).await;
         }
-        app.mux.send_keys(pane, parser.clear_keys()).await?;
+        app.mux
+            .send_keys(pane, ComposerParser::Stub.clear_keys())
+            .await?;
         sent = sent.saturating_add(1);
         tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+fn composer_cleared(runtime: RuntimeKind, screen: &str) -> bool {
+    match runtime {
+        RuntimeKind::ClaudeCode => crewmux_adapters::claude::classify_text(screen).is_ready(),
+        RuntimeKind::Stub | RuntimeKind::Codex | RuntimeKind::OpenCode | RuntimeKind::Terminal => {
+            composer_empty(ComposerParser::Stub, screen)
+        }
     }
 }
 
@@ -213,7 +299,6 @@ async fn reset_composer(
     app: &App,
     pane: &PaneRef,
     range: CaptureRange,
-    parser: ComposerParser,
     runtime: RuntimeKind,
 ) -> Result<bool, Error> {
     let keys = recovery_keys(runtime);
@@ -221,8 +306,21 @@ async fn reset_composer(
         app.mux.send_keys(pane, keys).await?;
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    let text = app.mux.capture(pane, range).await?.text;
-    Ok(composer_empty(parser, &text))
+    let text = app
+        .mux
+        .capture(pane, classify_range(runtime, range))
+        .await?
+        .text;
+    Ok(composer_cleared(runtime, &text))
+}
+
+/// Claude's draft check needs SGR. Other runtimes keep the caller's range.
+fn classify_range(runtime: RuntimeKind, range: CaptureRange) -> CaptureRange {
+    if runtime == RuntimeKind::ClaudeCode {
+        CaptureRange::VisibleEscapes
+    } else {
+        range
+    }
 }
 
 /// `C-u` passes for a paste of `lines` lines. Short pastes stay at 8.
@@ -540,6 +638,22 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_composer_paste_is_delivered_not_contaminated() {
+        let before = "› Ask Codex to do anything\n  ? for shortcuts\n";
+        let payload = "From: operator@host\nTo: codex\n---\nping\n---\n↩ Reply: rig send operator@host \"...\"";
+        let after = format!("› {payload}\n  ? for shortcuts\n");
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, &after, payload),
+            PasteHit::Clean
+        );
+        let noisy = format!("› {payload}\nNOISE\n  ? for shortcuts\n");
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, &noisy, payload),
+            PasteHit::Contaminated
+        );
+    }
+
+    #[test]
     fn claude_accepts_a_wrapped_paste_and_codex_stays_byte_exact() {
         let before = "stub> \n";
         let payload = "col\tvalue\nnext";
@@ -593,6 +707,50 @@ mod tests {
         assert_eq!(
             classify_for(PasteDisplay::Exact, "stub> ", "stub> col    value", plain),
             PasteHit::Missing
+        );
+    }
+
+    #[test]
+    fn claude_line_count_placeholder_is_the_send_envelope() {
+        let payload = crewmux_messaging::wrap_reply(
+            "operator@host",
+            "cl@pr18",
+            "ZEPHYR-342",
+            "operator@host",
+        );
+        assert_eq!(payload.matches('\n').count(), 5, "a 6-line envelope");
+        let rule = "─".repeat(40);
+        let screen =
+            format!("{rule}\n❯ [Pasted text #1 +5 lines]\n{rule}\n  paste again to expand\n");
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "idle\n", &screen, &payload),
+            PasteHit::Clean
+        );
+        let real = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/claude-2.1.287-pasted-plus11-lines.txt"
+        );
+        let body = include_str!(
+            "../../crewmux-adapters/tests/fixtures/screens/claude/2.1.287/payloads/claude-2.1.287-pasted-plus11-lines.payload.txt"
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "idle\n", real, body),
+            PasteHit::Clean
+        );
+    }
+
+    #[test]
+    fn a_placeholder_already_on_screen_is_not_a_new_paste() {
+        let rule = "─".repeat(40);
+        let screen = format!("{rule}\n❯ [Pasted text #1 +5 lines]\n{rule}\n");
+        let payload = "a\nb\nc\nd\ne\nf";
+        assert_eq!(payload.matches('\n').count(), 5);
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, &screen, &screen, payload),
+            PasteHit::Missing
+        );
+        assert_eq!(
+            classify_for(PasteDisplay::Claude, "idle\n", &screen, payload),
+            PasteHit::Clean
         );
     }
 
