@@ -17,15 +17,18 @@ use crate::state::App;
 async fn a_coloured_idle_codex_screen_is_delivered() {
     let rig = boot("idle", &coloured_idle()).await;
     let before = paste_count(&rig.mux).await;
-    let sent = deliver(&rig.app, outbound("ping")).await;
-    let shown = match &sent {
-        Ok(value) => value.to_string(),
-        Err(err) => err.to_string(),
-    };
+    let sent = deliver(&rig.app, outbound("ping")).await.expect("send");
     assert!(
         paste_count(&rig.mux).await > before,
-        "coloured idle screen was not delivered: {shown}"
+        "coloured idle screen was not pasted: {sent}"
     );
+    assert_eq!(sent["status"], "ok", "{sent}");
+    let receipt = sent["receipts"]
+        .as_array()
+        .and_then(|rows| rows.first())
+        .expect("receipt");
+    assert_eq!(receipt["outcome"], "delivered", "{sent}");
+    assert_eq!(receipt["guard_degraded"], false, "{sent}");
     drop(std::fs::remove_dir_all(&rig.root));
 }
 
@@ -39,7 +42,11 @@ async fn a_coloured_typed_draft_is_not_delivered() {
     let rig = boot("draft", &screen).await;
     let before = paste_count(&rig.mux).await;
     let sent = deliver(&rig.app, outbound("ping")).await;
-    assert!(sent.is_err(), "coloured draft was delivered: {sent:?}");
+    let message = sent.expect_err("coloured draft was delivered").to_string();
+    assert!(
+        message.contains("unrecognised_screen"),
+        "draft was not refused: {message}"
+    );
     assert_eq!(
         paste_count(&rig.mux).await,
         before,

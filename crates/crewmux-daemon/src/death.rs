@@ -130,6 +130,7 @@ fn redact_tokens(text: &str) -> (String, bool) {
 }
 
 const KEYS: &[&str] = &[
+    "x-api-key",
     "api_key",
     "apikey",
     "token",
@@ -244,9 +245,11 @@ fn next_assignment(text: &str, from: usize) -> Option<Assignment> {
         while let Some(rel) = lower.get(cursor..).and_then(|rest| rest.find(*key)) {
             let at = from.saturating_add(cursor).saturating_add(rel);
             let next = at.saturating_add(key.len());
-            if at_boundary(text, at)
-                && let Some(hit) = assignment_after(text, at, key.len())
-            {
+            // A key may sit inside a larger name (`DB_PASSWORD`, `client_secret`,
+            // `AWS_SECRET_ACCESS_KEY`). `_` and the other identifier characters
+            // before the word are part of that name. Token prefixes such as
+            // `sk-` stay boundary-anchored in `at_boundary`.
+            if let Some(hit) = assignment_after(text, at, key.len()) {
                 if best.as_ref().is_none_or(|cur| hit.key_at < cur.key_at) {
                     best = Some(hit);
                 }
@@ -262,7 +265,17 @@ fn next_assignment(text: &str, from: usize) -> Option<Assignment> {
 }
 
 fn assignment_after(text: &str, at: usize, key_len: usize) -> Option<Assignment> {
-    let after = text.get(at.saturating_add(key_len)..)?;
+    let tail = text.get(at.saturating_add(key_len)..)?;
+    let mut skipped = 0usize;
+    while tail
+        .as_bytes()
+        .get(skipped)
+        .copied()
+        .is_some_and(is_ident_byte)
+    {
+        skipped = skipped.saturating_add(1);
+    }
+    let after = tail.get(skipped..)?;
     let mut idx = 0usize;
     if after
         .as_bytes()
@@ -290,7 +303,10 @@ fn assignment_after(text: &str, at: usize, key_len: usize) -> Option<Assignment>
     {
         idx = idx.saturating_add(1);
     }
-    let value_at = at.saturating_add(key_len).saturating_add(idx);
+    let value_at = at
+        .saturating_add(key_len)
+        .saturating_add(skipped)
+        .saturating_add(idx);
     let value = text.get(value_at..)?;
     let value_len = quoted_or_bare(value)?;
     Some(Assignment {
@@ -298,6 +314,10 @@ fn assignment_after(text: &str, at: usize, key_len: usize) -> Option<Assignment>
         value_at,
         value_end: value_at.saturating_add(value_len),
     })
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
 }
 
 fn quoted_or_bare(value: &str) -> Option<usize> {
@@ -355,9 +375,37 @@ still here
         assert!(!later.contains("supersecretvalue"), "{later}");
         let json = redact_capture("{\"token\": \"supersecretvalue\"}\n");
         assert!(!json.contains("supersecretvalue"), "{json}");
-        let task = redact_capture("task-abcdefghijklmnop\n");
+        let task = redact_capture("task-abcdefghijklmnop\nask-me-later\n");
         assert!(task.contains("task-abcdefghijklmnop"), "{task}");
+        assert!(task.contains("ask-me-later"), "{task}");
         assert!(!task.contains("[redacted]"), "{task}");
+        let named = redact_capture(
+            "\
+DB_PASSWORD=db-secret-value
+OPENAI_API_KEY=openai-secret-value
+AWS_SECRET_ACCESS_KEY=aws-secret-value
+ANTHROPIC_AUTH_TOKEN=anthropic-secret-value
+client_secret: client-secret-value
+x-api-key: x-api-secret-value
+",
+        );
+        for secret in [
+            "db-secret-value",
+            "openai-secret-value",
+            "aws-secret-value",
+            "anthropic-secret-value",
+            "client-secret-value",
+            "x-api-secret-value",
+        ] {
+            assert!(!named.contains(secret), "{secret} in {named}");
+        }
+        assert!(named.contains("DB_PASSWORD="), "{named}");
+        assert!(named.contains("OPENAI_API_KEY="), "{named}");
+        assert!(named.contains("AWS_SECRET_ACCESS_KEY="), "{named}");
+        assert!(named.contains("ANTHROPIC_AUTH_TOKEN="), "{named}");
+        assert!(named.contains("client_secret:"), "{named}");
+        assert!(named.contains("x-api-key:"), "{named}");
+        assert!(named.contains("[redacted]"), "{named}");
         // The secret sits on a token boundary and straddles the 8000-byte window.
         // Capping first would keep `4567890xyz`; redacting first removes it.
         let secret = "sk-abcDEF1234567890xyz";

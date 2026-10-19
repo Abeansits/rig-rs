@@ -3,6 +3,9 @@
 use crate::types::{Capture, CaptureRange};
 
 pub(crate) fn land_or_append(screen: Capture, text: &str) -> Capture {
+    if let Some(landed) = land_codex_prompt(&screen.text, text) {
+        return Capture::new(landed, screen.cursor);
+    }
     if screen.text.contains('›') {
         let spliced = spliced_composer(&screen.text, text);
         if spliced != screen.text {
@@ -51,10 +54,40 @@ fn empty_prompt_line(line: &str) -> bool {
 }
 
 fn is_idle_hint(body: &str) -> bool {
+    if body == "Ask Codex to do anything" {
+        return true;
+    }
     let Some(rest) = body.strip_prefix("Try \"") else {
         return false;
     };
     rest.ends_with('"') && !rest.chars().rev().skip(1).any(|ch| ch == '"')
+}
+
+/// An idle Codex `›` prompt is replaced by the paste. The placeholder is not
+/// left glued to the payload, and the shortcuts footer stays put.
+fn land_codex_prompt(capture: &str, pasted: &str) -> Option<String> {
+    let cursor = capture.rfind('›')?;
+    let line_start = capture
+        .get(..cursor)
+        .and_then(|head| head.rfind('\n'))
+        .map_or(0, |index| index.saturating_add(1));
+    let line_end = capture
+        .get(cursor..)
+        .and_then(|rest| rest.find('\n'))
+        .map_or(capture.len(), |index| cursor.saturating_add(index));
+    let line = capture.get(line_start..line_end)?;
+    if !empty_prompt_line(line) {
+        return None;
+    }
+    let mut out = String::new();
+    out.push_str(capture.get(..line_start).unwrap_or(""));
+    out.push_str("› ");
+    out.push_str(pasted);
+    if !pasted.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(capture.get(line_end..).unwrap_or(""));
+    Some(out)
 }
 
 fn strip_prompt_marker(text: &str) -> Option<&str> {

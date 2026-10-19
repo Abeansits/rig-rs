@@ -22,6 +22,7 @@ pub use dialog::{AnswerPolicy, DialogDriver, DriveOutcome, EscalateReason, MuxPa
 pub use error::Error;
 pub use readiness::{ReadinessWatch, WatchDecision, default_budget, default_launch_timeout, stamp};
 pub use registry::AdapterRegistry;
+pub use sgr::strip_csi;
 pub use stub::{StubAdapter, StubScript, binding_for, parse_script, run_stub_agent};
 pub use types::{
     AppliedLaunch, Capabilities, DeliveryReceipt, InstalledResource, LaunchOpts, LaunchOutcome,
@@ -51,8 +52,22 @@ mod screen_tests {
 
     #[test]
     fn a_coloured_prompt_is_still_ready() {
-        let verdict = classify("stub-agent\n\u{1b}[1mstub> \u{1b}[22m");
-        assert_eq!(verdict, Readiness::Ready, "{verdict:?}");
+        // The reset sits between `>` and the space, so the raw bytes do not
+        // contain `stub> `. Dropping the strip leaves this Inconclusive.
+        let bold = "stub-agent\n\u{1b}[1mstub>\u{1b}[22m ";
+        let colour = "stub-agent\n\u{1b}[38;5;114mstub>\u{1b}[39m ";
+        assert!(!bold.contains("stub> "), "{bold:?}");
+        assert!(!colour.contains("stub> "), "{colour:?}");
+        assert_eq!(
+            classify(bold),
+            Readiness::Ready,
+            "stub strip dropped the escapes"
+        );
+        assert_eq!(
+            classify(colour),
+            Readiness::Ready,
+            "stub strip dropped the 256-colour prompt"
+        );
     }
 
     #[test]

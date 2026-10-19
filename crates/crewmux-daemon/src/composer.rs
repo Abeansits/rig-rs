@@ -120,6 +120,8 @@ pub(crate) fn runtime_drafting(runtime: crewmux_types::RuntimeKind, text: &str) 
 /// Classify a stub pane. A gate is not a prompt. Text after `stub> ` is a draft.
 #[must_use]
 pub(crate) fn classify_stub(text: &str, draft_age: Option<Duration>) -> ComposerState {
+    let stripped = crewmux_adapters::strip_csi(text);
+    let text = stripped.as_str();
     if text
         .lines()
         .any(|line| line.trim().starts_with("stub gate:"))
@@ -153,10 +155,24 @@ pub(crate) fn composer_empty(parser: ComposerParser, screen: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crewmux_mux::Key;
+    use crewmux_mux::{ComposerState, Key};
     use crewmux_types::RuntimeKind;
 
     use super::recovery_keys;
+
+    #[test]
+    fn a_coloured_stub_prompt_is_at_the_prompt() {
+        let bold = "\u{1b}[1mstub>\u{1b}[22m ";
+        let colour = "\u{1b}[38;5;114mstub>\u{1b}[39m ";
+        assert!(matches!(
+            super::classify_stub(bold, None),
+            ComposerState::AtPrompt
+        ));
+        assert!(matches!(
+            super::classify_stub(colour, None),
+            ComposerState::AtPrompt
+        ));
+    }
 
     #[test]
     fn failed_paste_reset_is_stub_only() {

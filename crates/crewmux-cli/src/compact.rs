@@ -24,6 +24,10 @@ pub(crate) struct CompactArgs {
     #[arg(long)]
     pub(crate) status: bool,
     /// Compact once without waiting for a restore map.
+    ///
+    /// Exit 0 means `/compact` was submitted, not that the restore has finished.
+    /// A second compact returns `already_in_progress` for about 12 seconds
+    /// while that restore is still running.
     #[arg(long)]
     pub(crate) skip_map: bool,
     /// Print the daemon JSON.

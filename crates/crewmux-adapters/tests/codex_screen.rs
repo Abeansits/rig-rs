@@ -92,6 +92,18 @@ fn coloured_codex_097_is_ready_not_unknown() {
 }
 
 #[test]
+fn osc_8_on_a_codex_prompt_is_ready() {
+    let bel = "\u{1b}]8;;https://example.test\u{7}› Ask Codex to do anything\u{1b}]8;;\u{7}\n  ? for shortcuts\n";
+    let st = "\u{1b}]8;;https://example.test\u{1b}\\› Ask Codex to do anything\u{1b}]8;;\u{1b}\\\n  ? for shortcuts\n";
+    for screen in [bel, st] {
+        match classify(screen) {
+            CodexScreen::Ready(_) => {}
+            other => panic!("OSC 8 prompt was {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn a_coloured_typed_line_is_a_draft() {
     let text = "\u{1b}[1m›\u{1b}[22m hello\n  ? for shortcuts\n";
     match classify(text) {

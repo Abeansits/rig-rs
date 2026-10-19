@@ -48,6 +48,11 @@ pub(crate) fn classify_for(
     {
         return PasteHit::Clean;
     }
+    if display == PasteDisplay::Exact
+        && let Some(hit) = classify_codex(before, after, payload)
+    {
+        return hit;
+    }
     if display.is_claude() {
         let visible = claude_visible(payload);
         let hit = classify_against(before, after, &visible);
@@ -63,6 +68,61 @@ pub(crate) fn classify_for(
         }
     }
     classify_against(before, after, payload)
+}
+
+/// Codex shows the paste after `›` and keeps `? for shortcuts` below it.
+///
+/// The stub parser treats that footer and the prompt marker as unexplained
+/// text, so a paste that landed is reported contaminated. The composer body
+/// is the comparison. Screens without a Codex footer stay on the stub path.
+fn classify_codex(before: &str, after: &str, payload: &str) -> Option<PasteHit> {
+    if before.contains("stub> ") || after.contains("stub> ") {
+        return None;
+    }
+    let before_body = codex_body(before)?;
+    let after_body = codex_body(after)?;
+    let payload_flat = flatten(payload);
+    let after_flat = flatten(&after_body);
+    let before_flat = flatten(&before_body);
+    if !located(&after_flat, &payload_flat) {
+        return Some(PasteHit::Missing);
+    }
+    if leftover(&before_flat, &after_flat, &payload_flat) {
+        Some(PasteHit::Contaminated)
+    } else {
+        Some(PasteHit::Clean)
+    }
+}
+
+fn codex_body(screen: &str) -> Option<String> {
+    let plain = crewmux_adapters::strip_csi(screen);
+    if !plain.contains('›') || !plain.contains("? for shortcuts") {
+        return None;
+    }
+    let mut lines = Vec::new();
+    let mut started = false;
+    for line in plain.lines() {
+        let trimmed = line.trim();
+        if !started {
+            let rest = trimmed.trim_start_matches(['│', '┃']);
+            let Some(after) = rest.trim_start().strip_prefix('›') else {
+                continue;
+            };
+            started = true;
+            let body = after.trim();
+            if !body.is_empty() && body != "Ask Codex to do anything" {
+                lines.push(body.to_owned());
+            }
+            continue;
+        }
+        if trimmed.contains("? for shortcuts") {
+            break;
+        }
+        if !trimmed.is_empty() {
+            lines.push(trimmed.to_owned());
+        }
+    }
+    started.then(|| lines.join("\n"))
 }
 
 fn classify_against(before: &str, after: &str, payload: &str) -> PasteHit {
@@ -575,6 +635,22 @@ mod tests {
             history_range(&modest),
             CaptureRange::JoinedHistory(rows) if (48..1024).contains(&rows)
         ));
+    }
+
+    #[test]
+    fn a_codex_composer_paste_is_delivered_not_contaminated() {
+        let before = "› Ask Codex to do anything\n  ? for shortcuts\n";
+        let payload = "From: operator@host\nTo: codex\n---\nping\n---\n↩ Reply: rig send operator@host \"...\"";
+        let after = format!("› {payload}\n  ? for shortcuts\n");
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, &after, payload),
+            PasteHit::Clean
+        );
+        let noisy = format!("› {payload}\nNOISE\n  ? for shortcuts\n");
+        assert_eq!(
+            classify_for(PasteDisplay::Exact, before, &noisy, payload),
+            PasteHit::Contaminated
+        );
     }
 
     #[test]
